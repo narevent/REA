@@ -14,7 +14,7 @@ ExecStart=/var/www/vetgaaf/venv/bin/gunicorn \
     --timeout 60 \
     --access-logfile /var/www/vetgaaf/logs/gunicorn-access.log \
     --error-logfile /var/www/vetgaaf/logs/gunicorn-error.log \
-    website.wsgi:application
+    rea.wsgi:application
 
 [Install]
 WantedBy=multi-user.target
