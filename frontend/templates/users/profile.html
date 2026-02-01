@@ -1,0 +1,115 @@
+{% extends 'frontend/base.html' %}
+
+{% block title %}{{ profile_user.username }}'s Profile - REA Music Education{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <!-- Profile Header -->
+    <div class="dashboard-section">
+        <div class="row">
+            <div class="col-md-2 text-center">
+                <div class="bg-primary text-white rounded-circle d-inline-flex align-items-center justify-content-center mb-3" style="width: 100px; height: 100px;">
+                    <span class="h1">{{ profile_user.first_name|default:profile_user.username|first|upper }}</span>
+                </div>
+            </div>
+            <div class="col-md-10">
+                <h1 class="display-6">
+                    {{ profile_user.first_name|default:"" }} {{ profile_user.last_name|default:"" }}
+                    <small class="text-muted">@{{ profile_user.username }}</small>
+                </h1>
+                <p class="fs-5">
+                    <span class="badge bg-{{ profile_user.user_type|default:'secondary' }}">
+                        {{ profile_user.get_user_type_display|default:profile_user.user_type|title }}
+                    </span>
+                    {% if profile_user.location %}
+                    <span class="ms-2 text-muted"><i class="fas fa-map-marker-alt me-1"></i>{{ profile_user.location }}</span>
+                    {% endif %}
+                    <span class="ms-2 text-muted"><i class="fas fa-music me-1"></i>{{ user_instruments.count }} instrument{{ user_instruments.count|pluralize }}</span>
+                </p>
+                {% if profile_user.bio %}
+                <p class="mt-3">{{ profile_user.bio }}</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Instruments Section -->
+    <div class="dashboard-section">
+        <h3 class="mb-4"><i class="fas fa-guitar me-2 text-primary"></i>{{ profile_user.first_name|default:profile_user.username }}'s Instruments</h3>
+        
+        {% if user_instruments %}
+        <div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-4">
+            {% for user_instrument in user_instruments %}
+            <div class="col">
+                <div class="card instrument-card h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">{{ user_instrument.instrument.name }}</h5>
+                        <p class="mb-2">
+                            <span class="badge bg-light text-dark">
+                                <span class="proficiency-{{ user_instrument.proficiency }}">
+                                    <i class="fas fa-circle me-1"></i>{{ user_instrument.years_of_experience }}
+                                </span>
+                            </span>
+                            <span class="ms-2 text-muted">{{ user_instrument.years_experience }} year{{ user_instrument.years_experience|pluralize }}</span>
+                        </p>
+                        <p class="card-text">{{ user_instrument.experience_description }}</p>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="text-center py-5">
+            <i class="fas fa-music fa-3x text-muted mb-3"></i>
+            <h4>No instruments added yet</h4>
+            <p class="text-muted">{{ profile_user.first_name|default:profile_user.username }} hasn't added any instruments to their profile</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Teacher or Student Specific Sections -->
+    {% if profile_user.user_type == 'teacher' %}
+    <div class="dashboard-section">
+        <h3 class="mb-4"><i class="fas fa-chalkboard-teacher me-2 text-primary"></i>Teaching Information</h3>
+        
+        {% if profile_user.teaching_info %}
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Teaching Philosophy</h5>
+                <p class="card-text">{{ profile_user.teaching_info }}</p>
+                
+                {% if profile_user.lesson_rate %}
+                <div class="mt-3">
+                    <h5 class="card-title">Lesson Rates</h5>
+                    <p class="card-text">${{ profile_user.lesson_rate }} per hour</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% else %}
+        <div class="text-center py-4">
+            <p class="text-muted">No teaching information available</p>
+        </div>
+        {% endif %}
+        
+        {% if user == profile_user %}
+        <div class="text-center mt-3">
+            <a href="#" class="btn btn-outline-primary">Edit Teaching Information</a>
+        </div>
+        {% else %}
+        <div class="text-center mt-3">
+            <a href="#" class="btn btn-primary">Contact About Lessons</a>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Profile Actions -->
+    <div class="text-center mt-4">
+        {% if user == profile_user %}
+        <a href="#" class="btn btn-outline-primary">Edit Profile</a>
+        {% endif %}
+        <a href="{% url 'dashboard' %}" class="btn btn-outline-secondary ms-2">Back to Dashboard</a>
+    </div>
+</div>
+{% endblock %}

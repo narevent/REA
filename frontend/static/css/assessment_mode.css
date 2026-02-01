@@ -1,0 +1,222 @@
+/* assessment_mode.css */
+/* Styling for assessment mode in exercise detail view */
+
+/* Assessment highlight for current note */
+.vf-note.assessment-highlight {
+    filter: drop-shadow(0 0 10px rgba(255, 215, 0, 0.8));
+}
+
+.vf-note.assessment-highlight .vf-notehead {
+    fill: #FFD700 !important;
+    stroke: #FFA500 !important;
+    stroke-width: 2px !important;
+}
+
+.vf-note.assessment-highlight .vf-stem {
+    stroke: #FFD700 !important;
+    stroke-width: 2px !important;
+}
+
+/* Pitch preview note styling */
+.pitch-preview {
+    animation: pulse-preview 1s ease-in-out infinite;
+}
+
+@keyframes pulse-preview {
+    0%, 100% {
+        opacity: 0.4;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.1);
+    }
+}
+
+/* Assessment controls styling */
+#assessment-controls {
+    margin-top: 20px;
+    padding: 20px;
+    border-radius: 8px;
+    background-color: #f8f9fa;
+}
+
+#assessment-results {
+    margin-top: 15px;
+}
+
+.progress {
+    height: 25px;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    transition: width 0.5s ease-in-out, background-color 0.3s ease;
+    font-size: 14px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Status messages */
+.assessment-status {
+    padding: 10px 15px;
+    margin-top: 10px;
+    border-radius: 6px;
+    font-size: 14px;
+}
+
+.assessment-status.active {
+    background-color: #d1ecf1;
+    border: 1px solid #bee5eb;
+    color: #0c5460;
+}
+
+.assessment-status.complete {
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+
+/* Note detection indicator */
+.note-detection-indicator {
+    display: inline-block;
+    margin-left: 10px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.note-detection-indicator.detecting {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.note-detection-indicator.matched {
+    background-color: #d4edda;
+    color: #155724;
+    animation: flash-green 0.5s;
+}
+
+@keyframes flash-green {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+/* Detected note badge animations */
+.badge {
+    transition: background-color 0.3s ease, transform 0.2s ease;
+}
+
+.badge.bg-success {
+    animation: pulse-success 0.5s ease-in-out;
+}
+
+@keyframes pulse-success {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.1);
+    }
+}
+
+/* Pitch difference feedback */
+#pitch-difference {
+    font-size: 0.9rem;
+    font-weight: 500;
+    min-height: 20px;
+}
+
+#pitch-difference .text-success {
+    animation: success-glow 0.5s ease-in-out;
+}
+
+@keyframes success-glow {
+    0% {
+        text-shadow: 0 0 5px rgba(40, 167, 69, 0.5);
+    }
+    50% {
+        text-shadow: 0 0 15px rgba(40, 167, 69, 0.8);
+    }
+    100% {
+        text-shadow: 0 0 5px rgba(40, 167, 69, 0.5);
+    }
+}
+
+/* Microphone permission prompt */
+.mic-permission-prompt {
+    padding: 15px;
+    margin: 10px 0;
+    border-radius: 6px;
+    background-color: #fff3cd;
+    border: 1px solid #ffeeba;
+    color: #856404;
+}
+
+/* Assessment complete overlay */
+.assessment-complete-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.assessment-complete-card {
+    background: white;
+    padding: 40px;
+    border-radius: 15px;
+    text-align: center;
+    max-width: 500px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+}
+
+.assessment-complete-card h3 {
+    margin-bottom: 20px;
+    color: #28a745;
+}
+
+.assessment-complete-card .score {
+    font-size: 48px;
+    font-weight: bold;
+    margin: 20px 0;
+    color: #333;
+}
+
+.assessment-complete-card .details {
+    margin: 15px 0;
+    color: #666;
+}
+
+.assessment-complete-card button {
+    margin-top: 20px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    #assessment-controls {
+        padding: 15px;
+    }
+    
+    .assessment-complete-card {
+        margin: 20px;
+        padding: 30px 20px;
+    }
+    
+    .assessment-complete-card .score {
+        font-size: 36px;
+    }
+}

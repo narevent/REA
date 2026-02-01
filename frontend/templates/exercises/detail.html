@@ -1,0 +1,1073 @@
+{% extends "frontend/base.html" %}
+
+{% load static %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{% static 'css/assessment_mode.css' %}">
+{% endblock %}
+
+{% block title %}Exercise #{{ exercise.id }} | REA - Music Education{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'home' %}">Home</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'exercise-dashboard' %}">Exercises</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Exercise #{{ exercise.id }}</li>
+        </ol>
+    </nav>
+
+    <div class="row">
+        <div class="col-lg-8">
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h2 class="card-title mb-4">Exercise #{{ exercise.id }}</h2>
+                    
+                    <div class="mb-4">
+                        <span class="badge {% if exercise.category == 'pitch' %}bg-success{% else %}bg-primary{% endif %} me-2">
+                            {{ exercise.get_category_display }}
+                        </span>
+                        <span class="badge {% if exercise.context == 'rel' %}bg-info{% else %}bg-warning{% endif %} me-2">
+                            {{ exercise.get_context_display }}
+                        </span>
+                        
+                        <span class="badge bg-info">
+                            {% if exercise.polyphonic %} Poly {% else %} Mono {% endif %}
+                        </span>
+                    </div>
+
+                    <div class="control-panel">
+                        <div class="control-section">
+                            <div class="playing-controls">
+                                <button id="play-btn" class="btn btn-primary">
+                                    <i class="fas fa-play me-1"></i> Play
+                                </button>
+                                <button id="pause-btn" class="btn btn-secondary" disabled>
+                                    <i class="fas fa-pause me-1"></i> Pause
+                                </button>
+                                <button id="stop-btn" class="btn btn-danger" disabled>
+                                    <i class="fas fa-stop me-1"></i> Stop
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="control-section">
+                            <div class="d-flex align-items-center gap-2">
+                                <input type="range" class="form-range" id="tempo-slider" min="40" max="208" step="4" value="120">
+                                <span id="tempo-value" class="badge bg-primary">120 BPM</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div id="score-container" class="tab-content active" data-tab="score">
+                        <div id="output"></div>
+                    </div>
+
+                    {% if exercise.category == 'pitch' %}
+                    <div class="card mb-4 mt-4">
+                        <div class="card-body">
+                            <div class="form-check form-switch mb-3">
+                                <input class="form-check-input" type="checkbox" id="assessment-mode">
+                                <label class="form-check-label" for="assessment-mode">Enable Assessment Mode</label>
+                            </div>
+                            
+                            <div id="assessment-controls" style="display: none;">
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle me-2"></i> 
+                                    Assessment mode will listen to your microphone and track your progress as you sing or play each note in sequence. 
+                                    The current note will be highlighted in gold. Your sung pitch appears as a semi-transparent preview. Rhythm is not evaluated - only pitch accuracy.
+                                </div>
+                                
+                                <button id="start-assessment" class="btn btn-success">
+                                    <i class="fas fa-microphone me-1"></i> Start Assessment
+                                </button>
+                                
+                                <div id="assessment-results" class="mt-3" style="display: none;">
+                                    <h6>Real-time Progress:</h6>
+                                    <div class="progress mb-2" style="height: 30px;">
+                                        <div id="pitch-accuracy" class="progress-bar bg-success" role="progressbar" style="width: 0%">0%</div>
+                                    </div>
+                                    <p class="small text-muted mb-2">
+                                        <span id="notes-detected">0</span> of <span id="total-notes">0</span> notes detected correctly
+                                    </p>
+                                    <div class="row">
+                                        <div class="col-6">
+                                            <p class="small mb-0">
+                                                <strong>Expected:</strong> <span id="current-note-display" class="badge bg-primary">--</span>
+                                            </p>
+                                        </div>
+                                        <div class="col-6">
+                                            <p class="small mb-0">
+                                                <strong>Detecting:</strong> <span id="detected-note-display" class="badge bg-secondary">--</span>
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div class="mt-2">
+                                        <p class="small mb-0">
+                                            <strong>Pitch Difference:</strong> <span id="pitch-difference">--</span>
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-lg-4">
+            <!-- Download Options -->
+            <div class="card mb-4">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0"><i class="fas fa-download me-2"></i> Download Options</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="list-group list-group-flush">
+                        {% if exercise.pdf %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            PDF Format
+                            <a href="{{ exercise.pdf.url }}" class="btn btn-sm btn-outline-primary" download>
+                                <i class="fas fa-file-pdf me-1"></i> Download
+                            </a>
+                        </li>
+                        {% endif %}
+                        
+                        {% if exercise.midi %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            MIDI File
+                            <a href="{{ exercise.midi.url }}" class="btn btn-sm btn-outline-primary" download>
+                                <i class="fas fa-file-audio me-1"></i> Download
+                            </a>
+                        </li>
+                        {% endif %}
+                        
+                        {% if exercise.lilypond %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            LilyPond Source
+                            <a href="{{ exercise.lilypond.url }}" class="btn btn-sm btn-outline-primary" download>
+                                <i class="fas fa-file-code me-1"></i> Download
+                            </a>
+                        </li>
+                        {% endif %}
+                        
+                        {% if exercise.svg %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            SVG Image
+                            <a href="{{ exercise.svg.url }}" class="btn btn-sm btn-outline-primary" download>
+                                <i class="fas fa-file-image me-1"></i> Download
+                            </a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- Exercise Information -->
+            <div class="card mb-4">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0"><i class="fas fa-info-circle me-2"></i> Details</h5>
+                </div>
+                <div class="card-body">
+                    <p class="mb-2">
+                        <strong>Context:</strong> {{ exercise.get_context_display }}
+                    </p>
+                    <p class="mb-2">
+                        <strong>Category:</strong> {{ exercise.get_category_display }}
+                    </p>
+                    <p class="mb-2">
+                        <strong>Voices:</strong> {% if exercise.polyphonic %} Poly {% else %} Mono {% endif %}
+                    </p>
+                    <p class="mb-2">
+                        <strong>Created:</strong> {{ exercise.created|date:"F j, Y" }}
+                    </p>
+                    <p class="mb-0">
+                        <strong>Last Modified:</strong> {{ exercise.modified|date:"F j, Y" }}
+                    </p>
+                </div>
+            </div>
+            
+            <!-- Actions -->
+            {% if user.is_authenticated %}
+            <div class="d-grid gap-2">
+                <a href="{% url 'exercise-update' exercise.id %}" class="btn btn-primary">
+                    <i class="fas fa-edit me-2"></i> Edit Exercise
+                </a>
+                <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#deleteModal">
+                    <i class="fas fa-trash me-2"></i> Delete Exercise
+                </button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+{% if user.is_authenticated %}
+<div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteModalLabel">Confirm Deletion</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                Are you sure you want to delete Exercise #{{ exercise.id }}? This action cannot be undone.
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <form method="post" action="{% url 'exercise-delete' exercise.id %}" style="display: inline;">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger">Delete</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+
+{% if exercise.midi %}
+    <script type="text/javascript" src="https://unpkg.com/tone@latest/build/Tone.js"></script>
+    <script type="text/javascript" src="https://unpkg.com/@tonejs/ui@0.0.8/build/tonejs-ui.js"></script>
+    <script type="text/javascript" src="https://unpkg.com/@tonejs/midi"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+    <script src="{% static 'js/pitch_detector.js' %}"></script>
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const { Factory, StaveNote, Accidental, Beam, Formatter, Renderer } = Vex.Flow;
+    let noteGrouped = [];
+    let isDragging = false;
+    let draggedNoteGroup = null;
+    let draggedNoteIndex = null;
+    let originalMidiNote = null;
+    let startY = null;
+    let selectedNoteGroup = null;
+    let selectedNoteIndex = null;
+    let currentScale = 1.0;
+
+    function midiToVexNote(midiNumber) {
+        const noteNames = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
+        const octave = Math.floor(midiNumber / 12) - 1;
+        const noteName = noteNames[midiNumber % 12];
+        return { 
+            key: noteName.replace('#', ''),
+            octave: octave,
+            accidental: noteName.includes('#') ? '#' : null
+        };
+    }
+
+    function getDuration(durationTicks, ppq) {
+        if (durationTicks >= ppq * 4) return "w";
+        if (durationTicks >= ppq * 2) return "h";
+        if (durationTicks >= ppq) return "q";
+        if (durationTicks >= ppq / 2) return "8";
+        if (durationTicks >= ppq / 4) return "16";
+        if (durationTicks >= ppq / 8) return "32";
+        return "q";
+    }
+
+    function groupNotesByTime(midiNotes) {
+        const noteGroups = {};
+        
+        midiNotes.forEach(note => {
+            if (!noteGroups[note.ticks]) {
+                noteGroups[note.ticks] = {
+                    ticks: note.ticks,
+                    time: note.time,
+                    duration: note.duration,
+                    durationTicks: note.durationTicks,
+                    notes: []
+                };
+            }
+            noteGroups[note.ticks].notes.push(note);
+        });
+        
+        return Object.values(noteGroups).sort((a, b) => a.ticks - b.ticks);
+    }
+
+    function renderScore(midi) {
+        const output = document.getElementById('output');
+        output.innerHTML = '';
+        
+        const renderer = new Renderer(output, Renderer.Backends.SVG);
+        
+        const width = 500;
+        const height = 200;
+        
+        renderer.resize(width * currentScale, height * currentScale);
+        const context = renderer.getContext();
+        context.scale(currentScale, currentScale);
+        
+        const stave = new Vex.Flow.Stave(10, 40, width - 20);
+        
+        let timeSignature = "4/4";
+        
+        stave.addClef("treble").addTimeSignature(timeSignature);
+        stave.setContext(context).draw();
+        
+        noteGrouped = groupNotesByTime(midi.tracks["0"].notes);
+        
+        const vexNotes = noteGrouped.map((group, groupIndex) => {
+            const duration = getDuration(group.durationTicks, midi.header.ppq);
+            
+            if (group.notes.length > 1) {
+                const keys = group.notes.map(note => {
+                    const vexNote = midiToVexNote(note.midi);
+                    return `${vexNote.key}/${vexNote.octave}`;
+                });
+                
+                const staveNote = new StaveNote({ 
+                    keys: keys, 
+                    duration: duration 
+                });
+                
+                group.notes.forEach((note, i) => {
+                    const vexNote = midiToVexNote(note.midi);
+                    if (vexNote.accidental) {
+                        staveNote.addModifier(new Accidental(vexNote.accidental), i);
+                    }
+                });
+                
+                staveNote.setAttribute('id', `note-${group.ticks}`);
+                staveNote.setAttribute('data-group-index', groupIndex);
+                staveNote.addClass(`note-${group.ticks}`);
+                
+                return staveNote;
+            } else {
+                const note = group.notes[0];
+                const vexNote = midiToVexNote(note.midi);
+                const staveNote = new StaveNote({ 
+                    keys: [`${vexNote.key}/${vexNote.octave}`], 
+                    duration: duration 
+                });
+                
+                if (vexNote.accidental) {
+                    staveNote.addModifier(new Accidental(vexNote.accidental), 0);
+                }
+                
+                staveNote.setAttribute('id', `note-${note.ticks}`);
+                staveNote.setAttribute('data-group-index', groupIndex);
+                staveNote.addClass(`note-${note.ticks}`);
+                
+                return staveNote;
+            }
+        });
+        
+        const beams = Beam.generateBeams(vexNotes);
+        
+        Formatter.FormatAndDraw(context, stave, vexNotes);
+        
+        beams.forEach(beam => {
+            beam.setContext(context).draw();
+        });
+    }
+
+    function startNoteHighlighting(midi) {
+        clearNoteHighlights();
+        
+        const vfContainer = document.querySelector('#output svg');
+        if (!vfContainer) return;
+        
+        const noteElements = vfContainer.querySelectorAll('.vf-stavenote');
+        
+        noteGrouped.forEach((group, index) => {
+            setTimeout(() => {
+                clearNoteHighlights();
+                if (noteElements[index]) {
+                    const noteheads = noteElements[index].querySelectorAll('.vf-notehead path');
+                    noteheads.forEach(path => {
+                        path.setAttribute('data-original-fill', path.getAttribute('fill') || 'black');
+                        path.setAttribute('fill', '#ff5722');
+                        path.setAttribute('stroke', '#ff5722');
+                        path.setAttribute('data-highlighted', 'true');
+                    });
+                }
+            }, group.time * 1000);
+        });
+    }
+
+    function clearNoteHighlights() {
+        document.querySelectorAll('path[data-highlighted="true"]').forEach(path => {
+            path.setAttribute('fill', path.getAttribute('data-original-fill') || 'black');
+            path.setAttribute('stroke', path.getAttribute('data-original-stroke') || 'none');
+            path.removeAttribute('data-highlighted');
+        });
+    }
+
+    let currentMidi = null;
+    
+    async function parseFile(file) {
+        let arrayBuffer;
+
+        if (typeof file === "string") {
+            try {
+                const response = await fetch(file);
+                if (!response.ok) {
+                    throw new Error("Failed to fetch the MIDI file");
+                }
+                arrayBuffer = await response.arrayBuffer();
+            } catch (error) {
+                console.error("Error fetching MIDI file:", error);
+                return;
+            }
+        } else {
+            arrayBuffer = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        const midi = new Midi(arrayBuffer);
+        currentMidi = midi;
+        renderScore(midi);
+    }
+                             
+    const synths = [];
+    let playbackTimeout = null;
+    let playing = false;
+
+    const playBtn = document.getElementById('play-btn');
+    const pauseBtn = document.getElementById('pause-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const tempoSlider = document.getElementById('tempo-slider');
+    const tempoValue = document.getElementById('tempo-value');
+
+    playBtn.addEventListener('click', () => {
+        if (!currentMidi) return;
+        
+        playing = true;
+        playBtn.disabled = true;
+        pauseBtn.disabled = false;
+        stopBtn.disabled = false;
+
+        const now = Tone.now() + 0.5;
+
+        while (synths.length) {
+            const synth = synths.shift();
+            synth.disconnect();
+        }
+        clearTimeout(playbackTimeout);
+
+        startNoteHighlighting(currentMidi);
+
+        currentMidi.tracks.forEach((track) => {
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                envelope: {
+                    attack: 0.02,
+                    decay: 0.1,
+                    sustain: 0.3,
+                    release: 1,
+                },
+            }).toDestination();
+            synths.push(synth);
+
+            track.notes.forEach((note) => {
+                synth.triggerAttackRelease(
+                    note.name,
+                    note.duration,
+                    note.time + now,
+                    note.velocity
+                );
+            });
+        });
+
+        const lastNoteEndTime = Math.max(
+            ...currentMidi.tracks.flatMap(track =>
+                track.notes.map(note => note.time + note.duration)
+            )
+        );
+
+        playbackTimeout = setTimeout(() => {
+            Tone.Transport.stop();
+            clearNoteHighlights();
+            clearTimeout(playbackTimeout);
+
+            while (synths.length) {
+                const synth = synths.shift();
+                synth.disconnect();
+            }
+
+            playing = false;
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+            stopBtn.disabled = true;
+        }, (lastNoteEndTime + 1.5) * 1000);
+    });
+
+    pauseBtn.addEventListener('click', () => {
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+    });
+
+    stopBtn.addEventListener('click', () => {
+        Tone.Transport.stop();
+        clearNoteHighlights();
+        clearTimeout(playbackTimeout);
+
+        while (synths.length) {
+            const synth = synths.shift();
+            synth.disconnect();
+        }
+
+        playing = false;
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+        stopBtn.disabled = true;
+    });
+
+    tempoSlider.addEventListener('input', () => {
+        const tempo = parseInt(tempoSlider.value);
+        tempoValue.textContent = `${tempo} BPM`;
+    });
+
+    // Load MIDI file
+    parseFile("{{exercise.midi.url}}");
+
+    // Assessment Mode Integration
+    {% if exercise.category == 'pitch' %}
+    const assessmentModeSwitch = document.getElementById('assessment-mode');
+    const assessmentControls = document.getElementById('assessment-controls');
+    const startAssessmentBtn = document.getElementById('start-assessment');
+    const assessmentResults = document.getElementById('assessment-results');
+    const pitchAccuracyBar = document.getElementById('pitch-accuracy');
+    const notesDetectedEl = document.getElementById('notes-detected');
+    const totalNotesEl = document.getElementById('total-notes');
+    const currentNoteDisplay = document.getElementById('current-note-display');
+    const detectedNoteDisplay = document.getElementById('detected-note-display');
+    const pitchDifferenceEl = document.getElementById('pitch-difference');
+    
+    let pitchDetector = null;
+    let assessmentActive = false;
+    let currentNoteIndex = 0;
+    let correctNotesCount = 0;
+    let assessmentNotes = [];
+    let previewNoteElement = null;
+
+    assessmentModeSwitch.addEventListener('change', () => {
+        assessmentControls.style.display = assessmentModeSwitch.checked ? 'block' : 'none';
+    });
+
+    startAssessmentBtn.addEventListener('click', async () => {
+        if (!assessmentActive) {
+            await startAssessment();
+        } else {
+            stopAssessment();
+        }
+    });
+
+    async function startAssessment() {
+        if (!currentMidi || !noteGrouped.length) {
+            alert('No notes to assess!');
+            return;
+        }
+
+        // Extract notes for assessment
+        assessmentNotes = [];
+        noteGrouped.forEach(group => {
+            group.notes.forEach(note => {
+                assessmentNotes.push({
+                    name: note.name, // e.g. "C4"
+                    midi: note.midi, // e.g. 60
+                    ticks: note.ticks
+                });
+            });
+        });
+
+        // Initialize pitch detector with improved logic
+        pitchDetector = new PitchDetector({
+            onNoteDetected: handleNoteDetected, // Called when a stable note is locked
+            onError: (error) => {
+                console.error('Pitch detection error:', error);
+                alert('Microphone error: ' + error);
+                stopAssessment();
+            }
+        });
+
+        const initialized = await pitchDetector.initialize();
+        if (!initialized) return;
+
+        // Reset state
+        currentNoteIndex = 0;
+        correctNotesCount = 0;
+        assessmentActive = true;
+
+        // Update UI
+        startAssessmentBtn.textContent = 'Stop Assessment';
+        startAssessmentBtn.classList.remove('btn-success');
+        startAssessmentBtn.classList.add('btn-danger');
+        assessmentResults.style.display = 'block';
+        totalNotesEl.textContent = assessmentNotes.length;
+        notesDetectedEl.textContent = '0';
+        
+        updateAccuracyDisplay();
+        highlightCurrentAssessmentNote();
+
+        // Start detection
+        pitchDetector.start();
+        // Start animation loop for smooth visual feedback (blue bubble)
+        startPitchPreviewLoop();
+    }
+
+    function stopAssessment() {
+        if (pitchDetector) {
+            pitchDetector.stop();
+            pitchDetector = null;
+        }
+
+        assessmentActive = false;
+        startAssessmentBtn.textContent = 'Start Assessment';
+        startAssessmentBtn.classList.remove('btn-danger');
+        startAssessmentBtn.classList.add('btn-success');
+        
+        clearAssessmentHighlights();
+        clearPitchPreview();
+        detectedNoteDisplay.textContent = '--';
+        pitchDifferenceEl.textContent = '--';
+    }
+
+    function startPitchPreviewLoop() {
+        if (!assessmentActive) return;
+        
+        // Use lastStableNote from detector for real-time feedback
+        // This updates even before the note is fully "Locked"/confirmed
+        const currentPitch = pitchDetector.lastStableNote;
+        
+        if (currentPitch && currentPitch.name !== '--' && currentPitch.frequency > 0) {
+            updatePitchPreview(currentPitch.name);
+            updateDetectedNoteDisplay(currentPitch.name);
+        } else {
+            clearPitchPreview();
+            detectedNoteDisplay.textContent = '--';
+            pitchDifferenceEl.textContent = '--';
+        }
+        
+        requestAnimationFrame(startPitchPreviewLoop);
+    }
+
+    function updatePitchPreview(detectedNoteName) {
+        if (!assessmentActive || currentNoteIndex >= assessmentNotes.length) return;
+        
+        const expectedNote = assessmentNotes[currentNoteIndex];
+        const detectedMidi = noteNameToMidi(detectedNoteName);
+        
+        if (detectedMidi > 0) {
+            renderPitchPreview(detectedMidi, currentNoteIndex);
+        } else {
+            clearPitchPreview();
+        }
+    }
+
+
+    // Helper to convert "C4", "F#5" to MIDI numbers
+    function noteNameToMidi(noteName) {
+        if (!noteName || noteName === '--') return 0;
+        
+        const noteMap = {
+            'C': 0, 'C#': 1, 'DB': 1, 'D': 2, 'D#': 3, 'EB': 3,
+            'E': 4, 'F': 5, 'F#': 6, 'GB': 6, 'G': 7, 'G#': 8, 'AB': 8,
+            'A': 9, 'A#': 10, 'BB': 10, 'B': 11
+        };
+        
+        // Handle both "C4" and "C#4" formats from PitchDetector
+        let notePart, octavePart;
+        
+        if (noteName.length === 2) {
+            // Simple note like "C4"
+            notePart = noteName[0].toUpperCase();
+            octavePart = parseInt(noteName[1]);
+        } else if (noteName.length === 3) {
+            // Note with accidental like "C#4"
+            notePart = noteName.substring(0, 2).toUpperCase();
+            octavePart = parseInt(noteName[2]);
+        } else {
+            return 0;
+        }
+        
+        const val = noteMap[notePart];
+        if (val === undefined) return 0;
+        
+        return (octavePart + 1) * 12 + val;
+    }
+
+    // Helper to convert MIDI back to VexFlow keys for positioning
+    function midiToVexKey(midi) {
+        const notes = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
+        const octave = Math.floor(midi / 12) - 1;
+        const noteIndex = midi % 12;
+        return `${notes[noteIndex]}/${octave}`;
+    }
+
+    function renderPitchPreview(detectedMidi, expectedNoteIndex) {
+        clearPitchPreview();
+        
+        const vfContainer = document.querySelector('#output svg');
+        if (!vfContainer) return;
+        
+        // Find X position of current expected note
+        const noteElements = vfContainer.querySelectorAll('.vf-stavenote');
+        if (!noteElements[expectedNoteIndex]) return;
+        
+        const expectedNoteElement = noteElements[expectedNoteIndex];
+        const notehead = expectedNoteElement.querySelector('.vf-notehead');
+        if (!notehead) return;
+        
+        const bbox = notehead.getBBox();
+        const noteX = bbox.x + (bbox.width / 2);
+        
+        // Get Y position using the relative approach
+        const yPos = getYPositionUsingReference(detectedMidi, expectedNoteIndex);
+        
+        if (!yPos) return;
+        
+        // Calculate semitone difference for visual feedback
+        const expectedNote = assessmentNotes[expectedNoteIndex];
+        const semitoneDiff = Math.abs(detectedMidi - expectedNote.midi);
+        
+        // Determine color based on how close/far the note is
+        let color, borderColor;
+        if (semitoneDiff === 0) {
+            color = '#4CAF50'; // Green for exact match
+            borderColor = '#2E7D32';
+        } else if (semitoneDiff <= 2) {
+            color = '#2196F3'; // Blue for close
+            borderColor = '#0D47A1';
+        } else if (semitoneDiff <= 6) {
+            color = '#FF9800'; // Orange for moderate distance
+            borderColor = '#E65100';
+        } else {
+            color = '#F44336'; // Red for far away
+            borderColor = '#B71C1C';
+        }
+        
+        // Create Visual Bubble
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', noteX);
+        circle.setAttribute('cy', yPos);
+        circle.setAttribute('r', Math.max(4, 6 - (semitoneDiff * 0.5))); // Smaller circle for larger differences
+        circle.setAttribute('fill', color);
+        circle.setAttribute('opacity', '0.7');
+        circle.setAttribute('stroke', borderColor);
+        circle.setAttribute('stroke-width', '1.5');
+        circle.setAttribute('class', 'pitch-preview');
+        
+        // Add a label showing the note name
+        const noteName = midiToNoteName(detectedMidi);
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', noteX);
+        text.setAttribute('y', yPos - 10);
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('fill', borderColor);
+        text.setAttribute('font-size', '10');
+        text.setAttribute('font-weight', 'bold');
+        text.setAttribute('class', 'pitch-preview-label');
+        text.textContent = noteName;
+        
+        vfContainer.appendChild(circle);
+        vfContainer.appendChild(text);
+        previewNoteElement = { circle, text };
+    }
+
+    function midiToNoteName(midi) {
+        const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const octave = Math.floor(midi / 12) - 1;
+        const noteIndex = midi % 12;
+        return noteNames[noteIndex] + octave;
+    }
+
+    function getYPositionForNote(vexKey, staveRect) {
+        // Parse the VexFlow key (e.g., "c/4", "f#/5")
+        const [note, octStr] = vexKey.split('/');
+        const octave = parseInt(octStr);
+        const noteName = note.toLowerCase();
+        
+        // Standard treble clef stave lines (from bottom to top):
+        // Line 4: E4
+        // Line 3: G4
+        // Line 2: B4
+        // Line 1: D5
+        // Space 4: F4 (below bottom line)
+        // Space 3: A4
+        // Space 2: C5
+        // Space 1: E5 (above top line)
+        
+        // Calculate MIDI note number first for easier positioning
+        const noteToMidiBase = {
+            'c': 0, 'd': 2, 'e': 4, 'f': 5, 'g': 7, 'a': 9, 'b': 11
+        };
+        
+        let baseName = noteName;
+        let accidental = 0;
+        
+        // Handle sharps and flats
+        if (noteName.includes('#')) {
+            baseName = noteName.replace('#', '');
+            accidental = 1;
+        } else if (noteName.includes('b')) {
+            baseName = noteName.replace('b', '');
+            accidental = -1;
+        }
+        
+        // Get base MIDI value (C4 = 60)
+        const baseMidi = noteToMidiBase[baseName] || 0;
+        const midiNote = (octave + 1) * 12 + baseMidi + accidental;
+        
+        // Reference note for positioning (Middle C = C4 = 60)
+        const middleC = 60;
+        
+        // Calculate semitone difference from middle C
+        const semitonesFromMiddleC = midiNote - middleC;
+        
+        // In VexFlow rendering, the stave has specific positions:
+        // Each line/space is typically 10 units apart
+        // Middle C (C4) is usually one ledger line below the stave
+        
+        // Get the actual stave rendering context
+        const staveSVG = document.querySelector('.vf-stave g path');
+        if (!staveSVG) return staveRect.y + staveRect.height / 2;
+        
+        const staveTransform = staveSVG.getAttribute('transform');
+        let translateY = 0;
+        
+        if (staveTransform) {
+            // Extract Y translation from transform
+            const match = staveTransform.match(/translate\([^,]+,\s*([^)]+)\)/);
+            if (match) {
+                translateY = parseFloat(match[1]);
+            }
+        }
+        
+        // Calculate Y position based on semitone distance from middle C
+        // In music notation, each half step (semitone) corresponds to half a space
+        // Standard VexFlow spacing: 10 units per space, 5 units per half step
+        
+        // Middle C is typically positioned 3 spaces below the bottom line of treble clef
+        // The bottom line of treble clef is E4 (MIDI 64)
+        
+        // Calculate distance from bottom line (E4 = 64)
+        const bottomLineMidi = 64; // E4
+        const distanceFromBottomLine = midiNote - bottomLineMidi;
+        
+        // Each half step = 5 units
+        const yOffset = distanceFromBottomLine * 5;
+        
+        // The bottom line Y position in your rendering (approximately)
+        // Adjust this based on your actual rendering
+        const bottomLineY = translateY + 80; // Approximate bottom line Y
+        
+        // Calculate final Y position (inverted because Y increases downward)
+        const finalY = bottomLineY - yOffset;
+        
+        return finalY;
+    }
+
+    function getYPositionUsingReference(detectedMidi, expectedNoteIndex) {
+        const vfContainer = document.querySelector('#output svg');
+        if (!vfContainer) return null;
+        
+        // Get the expected note element for reference
+        const noteElements = vfContainer.querySelectorAll('.vf-stavenote');
+        if (!noteElements[expectedNoteIndex]) return null;
+        
+        const expectedNoteElement = noteElements[expectedNoteIndex];
+        const expectedNote = assessmentNotes[expectedNoteIndex];
+        
+        // Get the expected note's Y position
+        const notehead = expectedNoteElement.querySelector('.vf-notehead');
+        if (!notehead) return null;
+        
+        const bbox = notehead.getBBox();
+        const expectedY = bbox.y + bbox.height / 2;
+        
+        // Convert MIDI to note names (with naturals for staff position)
+        const detectedNoteName = midiToNoteName(detectedMidi);
+        const expectedNoteName = expectedNote.name;
+        
+        // Extract the natural note name (without sharps/flats) for staff positioning
+        const detectedNatural = detectedNoteName.replace(/[#b]/g, '');
+        const expectedNatural = expectedNoteName.replace(/[#b]/g, '');
+        
+        // Calculate the difference in staff positions (diatonic steps, not chromatic)
+        const noteOrder = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
+        
+        function getNoteStaffPosition(noteName) {
+            const match = noteName.match(/([A-G])(\d+)/);
+            if (!match) return null;
+            const [, note, octave] = match;
+            const noteIndex = noteOrder.indexOf(note);
+            // Each octave has 7 diatonic steps, starting from C
+            return (parseInt(octave) * 7) + noteIndex;
+        }
+        
+        const detectedPos = getNoteStaffPosition(detectedNatural);
+        const expectedPos = getNoteStaffPosition(expectedNatural);
+        
+        if (detectedPos === null || expectedPos === null) return null;
+        
+        // Calculate diatonic step difference (this ensures C# appears at C position, D# at D position, etc.)
+        const stepDiff = detectedPos - expectedPos;
+        
+        // Each staff step = 5 units in VexFlow (half of a staff space)
+        const stepHeight = 5;
+        
+        // Calculate new Y position (higher pitch = lower Y)
+        const newY = expectedY - (stepDiff * stepHeight);
+        
+        return newY;
+    }
+
+    function clearPitchPreview() {
+        if (previewNoteElement) {
+            if (previewNoteElement.circle) previewNoteElement.circle.remove();
+            if (previewNoteElement.text) previewNoteElement.text.remove();
+            if (previewNoteElement.line) previewNoteElement.line.remove();
+            previewNoteElement = null;
+        }
+        
+        // Also clear any stray preview elements
+        document.querySelectorAll('.pitch-preview, .pitch-preview-label, .pitch-preview-line').forEach(el => el.remove());
+    }
+
+
+    function updateDetectedNoteDisplay(detectedNoteName) {
+        if (!assessmentActive || currentNoteIndex >= assessmentNotes.length) return;
+        
+        const expectedNote = assessmentNotes[currentNoteIndex];
+        detectedNoteDisplay.textContent = detectedNoteName;
+        
+        const detectedMidi = noteNameToMidi(detectedNoteName);
+        const expectedMidi = expectedNote.midi;
+        const diff = detectedMidi - expectedMidi;
+        
+        if (diff === 0) {
+            pitchDifferenceEl.innerHTML = '<span class="text-success fw-bold">Perfect match!</span>';
+            detectedNoteDisplay.className = 'badge bg-success';
+        } else {
+            const dir = diff > 0 ? 'High' : 'Low';
+            const semitones = Math.abs(diff);
+            // Octave error check
+            if (semitones === 12) {
+                pitchDifferenceEl.innerHTML = `<span class="text-danger">Wrong Octave! (1 Octave ${dir})</span>`;
+            } else {
+                pitchDifferenceEl.innerHTML = `<span class="text-warning">${semitones} semitone(s) ${dir}</span>`;
+            }
+            detectedNoteDisplay.className = 'badge bg-danger';
+        }
+    }
+
+    function handleNoteDetected(noteInfo) {
+        // This is called when the detector is "Confident" (Stable)
+        if (!assessmentActive || !noteInfo || currentNoteIndex >= assessmentNotes.length) return;
+
+        const expectedNote = assessmentNotes[currentNoteIndex];
+        const detectedMidi = noteNameToMidi(noteInfo.name);
+        
+        // Strict Match
+        if (detectedMidi === expectedNote.midi) {
+            correctNotesCount++;
+            currentNoteIndex++;
+            updateAccuracyDisplay();
+            clearPitchPreview();
+            
+            if (currentNoteIndex >= assessmentNotes.length) {
+                completeAssessment();
+            } else {
+                highlightCurrentAssessmentNote();
+            }
+        }
+    }
+
+    function updateAccuracyDisplay() {
+        const accuracy = assessmentNotes.length > 0 
+            ? Math.round((correctNotesCount / assessmentNotes.length) * 100) 
+            : 0;
+        
+        pitchAccuracyBar.style.width = accuracy + '%';
+        pitchAccuracyBar.textContent = accuracy + '%';
+        
+        pitchAccuracyBar.classList.remove('bg-success', 'bg-warning', 'bg-danger');
+        if (accuracy >= 80) {
+            pitchAccuracyBar.classList.add('bg-success');
+        } else if (accuracy >= 60) {
+            pitchAccuracyBar.classList.add('bg-warning');
+        } else {
+            pitchAccuracyBar.classList.add('bg-danger');
+        }
+
+        if (currentNoteIndex < assessmentNotes.length) {
+            const expectedNote = assessmentNotes[currentNoteIndex];
+            currentNoteDisplay.textContent = expectedNote.name;
+        } else {
+            currentNoteDisplay.textContent = 'Complete!';
+        }
+    }
+
+    function highlightCurrentAssessmentNote() {
+        clearAssessmentHighlights();
+        
+        if (currentNoteIndex >= assessmentNotes.length) return;
+        
+        const vfContainer = document.querySelector('#output svg');
+        if (!vfContainer) return;
+        
+        const noteElements = vfContainer.querySelectorAll('.vf-stavenote');
+        
+        // Find the note element by matching the note index
+        if (noteElements[currentNoteIndex]) {
+            const noteElement = noteElements[currentNoteIndex];
+            const noteheads = noteElement.querySelectorAll('.vf-notehead path');
+            
+            noteheads.forEach(path => {
+                path.setAttribute('data-original-fill', path.getAttribute('fill') || 'black');
+                path.setAttribute('fill', '#FFD700'); // Gold color
+                path.setAttribute('stroke', '#FFA500'); // Orange border
+                path.setAttribute('stroke-width', '2');
+                path.setAttribute('data-assessment-highlight', 'true');
+            });
+        }
+    }
+
+    function clearAssessmentHighlights() {
+        document.querySelectorAll('path[data-assessment-highlight="true"]').forEach(path => {
+            path.setAttribute('fill', path.getAttribute('data-original-fill') || 'black');
+            path.removeAttribute('stroke-width');
+            path.removeAttribute('data-assessment-highlight');
+        });
+    }
+
+    function completeAssessment() {
+        const accuracy = Math.round((correctNotesCount / assessmentNotes.length) * 100);
+        
+        // Keep assessment running to show final state
+        assessmentActive = false;
+        
+        if (pitchDetector) {
+            pitchDetector.stop();
+            pitchDetector = null;
+        }
+        
+        clearPitchPreview();
+        
+        // Update UI to show completion
+        startAssessmentBtn.textContent = 'Start Assessment';
+        startAssessmentBtn.classList.remove('btn-danger');
+        startAssessmentBtn.classList.add('btn-success');
+        
+        // Show completion message in the pitch difference area
+        pitchDifferenceEl.innerHTML = `<span class="text-success fw-bold">✓ Assessment Complete! Final Score: ${accuracy}%</span>`;
+        detectedNoteDisplay.textContent = 'Complete';
+        detectedNoteDisplay.classList.remove('bg-secondary', 'bg-warning', 'bg-danger');
+        detectedNoteDisplay.classList.add('bg-success');
+    }
+    {% endif %}
+});
+</script>
+{% endblock %}

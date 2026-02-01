@@ -1,0 +1,20 @@
+[Unit]
+Description=Gunicorn daemon for VumGames Django application
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/vumgames
+Environment="PATH=/var/www/vumgames/venv/bin"
+EnvironmentFile=/var/www/vumgames/.env
+ExecStart=/var/www/vumgames/venv/bin/gunicorn \
+    --workers 3 \
+    --bind unix:/var/www/vumgames/gunicorn.sock \
+    --timeout 60 \
+    --access-logfile /var/www/vumgames/logs/gunicorn-access.log \
+    --error-logfile /var/www/vumgames/logs/gunicorn-error.log \
+    website.wsgi:application
+
+[Install]
+WantedBy=multi-user.target

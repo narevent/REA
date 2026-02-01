@@ -1,0 +1,113 @@
+{% extends 'frontend/base.html' %}
+
+{% block title %}REA - Connect with Music{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<section class="hero-section">
+    <div class="container">
+        <div class="row align-items-center">
+            <div class="col-lg-4">
+                <h1 class="display-4 fw-bold mb-4">Train Your Ears Track Progress</h1>
+                <p class="lead mb-4">Practice ear training by using the REA model, track your progress, and monitor your performance over time.</p>
+                <div class="mt-5">
+                    <a href="{% url 'signup' %}" class="btn btn-light btn-lg me-3">Get Started</a>
+                    <a href="#features" class="btn btn-outline-light btn-lg">Learn More</a>
+                </div>
+            </div>
+            <div class="col-lg-8 d-none d-lg-block">
+                <img src="https://lilypond.org/doc/v2.23/Documentation/pictures/bwv861-lilypond-large.png" alt="https://www.zappa-analysis.com/the-black-page2a.jpg" class="img-fluid rounded-3 shadow">
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Stats Section -->
+<section class="py-5">
+    <div class="container">
+        <div class="row text-center">
+            <div class="col-md-4 mb-4">
+                <div class="card h-100 py-4">
+                    <div class="card-body">
+                        <h1 class="display-4 fw-bold text-primary">{{ instruments_count }}</h1>
+                        <p class="lead">Instruments</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="card h-100 py-4">
+                    <div class="card-body">
+                        <h1 class="display-4 fw-bold text-primary">{{ teachers_count }}</h1>
+                        <p class="lead">Teachers</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4 mb-4">
+                <div class="card h-100 py-4">
+                    <div class="card-body">
+                        <h1 class="display-4 fw-bold text-primary">{{ students_count }}</h1>
+                        <p class="lead">Students</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Features Section -->
+<section class="py-5 bg-white" id="features">
+    <div class="container">
+        <div class="text-center mb-5">
+            <h2 class="fw-bold">Why Choose REA?</h2>
+            <p class="lead text-muted">Our platform offers everything you need to excel in your Solfege.</p>
+        </div>
+        
+        <div class="row g-4">
+            <div class="col-md-4">
+                <div class="card h-100 p-4">
+                    <div class="feature-icon">
+                        <i class="fas fa-users fa-xl"></i>
+                    </div>
+                    <h3>Practice makes Perfect</h3>
+                    <p class="text-muted">Find the perfect excercises for your instrument, learning style, and skill level.</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100 p-4">
+                    <div class="feature-icon">
+                        <i class="fas fa-chart-line fa-xl"></i>
+                    </div>
+                    <h3>Track Progress</h3>
+                    <p class="text-muted">Monitor your improvement over time with detailed proficiency tracking.</p>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card h-100 p-4">
+                    <div class="feature-icon">
+                        <i class="fas fa-music fa-xl"></i>
+                    </div>
+                    <h3>Perfect Pitch</h3>
+                    <p class="text-muted">Learn and master multiple techniques to achieve perfect pitch.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- CTA Section -->
+<section class="py-5">
+    <div class="container">
+        <div class="row">
+            <div class="col-lg-10 mx-auto">
+                <div class="card bg-primary text-white p-5 text-center">
+                    <h2 class="fw-bold mb-3">Ready to start the game?</h2>
+                    <p class="lead mb-4">Join thousands of students and teachers on REA today.</p>
+                    <div>
+                        <a href="{% url 'signup' %}" class="btn btn-light btn-lg">Sign Up Now</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}

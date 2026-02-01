@@ -1,0 +1,773 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}Score Viewer | REA - Music Education{% endblock %}
+
+{% block extra_css %}
+<style>
+    #score-container {
+        width: 100%;
+        overflow-x: auto;
+        padding: 1rem;
+        background-color: #fff;
+        border-radius: 0.5rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+    
+    .control-panel {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+    
+    .control-section {
+        flex: 1;
+        min-width: 200px;
+    }
+    
+    .playing-controls {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    .playing-controls button {
+        flex: 1;
+    }
+    
+    .note-highlight {
+        fill: #3b82f6;
+        opacity: 0.3;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'home' %}">Home</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'exercise-dashboard' %}">Exercises</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Create Exercise</li>
+        </ol>
+    </nav>
+
+    <div class="card mb-4">
+        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+            <h2 class="mb-0">Interactive Exercise</h2>
+            <span class="badge {% if exercise.category == 'pitch' %}bg-success{% else %}bg-primary{% endif %}">
+                {{ exercise.get_category_display }}
+            </span>
+        </div>
+        <div class="card-body">
+            <div class="control-panel">
+                <div class="control-section">
+                    <h5>Playback Controls</h5>
+                    <div class="playing-controls">
+                        <button id="play-btn" class="btn btn-primary">
+                            <i class="fas fa-play me-1"></i> Play
+                        </button>
+                        <button id="pause-btn" class="btn btn-secondary" disabled>
+                            <i class="fas fa-pause me-1"></i> Pause
+                        </button>
+                        <button id="stop-btn" class="btn btn-danger" disabled>
+                            <i class="fas fa-stop me-1"></i> Stop
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="control-section">
+                    <h5>Tempo</h5>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="range" class="form-range" id="tempo-slider" min="40" max="208" step="4" value="120">
+                        <span id="tempo-value" class="badge bg-primary">120 BPM</span>
+                    </div>
+                </div>
+                
+                {% if exercise.voices > 1 %}
+                <div class="control-section">
+                    <h5>Voice Display</h5>
+                    <div class="btn-group" role="group">
+                        <input type="radio" class="btn-check" name="voice-option" id="all-voices" value="all" checked>
+                        <label class="btn btn-outline-primary" for="all-voices">All Voices</label>
+                        
+                        {% for i in "x"|ljust:exercise.voices %}
+                        <input type="radio" class="btn-check" name="voice-option" id="voice-{{ forloop.counter }}" value="{{ forloop.counter }}">
+                        <label class="btn btn-outline-primary" for="voice-{{ forloop.counter }}">Voice {{ forloop.counter }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            
+            <div id="score-container" class="tab-content active" data-tab="score">
+				<div id="output"></div>
+			</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+
+{% if exercise.midi %}
+    <script type="text/javascript" src="https://unpkg.com/tone@latest/build/Tone.js"></script>
+    <script type="text/javascript" src="https://unpkg.com/@tonejs/ui@0.0.8/build/tonejs-ui.js"></script>
+    <script type="text/javascript" src="https://unpkg.com/@tonejs/midi"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const { Factory, StaveNote, Accidental, Beam, Formatter, Renderer } = Vex.Flow;
+    let noteGrouped = [];
+    let isDragging = false;
+    let draggedNoteGroup = null;
+    let draggedNoteIndex = null;
+    let originalMidiNote = null;
+    let startY = null;
+    let selectedNoteGroup = null;
+    let selectedNoteIndex = null;
+    let currentScale = 1.0;
+
+    function midiToVexNote(midiNumber) {
+        const noteNames = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b'];
+        const octave = Math.floor(midiNumber / 12) - 1;
+        const noteName = noteNames[midiNumber % 12];
+        return { 
+            key: noteName.replace('#', ''),
+            octave: octave,
+            accidental: noteName.includes('#') ? '#' : null
+        };
+    }
+    function getDuration(durationTicks, ppq) {
+        if (durationTicks >= ppq * 4) return "w"; // whole note
+        if (durationTicks >= ppq * 2) return "h"; // half note
+        if (durationTicks >= ppq) return "q"; // quarter note
+        if (durationTicks >= ppq / 2) return "8"; // eighth note
+        if (durationTicks >= ppq / 4) return "16"; // sixteenth note
+        if (durationTicks >= ppq / 8) return "32"; // thirty-second note
+        return "q"; // default to quarter note
+    }
+    function groupNotesByTime(midiNotes) {
+        const noteGroups = {};
+        
+        midiNotes.forEach(note => {
+            if (!noteGroups[note.ticks]) {
+                noteGroups[note.ticks] = {
+                    ticks: note.ticks,
+                    time: note.time,
+                    duration: note.duration,
+                    durationTicks: note.durationTicks,
+                    notes: []
+                };
+            }
+            noteGroups[note.ticks].notes.push(note);
+        });
+        
+        // Convert to array and sort by ticks
+        return Object.values(noteGroups).sort((a, b) => a.ticks - b.ticks);
+    }
+    function renderScore(midi) {
+        const output = document.getElementById('output');
+        output.innerHTML = '';
+        
+        const renderer = new Renderer(output, Renderer.Backends.SVG);
+        
+        const width = 500; //Math.max(500, midi.tracks["0"].notes.length * 80);
+        const height = 200;
+        
+        renderer.resize(width * currentScale, height * currentScale);
+        const context = renderer.getContext();
+        context.scale(currentScale, currentScale);
+        
+        const stave = new Vex.Flow.Stave(10, 40, width - 20);
+        
+        // Set up clef and time signature from MIDI data
+        let timeSignature = "4/4"; // Default
+        /*
+        if (midi.header.timeSignatures && midi.header.timeSignatures.length > 0) {
+            const ts = midi.header.timeSignatures[0].timeSignature;
+            timeSignature = `${ts[0]}/${ts[1]}`;
+        }
+        */
+        
+        stave.addClef("treble").addTimeSignature(timeSignature);
+        stave.setContext(context).draw();
+        
+        // Group notes by time for chords
+        noteGrouped = groupNotesByTime(midi.tracks["0"].notes);
+        
+        // Create VexFlow notes
+        const vexNotes = noteGrouped.map(group => {
+            const duration = getDuration(group.durationTicks, midi.header.ppq);
+            
+            // For multiple notes at same time, create a chord
+            if (group.notes.length > 1) {
+                const keys = group.notes.map(note => {
+                    const vexNote = midiToVexNote(note.midi);
+                    return `${vexNote.key}/${vexNote.octave}`;
+                });
+                
+                const staveNote = new StaveNote({ 
+                    keys: keys, 
+                    duration: duration 
+                });
+                
+                // Add accidentals if needed
+                group.notes.forEach((note, i) => {
+                    const vexNote = midiToVexNote(note.midi);
+                    if (vexNote.accidental) {
+                        staveNote.addModifier(new Accidental(vexNote.accidental), i);
+                    }
+                });
+                
+                // Add tick identifier for highlighting
+                staveNote.setAttribute('id', `note-${group.ticks}`);
+                staveNote.addClass(`note-${group.ticks}`);
+                
+                return staveNote;
+            } else {
+                // Single note
+                const note = group.notes[0];
+                const vexNote = midiToVexNote(note.midi);
+                const staveNote = new StaveNote({ 
+                    keys: [`${vexNote.key}/${vexNote.octave}`], 
+                    duration: duration 
+                });
+                
+                if (vexNote.accidental) {
+                    staveNote.addModifier(new Accidental(vexNote.accidental), 0);
+                }
+                
+                // Add tick identifier for highlighting
+                staveNote.setAttribute('id', `note-${note.ticks}`);
+                staveNote.addClass(`note-${note.ticks}`);
+                
+                return staveNote;
+            }
+        });
+        
+        // Create beams for eighth notes and shorter
+        const beams = Beam.generateBeams(vexNotes);
+        
+        // Format and draw
+        Formatter.FormatAndDraw(context, stave, vexNotes);
+        
+        // Draw beams
+        beams.forEach(beam => {
+            beam.setContext(context).draw();
+        });
+
+        setupNoteSelection();
+    }
+
+    function handleKeyboardControl(event) {
+        // Only process if we have a selected note
+        if (!selectedNoteGroup || selectedNoteIndex === null) return;
+        
+        switch (event.key) {
+            case 'ArrowUp':
+                event.preventDefault();
+                moveSelectedNote(1); // Move up one semitone
+                break;
+            case 'ArrowDown':
+                event.preventDefault();
+                moveSelectedNote(-1); // Move down one semitone
+                break;
+        }
+    }
+    function moveSelectedNote(semitones) {
+        if (!selectedNoteGroup || selectedNoteIndex === null) return;
+        
+        const note = selectedNoteGroup.notes[selectedNoteIndex];
+        
+        // Update the MIDI note number
+        const newMidiNote = note.midi + semitones;
+        
+        // Constrain to reasonable MIDI range (21-108)
+        const constrainedMidiNote = Math.min(Math.max(newMidiNote, 21), 108);
+        
+        // Update the note in our data structure
+        note.midi = constrainedMidiNote;
+        
+        // Update the note name based on the new MIDI number
+        const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const octave = Math.floor(constrainedMidiNote / 12) - 1;
+        const noteName = noteNames[constrainedMidiNote % 12];
+        note.name = `${noteName}${octave}`;
+        
+        // Re-render the score
+        renderScore(currentMidi);
+        
+        // Re-select and highlight the note
+        // Find the group index again after re-rendering
+        const groupIndex = noteGrouped.findIndex(group => group.ticks === selectedNoteGroup.ticks);
+        if (groupIndex >= 0) {
+            selectNote(groupIndex, selectedNoteIndex);
+        }
+        
+        // Update the JSON display if it's open
+        //document.querySelector("#ResultsText").value = JSON.stringify(currentMidi, undefined, 2);
+    }
+    
+    function handleNoteDrag(event) {
+        if (!isDragging || !draggedNoteGroup || draggedNoteIndex === null) return;
+
+        const deltaY = startY - event.clientY;
+        if (Math.abs(deltaY) < 5) return;  // Only start dragging after threshold
+
+        const semitoneChange = Math.round(deltaY / 5);
+        const newMidiNote = originalMidiNote + semitoneChange;
+
+        const constrainedMidiNote = Math.min(Math.max(newMidiNote, 21), 108);
+        draggedNoteGroup.notes[draggedNoteIndex].midi = constrainedMidiNote;
+
+        const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const octave = Math.floor(constrainedMidiNote / 12) - 1;
+        const noteName = noteNames[constrainedMidiNote % 12];
+        draggedNoteGroup.notes[draggedNoteIndex].name = `${noteName}${octave}`;
+
+        renderScore(currentMidi);
+
+        // After rerender, re-select the note
+        const groupIndex = noteGrouped.findIndex(group => group.ticks === draggedNoteGroup.ticks);
+        if (groupIndex >= 0) {
+            selectNote(groupIndex, draggedNoteIndex);
+        }
+    }
+    function endNoteDrag() {
+        if (isDragging) {
+            isDragging = false;
+
+            // Update the JSON display
+            //document.querySelector("#ResultsText").value = JSON.stringify(currentMidi, undefined, 2);
+
+            // Reset drag state
+            draggedNoteGroup = null;
+            draggedNoteIndex = null;
+            originalMidiNote = null;
+            startY = null;
+        }
+    }
+
+    function setupNoteSelection() {
+        const vfContainer = document.querySelector('#output svg');
+        if (!vfContainer) return;
+        
+        // Make sure we have pointer events on the SVG
+        vfContainer.style.pointerEvents = 'auto';
+        
+        // Add click handlers to note elements
+        const noteElements = vfContainer.querySelectorAll('.vf-stavenote');
+        noteElements.forEach((noteElement, groupIndex) => {
+            const noteheads = noteElement.querySelectorAll('.vf-notehead');
+            noteheads.forEach((notehead, noteIndex) => {
+                notehead.style.cursor = 'pointer';
+                notehead.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();
+                    startY = e.clientY;
+
+                    const group = noteGrouped[groupIndex];
+                    const note = group.notes[noteIndex];
+
+                    // Prepare for drag
+                    isDragging = true;
+                    draggedNoteGroup = group;
+                    draggedNoteIndex = noteIndex;
+                    originalMidiNote = note.midi;
+
+                    // Select the note visually
+                    selectNote(groupIndex, noteIndex);
+                });
+
+                document.addEventListener('mousemove', handleNoteDrag);
+                document.addEventListener('mouseup', endNoteDrag);
+            });
+        });
+        
+        // Add click handler to the staff to deselect when clicking elsewhere
+        vfContainer.addEventListener('click', (e) => {
+            // Only deselect if the click wasn't on a notehead
+            if (!e.target.closest('.vf-notehead')) {
+                deselectNote();
+            }
+        });
+        
+        // Add keyboard event listener for arrow keys
+        document.addEventListener('keydown', handleKeyboardControl);
+    }
+    function selectNote(groupIndex, noteIndex) {
+        // Deselect any previously selected note
+        deselectNote();
+        
+        // Get the note group and note we're selecting
+        selectedNoteGroup = noteGrouped[groupIndex];
+        if (!selectedNoteGroup) return;
+        
+        // For chords, find the specific note being selected
+        selectedNoteIndex = noteIndex;
+        if (selectedNoteGroup.notes && selectedNoteIndex < selectedNoteGroup.notes.length) {
+            // Highlight the selected note
+            highlightNote(selectedNoteGroup.ticks, selectedNoteIndex);
+        }
+    }
+    function deselectNote() {
+        if (selectedNoteGroup) {
+            clearNoteHighlights();
+            selectedNoteGroup = null;
+            selectedNoteIndex = null;
+        }
+    }
+    function startNoteHighlighting(midi) {
+        // Clear any existing highlights
+        clearNoteHighlights();
+        
+        const now = Tone.now() + 0.5;
+        midi.tracks["0"].notes.forEach((note) => {
+            // Schedule highlight to appear when note starts
+            Tone.Transport.schedule((time) => {
+                highlightNote(note.ticks);
+            }, note.time + now);
+            
+            // Schedule highlight to be removed when note ends
+            Tone.Transport.schedule((time) => {
+                unhighlightNote(note.ticks);
+            }, note.time + note.duration + now);
+        });
+    }
+    function highlightNote(ticks, specificNoteIndex = null) {
+        // Find the note group at the specified tick position
+        const noteGroup = noteGrouped.find(group => group.ticks === ticks);
+        if (!noteGroup) return;
+        
+        // Find the index of this group in our noteGrouped array
+        const groupIndex = noteGrouped.indexOf(noteGroup);
+        if (groupIndex < 0) return;
+        
+        // Get the corresponding VexFlow stave note
+        const vfContainer = document.querySelector('#output svg');
+        if (!vfContainer) return;
+        
+        // Target the specific note or chord based on its position in the score
+        const noteElements = vfContainer.querySelectorAll('.vf-stavenote');
+        if (groupIndex < noteElements.length) {
+            const noteElement = noteElements[groupIndex];
+            
+            // For all noteheads in this note/chord
+            const noteheads = noteElement.querySelectorAll('.vf-notehead path');
+            
+            // If a specific note in a chord is specified, only highlight that one
+            if (specificNoteIndex !== null && specificNoteIndex < noteheads.length) {
+                const path = noteheads[specificNoteIndex];
+                // Store original color for restoration
+                if (!path.getAttribute('data-original-fill')) {
+                    path.setAttribute('data-original-fill', path.getAttribute('fill') || 'black');
+                }
+                if (!path.getAttribute('data-original-stroke')) {
+                    path.setAttribute('data-original-stroke', path.getAttribute('stroke') || 'none');
+                }
+                
+                // Apply highlight
+                path.setAttribute('fill', '#ff5722');
+                path.setAttribute('stroke', '#ff5722');
+                path.setAttribute('data-highlighted', 'true');
+            } else {
+                // Highlight all notes in the chord
+                noteheads.forEach(path => {
+                    // Store original color for restoration
+                    if (!path.getAttribute('data-original-fill')) {
+                        path.setAttribute('data-original-fill', path.getAttribute('fill') || 'black');
+                    }
+                    if (!path.getAttribute('data-original-stroke')) {
+                        path.setAttribute('data-original-stroke', path.getAttribute('stroke') || 'none');
+                    }
+                    
+                    // Apply highlight
+                    path.setAttribute('fill', '#ff5722');
+                    path.setAttribute('stroke', '#ff5722');
+                    path.setAttribute('data-highlighted', 'true');
+                });
+            }
+        }
+    }
+    function unhighlightNote(ticks) {
+        // Find the note group
+        const noteGroup = noteGrouped.find(group => group.ticks === ticks);
+        if (!noteGroup) return;
+        
+        const groupIndex = noteGrouped.indexOf(noteGroup);
+        if (groupIndex < 0) return;
+        
+        // Get the corresponding VexFlow stave note
+        const vfContainer = document.querySelector('#output svg');
+        if (!vfContainer) return;
+        
+        const noteElements = vfContainer.querySelectorAll('.vf-stavenote');
+        if (groupIndex < noteElements.length) {
+            const noteElement = noteElements[groupIndex];
+            
+            // Restore original colors
+            const noteheads = noteElement.querySelectorAll('.vf-notehead path');
+            noteheads.forEach(path => {
+                if (path.getAttribute('data-highlighted') === 'true') {
+                    path.setAttribute('fill', path.getAttribute('data-original-fill') || 'black');
+                    path.setAttribute('stroke', path.getAttribute('data-original-stroke') || 'none');
+                    path.removeAttribute('data-highlighted');
+                }
+            });
+        }
+    }
+    function clearNoteHighlights() {
+        document.querySelectorAll('path[data-highlighted="true"]').forEach(path => {
+            path.setAttribute('fill', path.getAttribute('data-original-fill') || 'black');
+            path.setAttribute('stroke', path.getAttribute('data-original-stroke') || 'none');
+            path.removeAttribute('data-highlighted');
+        });
+    }
+
+    let currentMidi = null;
+    async function parseFile(file) {
+        let arrayBuffer;
+
+        if (typeof file === "string") {
+            // It's a URL
+            try {
+                const response = await fetch(file);
+                if (!response.ok) {
+                    throw new Error("Failed to fetch the MIDI file");
+                }
+                arrayBuffer = await response.arrayBuffer();
+            } catch (error) {
+                console.error("Error fetching MIDI file:", error);
+                return;
+            }
+        } else {
+            // It's a File object
+            arrayBuffer = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // Proceed with MIDI parsing
+        const midi = new Midi(arrayBuffer);
+
+        currentMidi = midi;
+        noteGrouped = new Array([]);
+        isDragging = false;
+        draggedNoteGroup = null;
+        draggedNoteIndex = null;
+        originalMidiNote = null;
+        startY = null;
+        selectedNoteGroup = null;
+        selectedNoteIndex = null;
+        currentScale = 1.0;
+
+        renderScore(midi);
+    }
+
+    const synths = [];
+    let playbackTimeout = null;
+    let playing = false;  // Logical state
+
+    //const toggle = document.querySelector("tone-play-toggle");
+    const playBtn = document.getElementById('play-btn');
+    const pauseBtn = document.getElementById('pause-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const tempoSlider = document.getElementById('tempo-slider');
+    const tempoValue = document.getElementById('tempo-value');
+
+    playBtn.addEventListener("play", (e) => {
+        playing = e.detail;
+        
+        if (playing && currentMidi) {
+            const now = Tone.now() + 0.5;
+
+            // Clear any previous synths and scheduled timeouts
+            while (synths.length) {
+                const synth = synths.shift();
+                synth.disconnect();
+            }
+            clearTimeout(playbackTimeout);
+
+            startNoteHighlighting(currentMidi);
+
+            currentMidi.tracks.forEach((track) => {
+                const synth = new Tone.PolySynth(Tone.Synth, {
+                    envelope: {
+                        attack: 0.02,
+                        decay: 0.1,
+                        sustain: 0.3,
+                        release: 1,
+                    },
+                }).toDestination();
+                synths.push(synth);
+
+                track.notes.forEach((note) => {
+                    synth.triggerAttackRelease(
+                        note.name,
+                        note.duration,
+                        note.time + now,
+                        note.velocity
+                    );
+                });
+            });
+
+            const lastNoteEndTime = Math.max(
+                ...currentMidi.tracks.flatMap(track =>
+                    track.notes.map(note => note.time + note.duration)
+                )
+            );
+
+            Tone.Transport.start("+0.1");
+
+            playbackTimeout = setTimeout(() => {
+                // Cleanup once playback finishes naturally
+                Tone.Transport.stop();
+                clearNoteHighlights();
+                clearTimeout(playbackTimeout);
+
+                while (synths.length) {
+                    const synth = synths.shift();
+                    synth.disconnect();
+                }
+
+                // Force sync logical and UI state
+                playing = false;
+                playBtn.disabled = false;
+                pauseBtn.disabled = true;
+                stopBtn.disabled = true;
+
+            }, (lastNoteEndTime + 1.5) * 1000);  // Allow for release tail
+
+        } else {
+            // Manual stop
+            Tone.Transport.stop();
+            clearNoteHighlights();
+            clearTimeout(playbackTimeout);
+
+            while (synths.length) {
+                const synth = synths.shift();
+                synth.disconnect();
+            }
+
+            playing = false;
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+            stopBtn.disabled = true;
+        }
+    });
+
+    currentMidi = parseFile("{{exercise.midi.url}}");
+    
+    // Play button click handler
+    playBtn.addEventListener('click', () => {
+        Tone.Transport.start();
+        
+        playing = true;
+        playBtn.disabled = true;
+        pauseBtn.disabled = false;
+        stopBtn.disabled = false;
+                
+        if (playing && currentMidi) {
+            const now = Tone.now() + 0.5;
+
+            // Clear any previous synths and scheduled timeouts
+            while (synths.length) {
+                const synth = synths.shift();
+                synth.disconnect();
+            }
+            clearTimeout(playbackTimeout);
+
+            startNoteHighlighting(currentMidi);
+
+            currentMidi.tracks.forEach((track) => {
+                const synth = new Tone.PolySynth(Tone.Synth, {
+                    envelope: {
+                        attack: 0.02,
+                        decay: 0.1,
+                        sustain: 0.3,
+                        release: 1,
+                    },
+                }).toDestination();
+                synths.push(synth);
+
+                track.notes.forEach((note) => {
+                    synth.triggerAttackRelease(
+                        note.name,
+                        note.duration,
+                        note.time + now,
+                        note.velocity
+                    );
+                });
+            });
+
+            const lastNoteEndTime = Math.max(
+                ...currentMidi.tracks.flatMap(track =>
+                    track.notes.map(note => note.time + note.duration)
+                )
+            );
+
+            Tone.Transport.start("+0.1");
+
+            playbackTimeout = setTimeout(() => {
+                // Cleanup once playback finishes naturally
+                Tone.Transport.stop();
+                clearNoteHighlights();
+                clearTimeout(playbackTimeout);
+
+                while (synths.length) {
+                    const synth = synths.shift();
+                    synth.disconnect();
+                }
+
+                // Force sync logical and UI state
+                playing = false;
+                playBtn.disabled = false;
+                pauseBtn.disabled = true;
+                stopBtn.disabled = true;
+
+            }, (lastNoteEndTime + 1.5) * 1000);  // Allow for release tail
+
+        } else {
+            // Manual stop
+            Tone.Transport.stop();
+            clearNoteHighlights();
+            clearTimeout(playbackTimeout);
+
+            while (synths.length) {
+                const synth = synths.shift();
+                synth.disconnect();
+            }
+
+            playing = false;
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+            stopBtn.disabled = true;
+        }
+    });
+    // Pause button click handler
+    pauseBtn.addEventListener('click', () => {
+        //Tone.Transport.pause();
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+    });
+    // Stop button click handler
+    stopBtn.addEventListener('click', () => {
+        //Tone.Transport.stop();
+        playBtn.disabled = false;
+        pauseBtn.disabled = true;
+        stopBtn.disabled = true;
+    });
+    // Tempo slider change handler
+    tempoSlider.addEventListener('input', () => {
+        const tempo = parseInt(tempoSlider.value);
+        player.tempo = tempo;
+        tempoValue.textContent = `${tempo} BPM`;
+    });
+    
+});
+</script>
+{% endblock %}

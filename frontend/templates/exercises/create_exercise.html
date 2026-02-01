@@ -1,0 +1,1043 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}Score Editor | REA - Music Education{% endblock %}
+
+{% block extra_css %}
+<style>
+    #score-container {
+        width: 100%;
+        overflow-x: auto;
+        padding: 1rem;
+        background-color: #fff;
+        border-radius: 0.5rem;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+    
+    .control-panel {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+    
+    .control-section {
+        flex: 1;
+        min-width: 200px;
+    }
+    
+    .playing-controls {
+        display: flex;
+        gap: 0.5rem;
+    }
+    
+    .playing-controls button {
+        flex: 1;
+    }
+    
+    .note-highlight {
+        fill: #3b82f6;
+        opacity: 0.3;
+    }
+
+    .editor-tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+        padding: 0.5rem;
+        background-color: #f3f4f6;
+        border-radius: 0.5rem;
+    }
+
+    .tool-group {
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid #e5e7eb;
+        padding-right: 0.75rem;
+        margin-right: 0.5rem;
+    }
+
+    .tool-group:last-child {
+        border-right: none;
+    }
+
+    .tool-group-title {
+        font-size: 0.8rem;
+        color: #6b7280;
+        margin-bottom: 0.25rem;
+    }
+
+    .btn-tool {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+    }
+
+    .btn-tool.active {
+        background-color: #3b82f6;
+        color: white;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+    <nav aria-label="breadcrumb" class="mb-4">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{% url 'home' %}">Home</a></li>
+            <li class="breadcrumb-item"><a href="{% url 'exercise-dashboard' %}">Exercises</a></li>
+            <li class="breadcrumb-item active" aria-current="page">Create Exercise</li>
+        </ol>
+    </nav>
+
+    <div class="card mb-4">
+        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+            <h2 class="mb-0">Create New Score</h2>
+            <button id="export-midi" class="btn btn-success">
+                <i class="fas fa-download me-1"></i> Export MIDI
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="editor-tools">
+                <div class="tool-group">
+                    <span class="tool-group-title">Action</span>
+                    <div class="btn-group">
+                        <button id="tool-add" class="btn btn-sm btn-tool active">
+                            <i class="fas fa-plus-circle me-1"></i> Add
+                        </button>
+                        <button id="tool-edit" class="btn btn-sm btn-tool">
+                            <i class="fas fa-edit me-1"></i> Edit
+                        </button>
+                        <button id="tool-delete" class="btn btn-sm btn-tool">
+                            <i class="fas fa-trash me-1"></i> Delete
+                        </button>
+                    </div>
+                </div>
+
+                <div class="tool-group">
+                    <span class="tool-group-title">Note Duration</span>
+                    <div class="btn-group">
+                        <button id="duration-w" class="btn btn-sm btn-tool">
+                            <i class="fas fa-braille me-1"></i> Whole
+                        </button>
+                        <button id="duration-h" class="btn btn-sm btn-tool">
+                            <i class="fas fa-braille me-1"></i> Half
+                        </button>
+                        <button id="duration-q" class="btn btn-sm btn-tool active">
+                            <i class="fas fa-braille me-1"></i> Quarter
+                        </button>
+                        <button id="duration-8" class="btn btn-sm btn-tool">
+                            <i class="fas fa-braille me-1"></i> Eighth
+                        </button>
+                        <button id="duration-16" class="btn btn-sm btn-tool">
+                            <i class="fas fa-braille me-1"></i> 16th
+                        </button>
+                    </div>
+                </div>
+
+                <div class="tool-group">
+                    <span class="tool-group-title">Accidental</span>
+                    <div class="btn-group">
+                        <button id="accidental-flat" class="btn btn-sm btn-tool">
+                            <i class="fas fa-flat-alt me-1"></i> ♭
+                        </button>
+                        <button id="accidental-natural" class="btn btn-sm btn-tool active">
+                            <i class="fas fa-natural-alt me-1"></i> ♮
+                        </button>
+                        <button id="accidental-sharp" class="btn btn-sm btn-tool">
+                            <i class="fas fa-sharp-alt me-1"></i> ♯
+                        </button>
+                    </div>
+                </div>
+
+                <div class="tool-group">
+                    <span class="tool-group-title">Staff</span>
+                    <div class="btn-group">
+                        <button id="add-measure" class="btn btn-sm btn-primary">
+                            <i class="fas fa-plus me-1"></i> Add Measure
+                        </button>
+                        <button id="clear-score" class="btn btn-sm btn-danger">
+                            <i class="fas fa-trash-alt me-1"></i> Clear All
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-panel">
+                <div class="control-section">
+                    <h5>Playback Controls</h5>
+                    <div class="playing-controls">
+                        <button id="play-btn" class="btn btn-primary">
+                            <i class="fas fa-play me-1"></i> Play
+                        </button>
+                        <button id="pause-btn" class="btn btn-secondary" disabled>
+                            <i class="fas fa-pause me-1"></i> Pause
+                        </button>
+                        <button id="stop-btn" class="btn btn-danger" disabled>
+                            <i class="fas fa-stop me-1"></i> Stop
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="control-section">
+                    <h5>Tempo</h5>
+                    <div class="d-flex align-items-center gap-2">
+                        <input type="range" class="form-range" id="tempo-slider" min="40" max="208" step="4" value="120">
+                        <span id="tempo-value" class="badge bg-primary">120 BPM</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="score-container" class="tab-content active" data-tab="score">
+                <div id="output"></div>
+            </div>
+
+            <button id="save-exercise" class="btn btn btn-secondary mt-3 gap-2">
+                <i class="fas fa-upload me-1"></i> Save Exercise
+            </button>
+        </div>
+        
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script type="text/javascript" src="https://unpkg.com/tone@latest/build/Tone.js"></script>
+<script type="text/javascript" src="https://unpkg.com/@tonejs/ui@0.0.8/build/tonejs-ui.js"></script>
+<script type="text/javascript" src="https://unpkg.com/@tonejs/midi"></script>
+<script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const { Factory, StaveNote, Accidental, Beam, Formatter, Renderer, Voice, Stave } = Vex.Flow;
+
+    // State variables
+    let scoreData = {
+        measures: [
+            {
+                notes: [],
+                timeSignature: "4/4"
+            }
+        ],
+        keySig: "C",
+        tempo: 120
+    };
+
+    let currentTool = 'add'; // 'add', 'edit', 'delete'
+    let currentDuration = 'q';
+    let currentAccidental = '';
+    let selectedNoteInfo = null;
+    let isDragging = false;
+    let startY = null;
+    let currentScale = 1.0;
+
+    let renderedStaves = [];
+    let renderedVexNotes = []; // Store VexFlow StaveNote objects
+
+    // Initialize the editor
+    function initEditor() {
+        setupToolButtons();
+        renderScore();
+        setupNoteInteraction(); // Combined setup for adding, editing, deleting
+        setupPlayback();
+    }
+
+    // Set up tool selection buttons
+    function setupToolButtons() {
+        // Tool buttons
+        document.getElementById('tool-add').addEventListener('click', () => setTool('add'));
+        document.getElementById('tool-edit').addEventListener('click', () => setTool('edit'));
+        document.getElementById('tool-delete').addEventListener('click', () => setTool('delete'));
+
+        // Duration buttons
+        document.getElementById('duration-w').addEventListener('click', () => setDuration('w'));
+        document.getElementById('duration-h').addEventListener('click', () => setDuration('h'));
+        document.getElementById('duration-q').addEventListener('click', () => setDuration('q'));
+        document.getElementById('duration-8').addEventListener('click', () => setDuration('8'));
+        document.getElementById('duration-16').addEventListener('click', () => setDuration('16'));
+
+        // Accidental buttons
+        document.getElementById('accidental-flat').addEventListener('click', () => setAccidental('b'));
+        document.getElementById('accidental-natural').addEventListener('click', () => setAccidental('n'));
+        document.getElementById('accidental-sharp').addEventListener('click', () => setAccidental('#'));
+
+        // Staff manipulation
+        document.getElementById('add-measure').addEventListener('click', addMeasure);
+        document.getElementById('clear-score').addEventListener('click', clearScore);
+
+        // Export MIDI
+        document.getElementById('export-midi').addEventListener('click', exportToMidi);
+
+        document.getElementById('save-exercise').addEventListener('click', saveExercise);
+    }
+
+    // Set the current tool
+    function setTool(tool) {
+        currentTool = tool;
+        document.querySelectorAll('#tool-add, #tool-edit, #tool-delete').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.getElementById(`tool-${tool}`).classList.add('active');
+        clearNoteHighlights();
+        selectedNoteInfo = null; // Deselect any previously selected note
+    }
+
+    // Set the current note duration
+    function setDuration(duration) {
+        currentDuration = duration;
+        document.querySelectorAll('[id^="duration-"]').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.getElementById(`duration-${duration}`).classList.add('active');
+    }
+
+    // Set the current accidental
+    function setAccidental(accidental) {
+        currentAccidental = accidental;
+        document.querySelectorAll('[id^="accidental-"]').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.getElementById(`accidental-${accidental === 'b' ? 'flat' : accidental === '#' ? 'sharp' : 'natural'}`).classList.add('active');
+    }
+
+    // Convert Y position to note name and octave
+    function yToNote(y, stave) {
+        const staveTop = stave.getYForLine(0);
+        const lineHeight = stave.getYForLine(1) - staveTop;
+        const relativeY = y - staveTop;
+        const position = Math.round(relativeY / (lineHeight / 2));
+        const baseNotes = ['f/5', 'e/5', 'd/5', 'c/5', 'b/4', 'a/4', 'g/4', 'f/4', 'e/4', 'd/4', 'c/4', 'b/3', 'a/3', 'g/3', 'f/3'];
+        const index = Math.max(0, Math.min(position, baseNotes.length - 1));
+        return baseNotes[index];
+    }
+
+    // Create a new note object
+    function createNoteData(key, duration, accidental = null) {
+        const [noteName, octave] = key.split('/');
+        const noteToMidi = {
+            'c': 0, 'c#': 1, 'db': 1, 'd': 2, 'd#': 3, 'eb': 3,
+            'e': 4, 'f': 5, 'f#': 6, 'gb': 6, 'g': 7, 'g#': 8,
+            'ab': 8, 'a': 9, 'a#': 10, 'bb': 10, 'b': 11
+        };
+        let midiNote = (parseInt(octave) + 1) * 12;
+        midiNote += noteToMidi[noteName.toLowerCase()];
+        if (accidental === '#') midiNote += 1;
+        if (accidental === 'b') midiNote -= 1;
+        const durationTicks = {
+            'w': 1920, 'h': 960, 'q': 480, '8': 240, '16': 120
+        }[duration];
+        return {
+            key: key,
+            duration: duration,
+            accidental: accidental,
+            midiNote: midiNote,
+            ticks: 0,
+            durationTicks: durationTicks
+        };
+    }
+
+    // Add a note to the score
+    function addNote(measureIndex, key, duration, accidental = null) {
+        if (measureIndex < 0 || measureIndex >= scoreData.measures.length) {
+            console.error('Invalid measure index:', measureIndex);
+            return;
+        }
+        const noteData = createNoteData(key, duration, accidental);
+        scoreData.measures[measureIndex].notes.push(noteData);
+        updateNotePositions();
+        renderScore();
+    }
+
+    // Update the time position of all notes within a measure
+    function updateNotePositions() {
+        scoreData.measures.forEach(measure => {
+            measure.notes.sort((a, b) => a.ticks - b.ticks);
+            let currentTick = 0;
+            measure.notes.forEach(note => {
+                note.ticks = currentTick;
+                currentTick += note.durationTicks;
+            });
+        });
+    }
+
+    // Remove a note from the score
+    function removeNote(measureIndex, noteIndex) {
+        if (measureIndex < 0 || measureIndex >= scoreData.measures.length) {
+            console.error('Invalid measure index:', measureIndex);
+            return;
+        }
+        const measure = scoreData.measures[measureIndex];
+        if (noteIndex < 0 || noteIndex >= measure.notes.length) {
+            console.error('Invalid note index:', noteIndex);
+            return;
+        }
+        measure.notes.splice(noteIndex, 1);
+        updateNotePositions();
+        renderScore();
+    }
+
+    // Add a new measure to the score
+    function addMeasure() {
+        scoreData.measures.push({
+            notes: [],
+            timeSignature: scoreData.measures[0].timeSignature
+        });
+        renderScore();
+    }
+
+    // Clear the entire score
+    function clearScore() {
+        if (confirm('Are you sure you want to clear the entire score?')) {
+            scoreData.measures = [{
+                notes: [],
+                timeSignature: "4/4"
+            }];
+            renderScore();
+        }
+    }
+
+    // Render the score to the canvas
+    function renderScore() {
+        const output = document.getElementById('output');
+        output.innerHTML = '';
+
+        const renderer = new Renderer(output, Renderer.Backends.SVG);
+        const width = Math.max(500, scoreData.measures.length * 300);
+        const height = 200;
+
+        renderer.resize(width * currentScale, height * currentScale);
+        const context = renderer.getContext();
+        context.scale(currentScale, currentScale);
+
+        renderedStaves = [];
+        renderedVexNotes = []; // This will now be a 2D array
+
+        scoreData.measures.forEach((measure, measureIndex) => {
+            const stave = new Stave(
+                10 + measureIndex * 290,
+                40,
+                290
+            );
+
+            if (measureIndex === 0) {
+                stave.addClef("treble").addTimeSignature(measure.timeSignature);
+            }
+
+            stave.setContext(context).draw();
+            renderedStaves.push(stave);
+
+            const vexNotes = measure.notes.map((note, index) => {
+                const staveNote = new StaveNote({
+                    keys: [note.key],
+                    duration: note.duration
+                });
+
+                if (note.accidental) {
+                    staveNote.addModifier(new Accidental(note.accidental), 0);
+                }
+
+                // We are no longer relying on setAttribute for DOM retrieval
+                return staveNote;
+            });
+
+            renderedVexNotes.push(vexNotes);
+
+            const beams = Beam.generateBeams(vexNotes.filter(note =>
+                note.getDuration() === "8" || note.getDuration() === "16"
+            ));
+
+            if (vexNotes.length > 0) {
+                Formatter.FormatAndDraw(context, stave, vexNotes);
+                beams.forEach(beam => {
+                    beam.setContext(context).draw();
+                });
+            }
+        });
+    }
+
+    // Set up note interaction (add, edit, delete)
+    function setupNoteInteraction() {
+        const output = document.getElementById('output');
+
+        output.addEventListener('click', function(e) {
+            const svgElement = e.target.closest('svg');
+            if (!svgElement) return;
+
+            const rect = svgElement.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / currentScale;
+            const y = (e.clientY - rect.top) / currentScale;
+
+            let clickedStave = null;
+            let clickedMeasureIndex = -1;
+
+            renderedStaves.forEach((stave, index) => {
+                const staveX = stave.getX();
+                const staveY = stave.getY();
+                const staveWidth = stave.getWidth();
+                const staveHeight = 100; // Approximate height
+
+                if (x >= staveX && x <= staveX + staveWidth &&
+                    y >= staveY && y <= staveY + staveHeight) {
+                    clickedStave = stave;
+                    clickedMeasureIndex = index;
+                    return; // Exit the loop once the stave is found
+                }
+            });
+
+            if (clickedStave) {
+                handleStaveClick(e, clickedStave, clickedMeasureIndex);
+            }
+        });
+
+        document.addEventListener('keydown', handleKeyboardControl);
+    }
+
+    function handleStaveClick(e, stave, measureIndex) {
+        const svgElement = e.target.closest('svg');
+        if (!svgElement) return;
+
+        const rect = svgElement.getBoundingClientRect();
+        const x = (e.clientX - rect.left) / currentScale;
+        const y = (e.clientY - rect.top) / currentScale;
+
+        if (measureIndex >= 0 && measureIndex < renderedVexNotes.length && renderedVexNotes[measureIndex]) {
+            const vexNotesInMeasure = renderedVexNotes[measureIndex];
+
+            for (let i = 0; i < vexNotesInMeasure.length; i++) {
+                const vexNote = vexNotesInMeasure[i];
+                const boundingBox = vexNote.getBoundingBox();
+
+                // Check if the click coordinates are within the note's bounding box
+                if (x >= boundingBox.x && x <= boundingBox.x + boundingBox.w &&
+                    y >= boundingBox.y && y <= boundingBox.y + boundingBox.h) {
+
+                    console.log('Clicked on note at measure:', measureIndex, 'index:', i);
+
+                    if (currentTool === 'edit') {
+                        selectedNoteInfo = {
+                            measureIndex: measureIndex,
+                            noteIndex: i,
+                            // We might not need the DOM element anymore
+                        };
+                        highlightNote(measureIndex, i);
+                    } else if (currentTool === 'delete') {
+                        removeNote(measureIndex, i);
+                    }
+                    return; // Found the note, exit
+                }
+            }
+        }
+
+        // If not in edit or delete mode, handle adding a new note
+        if (currentTool === 'add') {
+            const noteKey = yToNote(y, stave);
+            const measure = scoreData.measures[measureIndex];
+            let newPosition = 0;
+            if (measure.notes.length > 0) {
+                const lastNote = measure.notes[measure.notes.length - 1];
+                newPosition = lastNote.ticks + lastNote.durationTicks;
+            }
+            const measureDuration = 1920;
+            if (newPosition + getDurationTicks(currentDuration) > measureDuration) {
+                console.log('Cannot add note: would exceed measure length');
+                return;
+            }
+            addNoteAtPosition(measureIndex, noteKey, currentDuration, currentAccidental, newPosition);
+        }
+    }
+
+    function addNoteAtPosition(measureIndex, key, duration, accidental, tickPosition) {
+        if (measureIndex < 0 || measureIndex >= scoreData.measures.length) {
+            console.error('Invalid measure index:', measureIndex);
+            return;
+        }
+        const noteData = createNoteData(key, duration, accidental);
+        noteData.ticks = tickPosition;
+        scoreData.measures[measureIndex].notes.push(noteData);
+        updateNotePositions();
+        renderScore();
+    }
+
+    function getDurationTicks(duration) {
+        const durationMapping = {
+            'w': 1920,
+            'h': 960,
+            'q': 480,
+            '8': 240,
+            '16': 120
+        };
+        return durationMapping[duration] || 480;
+    }
+
+    // Handle keyboard controls for editing notes
+    function handleKeyboardControl(e) {
+        if (!selectedNoteInfo) return;
+
+        const { measureIndex, noteIndex } = selectedNoteInfo;
+
+        if (measureIndex < 0 || measureIndex >= scoreData.measures.length ||
+            noteIndex < 0 || noteIndex >= scoreData.measures[measureIndex].notes.length) {
+            selectedNoteInfo = null;
+            return;
+        }
+
+        switch (e.key) {
+            case 'ArrowUp':
+                e.preventDefault();
+                moveSelectedNoteVertically(-1);
+                break;
+
+            case 'ArrowDown':
+                e.preventDefault();
+                moveSelectedNoteVertically(1);
+                break;
+
+            case 'ArrowLeft':
+                e.preventDefault();
+                changeNoteAccidental(-1);
+                break;
+
+            case 'ArrowRight':
+                e.preventDefault();
+                changeNoteAccidental(1);
+                break;
+
+            case 'Delete':
+            case 'Backspace':
+                e.preventDefault();
+                removeNote(selectedNoteInfo.measureIndex, selectedNoteInfo.noteIndex);
+                selectedNoteInfo = null;
+                break;
+        }
+    }
+
+    // Move selected note up or down
+    function moveSelectedNoteVertically(direction) {
+        if (!selectedNoteInfo) return;
+
+        const { measureIndex, noteIndex } = selectedNoteInfo;
+
+        if (measureIndex < 0 || measureIndex >= scoreData.measures.length ||
+            noteIndex < 0 || noteIndex >= scoreData.measures[measureIndex].notes.length) {
+            selectedNoteInfo = null;
+            return;
+        }
+
+        const note = scoreData.measures[measureIndex].notes[noteIndex];
+        const [noteNameWithAccidental, octaveStr] = note.key.split('/');
+        const noteBaseName = noteNameWithAccidental.replace(/[#b]/, '');
+        const accidental = noteNameWithAccidental.includes('#') ? '#' : noteNameWithAccidental.includes('b') ? 'b' : '';
+        let currentOctave = parseInt(octaveStr);
+        const scale = ['c', 'd', 'e', 'f', 'g', 'a', 'b'];
+        let noteIndexInScale = scale.indexOf(noteBaseName.toLowerCase());
+
+        noteIndexInScale += direction;
+
+        if (direction === -1 && noteIndexInScale < 0) {
+            noteIndexInScale = scale.length - 1;
+            currentOctave--;
+        } else if (direction === 1 && noteIndexInScale >= scale.length) {
+            noteIndexInScale = 0;
+            currentOctave++;
+        } else if (noteIndexInScale < 0) {
+            noteIndexInScale = 0; // Prevent going below C3
+            currentOctave = Math.max(3, currentOctave);
+        } else if (noteIndexInScale >= scale.length) {
+            noteIndexInScale = scale.length - 1; // Prevent going above B6
+            currentOctave = Math.min(6, currentOctave);
+        }
+
+        currentOctave = Math.max(3, Math.min(currentOctave, 6)); // Ensure octave stays within a reasonable range
+        const newKey = `${scale[noteIndexInScale]}${accidental}/${currentOctave}`;
+        note.key = newKey;
+
+        const noteToMidiBase = {
+            'c': 0, 'd': 2, 'e': 4, 'f': 5, 'g': 7, 'a': 9, 'b': 11
+        };
+        let midiNote = (currentOctave + 1) * 12 + noteToMidiBase[scale[noteIndexInScale]];
+        if (accidental === '#') midiNote += 1;
+        if (accidental === 'b') midiNote -= 1;
+        note.midiNote = midiNote;
+
+        renderScore();
+        highlightNote(measureIndex, noteIndex);
+    }
+
+    // Change the accidental of the selected note
+    function changeNoteAccidental(direction) {
+        if (!selectedNoteInfo) return;
+
+        const { measureIndex, noteIndex } = selectedNoteInfo;
+
+        if (measureIndex < 0 || measureIndex >= scoreData.measures.length ||
+            noteIndex < 0 || noteIndex >= scoreData.measures[measureIndex].notes.length) {
+            selectedNoteInfo = null;
+            return;
+        }
+
+        const note = scoreData.measures[measureIndex].notes[noteIndex];
+        const accidentals = ['b', '', '#'];
+        let currentIndex = accidentals.indexOf(note.accidental || '');
+        currentIndex = (currentIndex + direction + accidentals.length) % accidentals.length;
+        note.accidental = accidentals[currentIndex];
+
+        const [noteName, octave] = note.key.split('/');
+        const noteBaseName = noteName.replace(/[#b]/, '');
+        const noteToMidiBase = {
+            'c': 0, 'd': 2, 'e': 4, 'f': 5, 'g': 7, 'a': 9, 'b': 11
+        };
+        let midiNote = (parseInt(octave) + 1) * 12 + noteToMidiBase[noteBaseName.toLowerCase()];
+        if (note.accidental === '#') midiNote += 1;
+        if (note.accidental === 'b') midiNote -= 1;
+        note.midiNote = midiNote;
+
+        renderScore();
+        highlightNote(measureIndex, noteIndex);
+    }
+
+    // Highlight a note in the score
+    function highlightNote(measureIndex, noteIndex) {
+        console.log('Highlighting note at measure:', measureIndex, 'index:', noteIndex);
+        clearNoteHighlights();
+
+        const vfContainer = document.querySelector('#output svg');
+        if (!vfContainer) {
+            console.log('SVG container not found for highlighting.');
+            return;
+        }
+
+        const noteElements = vfContainer.querySelectorAll('.vf-stavenote');
+        let targetNoteElement = null;
+
+        noteElements.forEach(element => {
+            const elMeasure = parseInt(element.getAttribute('data-measure'));
+            const elNoteIndex = parseInt(element.getAttribute('data-note-index'));
+            if (elMeasure === measureIndex && elNoteIndex === noteIndex) {
+                targetNoteElement = element;
+                console.log('Found target note element:', targetNoteElement);
+            }
+        });
+
+        if (!targetNoteElement && renderedVexNotes[measureIndex] && renderedVexNotes[measureIndex][noteIndex]) {
+            const allVexNoteElements = Array.from(noteElements);
+            let currentIndex = 0;
+            for (let m = 0; m <= measureIndex; m++) {
+                if (renderedVexNotes[m]) {
+                    for (let n = 0; n < renderedVexNotes[m].length; n++) {
+                        if (m === measureIndex && n === noteIndex) {
+                            targetNoteElement = allVexNoteElements[currentIndex];
+                            console.log('Found target note element (fallback):', targetNoteElement);
+                            break;
+                        }
+                        currentIndex++;
+                    }
+                }
+                if (targetNoteElement) break;
+            }
+        }
+
+        if (targetNoteElement) {
+            const noteheadPaths = targetNoteElement.querySelectorAll('.vf-notehead > path');
+            noteheadPaths.forEach(path => {
+                if (!path.getAttribute('data-original-fill')) {
+                    path.setAttribute('data-original-fill', path.getAttribute('fill') || 'black');
+                    path.setAttribute('data-original-stroke', path.getAttribute('stroke') || 'none');
+                }
+                path.setAttribute('fill', '#ff5722');
+                path.setAttribute('stroke', '#ff5722');
+                path.setAttribute('data-highlighted', 'true');
+            });
+            const stemPath = targetNoteElement.querySelector('.vf-stem > path');
+            if (stemPath) {
+                if (!stemPath.getAttribute('data-original-fill')) {
+                    stemPath.setAttribute('data-original-fill', stemPath.getAttribute('fill') || 'black');
+                }
+                stemPath.setAttribute('fill', '#ff5722');
+                stemPath.setAttribute('data-highlighted', 'true');
+            }
+        } else {
+            console.warn('Could not find rendered note element for measure:', measureIndex, 'index:', noteIndex);
+        }
+    }
+
+    // Clear all note highlights
+    function clearNoteHighlights() {
+        console.log('Clearing note highlights (by color)');
+        const highlightedNoteheads = document.querySelectorAll('.vf-notehead > path[fill="#ff5722"], .vf-notehead > path[stroke="#ff5722"]');
+        console.log('Found highlighted noteheads to clear:', highlightedNoteheads);
+        highlightedNoteheads.forEach(path => {
+            path.setAttribute('fill', path.getAttribute('data-original-fill') || 'black');
+            path.setAttribute('stroke', path.getAttribute('data-original-stroke') || 'none');
+            path.removeAttribute('data-original-fill');
+            path.removeAttribute('data-original-stroke');
+            path.removeAttribute('data-highlighted');
+        });
+
+        const highlightedStems = document.querySelectorAll('.vf-stem > path[fill="#ff5722"]');
+        console.log('Found highlighted stems to clear:', highlightedStems);
+        highlightedStems.forEach(path => {
+            path.setAttribute('fill', path.getAttribute('data-original-fill') || 'black');
+            path.removeAttribute('data-original-fill');
+            path.removeAttribute('data-highlighted');
+        });
+
+        const highlightedStaveNotes = document.querySelectorAll('.vf-stavenote[data-highlighted="true"]');
+        highlightedStaveNotes.forEach(element => {
+            element.removeAttribute('data-highlighted');
+        });
+    }
+
+    // Set up playback functionality
+    function setupPlayback() {
+        const playBtn = document.getElementById('play-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const tempoSlider = document.getElementById('tempo-slider');
+        const tempoValue = document.getElementById('tempo-value');
+
+        let synths = [];
+        let playbackTimeout = null;
+        let noteHighlightTimeouts = [];
+        let playing = false;
+
+        tempoValue.textContent = `${scoreData.tempo} BPM`;
+        tempoSlider.value = scoreData.tempo;
+        
+        playBtn.addEventListener('click', () => {
+            if (playing) return;
+
+            const now = Tone.now() + 0.1;
+
+            while (synths.length) {
+                const synth = synths.shift();
+                synth.disconnect();
+            }
+            clearTimeout(playbackTimeout);
+            noteHighlightTimeouts.forEach(timeout => clearTimeout(timeout));
+            noteHighlightTimeouts = [];
+            clearNoteHighlights(); // Clear any existing highlights at the start
+            console.log('Playback started, highlights cleared.');
+
+            const synth = new Tone.PolySynth(Tone.Synth, {
+                envelope: {
+                    attack: 0.02,
+                    decay: 0.1,
+                    sustain: 0.3,
+                    release: 1,
+                },
+            }).toDestination();
+            synths.push(synth);
+
+            let cumulativeTime = 0; // Keep track of the total time elapsed
+
+            scoreData.measures.forEach((measure, measureIndex) => {
+                const timeSignatureParts = measure.timeSignature.split('/');
+                const beatsPerMeasure = parseInt(timeSignatureParts[0]);
+                const secondsPerBeat = 60 / scoreData.tempo;
+                const measureDurationSeconds = beatsPerMeasure * secondsPerBeat;
+
+                measure.notes.forEach((note, noteIndex) => {
+                    let durationBeats;
+                    switch (note.duration) {
+                        case 'w': durationBeats = 4; break; // Assuming whole note is always 4 beats
+                        case 'h': durationBeats = 2; break;
+                        case 'q': durationBeats = 1; break;
+                        case '8': durationBeats = 0.5; break;
+                        case '16': durationBeats = 0.25; break;
+                        default: durationBeats = 1;
+                    }
+                    const noteDurationSeconds = durationBeats * secondsPerBeat;
+                    const startTime = now + cumulativeTime + (note.ticks / 480) * secondsPerBeat;
+                    const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+                    const octave = Math.floor(note.midiNote / 12) - 1;
+                    const noteName = noteNames[note.midiNote % 12];
+                    const fullNoteName = `${noteName}${octave}`;
+
+                    synth.triggerAttackRelease(fullNoteName, noteDurationSeconds, startTime);
+
+                    const highlightDelay = (startTime - now) * 1000;
+                    const highlightTimeout = setTimeout(() => {
+                        console.log('Highlight timeout triggered for measure:', measureIndex, 'note:', noteIndex);
+                        clearNoteHighlights();
+                        highlightNote(measureIndex, noteIndex);
+
+                        const clearDelay = noteDurationSeconds * 1000;
+                        const clearHighlightTimeout = setTimeout(() => {
+                            console.log('Clear highlight timeout triggered for measure:', measureIndex, 'note:', noteIndex);
+                            // We might need to specifically un-highlight this note
+                            const vfContainer = document.querySelector('#output svg');
+                            if (vfContainer) {
+                                const noteElements = vfContainer.querySelectorAll('.vf-stavenote');
+                                let targetNoteElement = null;
+                                noteElements.forEach(element => {
+                                    const elMeasure = parseInt(element.getAttribute('data-measure'));
+                                    const elNoteIndex = parseInt(element.getAttribute('data-note-index'));
+                                    if (elMeasure === measureIndex && elNoteIndex === noteIndex) {
+                                        targetNoteElement = element;
+                                    }
+                                });
+                                if (targetNoteElement) {
+                                    const noteheadPaths = targetNoteElement.querySelectorAll('.vf-notehead > path[fill="#ff5722"], .vf-notehead > path[stroke="#ff5722"]');
+                                    noteheadPaths.forEach(path => {
+                                        path.setAttribute('fill', path.getAttribute('data-original-fill') || 'black');
+                                        path.setAttribute('stroke', path.getAttribute('data-original-stroke') || 'none');
+                                        path.removeAttribute('data-original-fill');
+                                        path.removeAttribute('data-original-stroke');
+                                        path.removeAttribute('data-highlighted');
+                                    });
+                                    const stemPath = targetNoteElement.querySelector('.vf-stem > path[fill="#ff5722"]');
+                                    if (stemPath) {
+                                        stemPath.setAttribute('fill', stemPath.getAttribute('data-original-fill') || 'black');
+                                        stemPath.removeAttribute('data-original-fill');
+                                        stemPath.removeAttribute('data-highlighted');
+                                    }
+                                    targetNoteElement.removeAttribute('data-highlighted');
+                                }
+                            }
+                        }, clearDelay);
+                        noteHighlightTimeouts.push(clearHighlightTimeout);
+                    }, highlightDelay);
+                    noteHighlightTimeouts.push(highlightTimeout);
+                });
+                cumulativeTime += measureDurationSeconds; // Add the duration of the current measure
+            });
+
+            playing = true;
+            playBtn.disabled = true;
+            pauseBtn.disabled = false;
+            stopBtn.disabled = false;
+        });
+        
+        
+        pauseBtn.addEventListener('click', () => {
+            if (playing) {
+                synths.forEach(synth => synth.releaseAll());
+                noteHighlightTimeouts.forEach(clearTimeout);
+                noteHighlightTimeouts = [];
+                playing = false;
+                playBtn.disabled = false;
+                pauseBtn.disabled = true;
+                stopBtn.disabled = false;
+                clearNoteHighlights(); // Ensure highlights are cleared on pause
+                console.log('Playback paused, highlights cleared.');
+            }
+        });
+
+        stopBtn.addEventListener('click', () => {
+            if (playing) {
+                synths.forEach(synth => synth.releaseAll());
+                noteHighlightTimeouts.forEach(clearTimeout);
+                noteHighlightTimeouts = [];
+                playing = false;
+                playBtn.disabled = false;
+                pauseBtn.disabled = true;
+                stopBtn.disabled = true;
+                clearNoteHighlights(); // Ensure highlights are cleared on stop
+                console.log('Playback stopped, highlights cleared.');
+            }
+        });
+
+        tempoSlider.addEventListener('input', () => {
+            const tempo = parseInt(tempoSlider.value);
+            scoreData.tempo = tempo;
+            tempoValue.textContent = `${tempo} BPM`;
+        });
+    }
+
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                // Does this cookie string begin with the name we want?
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    function saveExercise() {
+        const midi = new Midi(tempos=scoreData.tempo.value);
+        const track = midi.addTrack();
+        let currentTime = 0;
+
+        scoreData.measures.forEach(measure => {
+            measure.notes.forEach(note => {
+                track.addNote({
+                    midi: note.midiNote,
+                    time: currentTime + (note.ticks / 960),
+                    duration: note.durationTicks / 960
+                });
+            });
+            const timeSignatureParts = measure.timeSignature.split('/');
+            const beatsPerMeasure = parseInt(timeSignatureParts[0]);
+            currentTime += beatsPerMeasure;
+        });
+
+        const midiBytes = midi.toArray();
+        const blob = new Blob([midiBytes], { type: 'audio/midi' });
+
+        const formData = new FormData();
+        formData.append('midi', blob, 'score.mid');
+        //formData.append('svg', '<svg>...</svg>'); // add your real SVG
+        //formData.append('context', 'Some context text');
+        //formData.append('category', 'piano');
+
+        const csrftoken = getCookie('csrftoken');
+
+        fetch('/api/exercises/', {
+            method: 'POST',
+            headers: {
+                'X-CSRFToken': csrftoken,
+            },
+            body: formData,
+            credentials: 'include' // <--- THIS is also important to send cookies
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Exercise saved:', data);
+        })
+        .catch(error => {
+            console.error('Error saving exercise:', error);
+        });
+    }
+
+    // Convert score data to MIDI format for export
+    function exportToMidi() {
+        const midi = new Midi();
+        
+        const track = midi.addTrack();
+        let currentTime = 0;
+
+        scoreData.measures.forEach(measure => {
+            measure.notes.forEach(note => {
+                track.addNote({
+                    midi: note.midiNote,
+                    time: currentTime + (note.ticks / 960),
+                    duration: note.durationTicks / 960
+                });
+            });
+            const timeSignatureParts = measure.timeSignature.split('/');
+            const beatsPerMeasure = parseInt(timeSignatureParts[0]);
+            currentTime += beatsPerMeasure;
+        });
+
+        const midiBytes = midi.toArray();
+        const blob = new Blob([midiBytes], { type: 'audio/midi' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'score.mid';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+    }
+
+    initEditor();
+});
+</script>
+{% endblock %}

@@ -1,0 +1,218 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}Exercises Dashboard | REA - Music Education{% endblock %}
+
+{% block content %}
+<section class="hero-section">
+    <div class="container">
+        <div class="row">
+            <div class="col-lg-8 mx-auto text-center">
+                {% if user.is_authenticated %}
+                    <h1 class="display-4 fw-bold mb-3">Create Exercises</h1>
+                    <p class="lead mb-4">Make a new collection of music exercises to improve your students.</p>
+                    <a href="{% url 'exercise-create' %}" class="btn btn-light btn-lg">New Exercise</a>
+                    <a href="{% url 'exercise-upload' %}" class="btn btn-light btn-lg">Upload Exercise</a>
+                {% else %}
+                    <h1 class="display-4 fw-bold mb-3">Music Exercises</h1>
+                    <p class="lead mb-4">Browse and practice our collection of music exercises to improve your skills.</p>
+                    <!-- ANDERE URL -->
+                    <a href="{% url 'exercise-upload' %}" class="btn btn-light btn-lg">Create New Exercise</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</section>
+
+<div class="container py-5">
+    <!-- Stats Section -->
+    {% if user.is_authenticated %}
+        <div class="row mb-5">
+            <div class="col-md-3 col-sm-6 mb-4">
+                <div class="card h-100 text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Exercises</h5>
+                        <p class="display-4 fw-bold text-primary">{{ exercises.count }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6 mb-4">
+                <div class="card h-100 text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Intonation</h5>
+                        <p class="display-4 fw-bold proficiency-beginner">{{ pitch_exercises }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6 mb-4">
+                <div class="card h-100 text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Rhythm</h5>
+                        <p class="display-4 fw-bold proficiency-intermediate">{{ rhythm_exercises }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6 mb-4">
+                <div class="card h-100 text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Modules</h5>
+                        <p class="display-4 fw-bold proficiency-advanced">
+                            0
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% else %}
+        <div class="row mb-5">
+            <div class="col-md-3 col-sm-6 mb-4">
+                <div class="card h-100 text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Progress</h5>
+                        <p class="display-4 fw-bold text-primary">0 / {{ exercises.count }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6 mb-4">
+                <div class="card h-100 text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Intonation</h5>
+                        <p class="display-4 fw-bold proficiency-beginner">0 / {{ pitch_exercises }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6 mb-4">
+                <div class="card h-100 text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Rhythm</h5>
+                        <p class="display-4 fw-bold proficiency-intermediate">0 / {{ rhythm_exercises }}</p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6 mb-4">
+                <div class="card h-100 text-center">
+                    <div class="card-body">
+                        <h5 class="card-title">Score</h5>
+                        <p class="display-4 fw-bold proficiency-advanced">
+                            79%
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+        
+
+    <!-- Filter Controls -->
+    <div class="dashboard-section mb-4">
+        <h3 class="mb-3">Filter Exercises</h3>
+        <form id="filter-form" class="row g-3">
+            <div class="col-md-3">
+                <label for="context" class="form-label">Context</label>
+                <select id="context" name="context" class="form-select">
+                    <option value="">All</option>
+                    <option value="rel">Relative</option>
+                    <option value="abs">Absolute</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="category" class="form-label">Category</label>
+                <select id="category" name="category" class="form-select">
+                    <option value="">All</option>
+                    <option value="pitch">Intonation</option>
+                    <option value="rhythm">Rhythm</option>
+                </select>
+            </div>
+            <!--
+            <div class="col-md-3">
+                <label for="voices" class="form-label">Voices</label>
+                <select id="voices" name="voices" class="form-select">
+                    <option value="">All</option>
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3">3</option>
+                    <option value="4">4</option>
+                </select>
+            </div>
+            -->
+            <div class="col-md-3 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary w-100">Apply Filters</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Exercise List -->
+    <div class="row" id="exercise-list">
+        {% for exercise in exercises %}
+        <div class="col-lg-4 col-md-6 mb-4">
+            <div class="card h-100 instrument-card">
+                <div class="card-body">
+                    <h5 class="card-title">Exercise #{{ exercise.id }}</h5>
+                    <div class="mb-3">
+                        <span class="badge {% if exercise.category == 'pitch' %}bg-success{% else %}bg-primary{% endif %} me-2">
+                            {{ exercise.get_category_display }}
+                        </span>
+                        <span class="badge {% if exercise.context == 'rel' %}bg-info{% else %}bg-warning{% endif %} me-2">
+                            {{ exercise.get_context_display }}
+                        </span>
+                        
+                        <span class="badge bg-info">
+                            {% if exercise.polyphonic %} Poly {% else %} Mono {% endif %}
+                        </span>
+                    </div>
+                    {% if exercise.img %}
+                    <div class="text-center mb-3">
+                        <img src="{{ exercise.img.url }}" alt="Exercise preview" class="img-fluid rounded" style="max-height: 120px;">
+                    </div>
+                    {% elif exercise.svg %}
+                    <div class="text-center mb-3">
+                        <img src="{{ exercise.svg.url }}" alt="Exercise notation" class="img-fluid rounded" style="max-height: 120px;">
+                    </div>
+                    {% endif %}
+                    <p class="card-text text-muted small">
+                        Created: {{ exercise.created|date:"M d, Y" }}
+                    </p>
+                </div>
+                <div class="card-footer bg-transparent border-0">
+                    <a href="{% url 'exercise-detail' exercise.id %}" class="btn btn-outline-primary w-100">View Details</a>
+                </div>
+            </div>
+        </div>
+        {% empty %}
+        <div class="col-12 text-center py-5">
+            <div class="alert alert-info">
+                <i class="fas fa-info-circle me-2"></i> No exercises found. Please try different filter settings.
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Set filter values from URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        document.getElementById('context').value = urlParams.get('context') || '';
+        document.getElementById('category').value = urlParams.get('category') || '';
+        //document.getElementById('voices').value = urlParams.get('voices') || '';
+        
+        // Handle form submission
+        document.getElementById('filter-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const context = document.getElementById('context').value;
+            const category = document.getElementById('category').value;
+            //const voices = document.getElementById('voices').value;
+            
+            // Build query parameters
+            const params = new URLSearchParams();
+            if (context) params.append('context', context);
+            if (category) params.append('category', category);
+            //if (voices) params.append('voices', voices);
+            
+            // Redirect with filter parameters
+            window.location.href = '{% url "exercise-dashboard" %}?' + params.toString();
+        });
+    });
+</script>
+{% endblock %}
