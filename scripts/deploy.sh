@@ -8,7 +8,7 @@ BACKUP_DIR="'"${BACKUP_DIR_PATH}"'"                         # Backup directory
 
 
 # Additional configuration
-REPO_URL="https://github.com/narevent/rea.git"       # GitHub repository URL
+REPO_URL="https://github.com/narevent/REA.git"       # GitHub repository URL
 DOMAIN_NAMES="rea.vetgaaf.tech"               # Space-separated domain names
 PRIMARY_DOMAIN="rea.vetgaaf.tech"                              # Primary domain (first one)
 WSGI_MODULE="rea.wsgi:application"                    # Django WSGI module (usually projectname.wsgi:application)
