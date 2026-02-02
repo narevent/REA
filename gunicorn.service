@@ -1,20 +1,20 @@
+# CONFIGURATION
+# PROJECT_NAME: rea
+# PROJECT_DIR: /var/www/rea
+# WSGI_MODULE: rea.wsgi:application
+
 [Unit]
-Description=Gunicorn daemon for Vetgaaf Django application
+Description=Gunicorn daemon for rea Django application
 After=network.target
 
 [Service]
 User=www-data
 Group=www-data
-WorkingDirectory=/var/www/vetgaaf
-Environment="PATH=/var/www/vetgaaf/venv/bin"
-EnvironmentFile=/var/www/vetgaaf/.env
-ExecStart=/var/www/vetgaaf/venv/bin/gunicorn \
-    --workers 3 \
-    --bind unix:/var/www/vetgaaf/gunicorn.sock \
-    --timeout 60 \
-    --access-logfile /var/www/vetgaaf/logs/gunicorn-access.log \
-    --error-logfile /var/www/vetgaaf/logs/gunicorn-error.log \
-    rea.wsgi:application
+UMask=0007
+WorkingDirectory=/var/www/rea
+Environment="PATH=/var/www/rea/venv/bin"
+EnvironmentFile=/var/www/rea/.env
+ExecStart=/var/www/rea/venv/bin/gunicorn     --workers 3     --bind unix:/var/www/rea/gunicorn.sock     --timeout 60     --access-logfile /var/www/rea/logs/gunicorn-access.log     --error-logfile /var/www/rea/logs/gunicorn-error.log     rea.wsgi:application
 
 [Install]
 WantedBy=multi-user.target
