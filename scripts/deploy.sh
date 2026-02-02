@@ -2,13 +2,9 @@
 set -e
 
 # CONFIGURATION
-PROJECT_NAME="'"${PROJECT_NAME}"'"                                    # Project name
-PROJECT_DIR="'"${PROJECT_DIR_PATH}"'"                            # Project directory
-BACKUP_DIR="'"${BACKUP_DIR_PATH}"'"                         # Backup directory
-
-
-# Additional configuration
-REPO_URL="https://github.com/narevent/REA.git"       # GitHub repository URL
+PROJECT_NAME="rea"                                    # Project name (used for directories and services)
+PROJECT_DIR="/var/www/rea"                            # Where to install the project
+REPO_URL="https://github.com/narevent/rea.git"       # GitHub repository URL
 DOMAIN_NAMES="rea.vetgaaf.tech"               # Space-separated domain names
 PRIMARY_DOMAIN="rea.vetgaaf.tech"                              # Primary domain (first one)
 WSGI_MODULE="rea.wsgi:application"                    # Django WSGI module (usually projectname.wsgi:application)
@@ -198,4 +194,3 @@ echo "  - Configure email settings in .env"
 echo "  - Configure payment gateways in .env (if needed)"
 echo "  - Upload media files if migrating from another server"
 echo ""
-

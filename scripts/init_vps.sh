@@ -1,12 +1,6 @@
 #!/bin/bash
 set -e
 
-# CONFIGURATION
-PROJECT_NAME="'"${PROJECT_NAME}"'"                                    # Project name
-PROJECT_DIR="'"${PROJECT_DIR_PATH}"'"                            # Project directory
-BACKUP_DIR="'"${BACKUP_DIR_PATH}"'"                         # Backup directory
-
-
 echo "================================"
 echo "rea VPS Initialization"
 echo "================================"
@@ -99,4 +93,3 @@ echo "Next steps:"
 echo "1. Add your SSH key to GitHub (if you created one)"
 echo "2. Run the deploy script: bash scripts/deploy.sh"
 echo ""
-

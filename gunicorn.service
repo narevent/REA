@@ -14,7 +14,13 @@ UMask=0007
 WorkingDirectory=/var/www/rea
 Environment="PATH=/var/www/rea/venv/bin"
 EnvironmentFile=/var/www/rea/.env
-ExecStart=/var/www/rea/venv/bin/gunicorn     --workers 3     --bind unix:/var/www/rea/gunicorn.sock     --timeout 60     --access-logfile /var/www/rea/logs/gunicorn-access.log     --error-logfile /var/www/rea/logs/gunicorn-error.log     rea.wsgi:application
+ExecStart=/var/www/rea/venv/bin/gunicorn \
+    --workers 3 \
+    --bind unix:/var/www/rea/gunicorn.sock \
+    --timeout 60 \
+    --access-logfile /var/www/rea/logs/gunicorn-access.log \
+    --error-logfile /var/www/rea/logs/gunicorn-error.log \
+    rea.wsgi:application
 
 [Install]
 WantedBy=multi-user.target

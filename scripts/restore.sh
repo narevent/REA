@@ -2,10 +2,9 @@
 set -e
 
 # CONFIGURATION
-PROJECT_NAME="'"${PROJECT_NAME}"'"                                    # Project name
-PROJECT_DIR="'"${PROJECT_DIR_PATH}"'"                            # Project directory
-BACKUP_DIR="'"${BACKUP_DIR_PATH}"'"                         # Backup directory
-
+PROJECT_NAME="rea"                                    # Project name
+PROJECT_DIR="/var/www/rea"                            # Project directory
+BACKUP_DIR="/var/backups/rea"                         # Backup directory
 
 SERVICE_NAME="gunicorn-${PROJECT_NAME}"
 
@@ -60,4 +59,3 @@ echo "================================"
 echo ""
 echo "Your site has been restored from: $backup_file"
 echo ""
-
