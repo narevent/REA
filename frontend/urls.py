@@ -1,5 +1,5 @@
 # frontend/urls.py
-from django.urls import path, include
+from django.urls import path
 from . import views
 
 urlpatterns = [
@@ -11,6 +11,8 @@ urlpatterns = [
     path('dashboard/', views.dashboard, name='dashboard'),
     path('profile/<str:username>/', views.profile_view, name='profile'),
     path('add-instrument/', views.add_instrument_view, name='add_instrument'),
+
+    # Exercise routes
     path('exercises/', views.ExerciseViewSet.as_view({'get': 'dashboard'}), name='exercise-dashboard'),
     path('exercises/<int:pk>/', views.ExerciseViewSet.as_view({'get': 'detail_view'}), name='exercise-detail'),
     path('exercises/upload/', views.ExerciseViewSet.as_view({'get': 'upload_form', 'post': 'upload_form'}), name='exercise-upload'),
@@ -18,4 +20,8 @@ urlpatterns = [
     path('exercises/<int:pk>/update/', views.ExerciseViewSet.as_view({'get': 'update_form', 'post': 'update_form'}), name='exercise-update'),
     path('exercises/<int:pk>/delete/', views.ExerciseViewSet.as_view({'post': 'delete'}), name='exercise-delete'),
     path('exercises/<int:pk>/viewer/', views.ExerciseViewSet.as_view({'get': 'score_viewer'}), name='exercise-viewer'),
+
+    # Lesson routes
+    path('lessons/', views.LessonViewSet.as_view({'get': 'lesson_dashboard'}), name='lesson-dashboard'),
+    path('lessons/<int:pk>/', views.LessonViewSet.as_view({'get': 'lesson_detail'}), name='lesson-detail'),
 ]

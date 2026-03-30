@@ -295,132 +295,78 @@ document.addEventListener('DOMContentLoaded', function() {
     function renderScore(midi) {
         const output = document.getElementById('output');
         output.innerHTML = '';
-
+        
         const renderer = new Renderer(output, Renderer.Backends.SVG);
-
+        
         const width = 500;
         const height = 200;
-
+        
         renderer.resize(width * currentScale, height * currentScale);
         const context = renderer.getContext();
         context.scale(currentScale, currentScale);
-
+        
         const stave = new Vex.Flow.Stave(10, 40, width - 20);
-        stave.addClef("treble");//.addTimeSignature("4/4");
+        
+        let timeSignature = "4/4";
+        
+        stave.addClef("treble").addTimeSignature(timeSignature);
         stave.setContext(context).draw();
-
+        
         noteGrouped = groupNotesByTime(midi.tracks["0"].notes);
-
+        
         const vexNotes = noteGrouped.map((group, groupIndex) => {
-            // Always use whole note duration for visual rendering - no stems, flags or beams
-            const displayDuration = "w";
-
+            const duration = getDuration(group.durationTicks, midi.header.ppq);
+            
             if (group.notes.length > 1) {
                 const keys = group.notes.map(note => {
                     const vexNote = midiToVexNote(note.midi);
                     return `${vexNote.key}/${vexNote.octave}`;
                 });
-
-                const staveNote = new StaveNote({
-                    keys: keys,
-                    duration: displayDuration
+                
+                const staveNote = new StaveNote({ 
+                    keys: keys, 
+                    duration: duration 
                 });
-
+                
                 group.notes.forEach((note, i) => {
                     const vexNote = midiToVexNote(note.midi);
                     if (vexNote.accidental) {
                         staveNote.addModifier(new Accidental(vexNote.accidental), i);
                     }
                 });
-
+                
                 staveNote.setAttribute('id', `note-${group.ticks}`);
                 staveNote.setAttribute('data-group-index', groupIndex);
                 staveNote.addClass(`note-${group.ticks}`);
+                
                 return staveNote;
             } else {
                 const note = group.notes[0];
                 const vexNote = midiToVexNote(note.midi);
-                const staveNote = new StaveNote({
-                    keys: [`${vexNote.key}/${vexNote.octave}`],
-                    duration: displayDuration
+                const staveNote = new StaveNote({ 
+                    keys: [`${vexNote.key}/${vexNote.octave}`], 
+                    duration: duration 
                 });
-
+                
                 if (vexNote.accidental) {
                     staveNote.addModifier(new Accidental(vexNote.accidental), 0);
                 }
-
+                
                 staveNote.setAttribute('id', `note-${note.ticks}`);
                 staveNote.setAttribute('data-group-index', groupIndex);
                 staveNote.addClass(`note-${note.ticks}`);
+                
                 return staveNote;
             }
         });
-
-        // ← No Beam.generateBeams, no beam drawing
+        
+        const beams = Beam.generateBeams(vexNotes);
+        
         Formatter.FormatAndDraw(context, stave, vexNotes);
-
-        // Attach click handlers after rendering
-        attachNoteClickHandlers();
-    }
-
-    function attachNoteClickHandlers() {
-    const vfContainer = document.querySelector('#output svg');
-    if (!vfContainer) return;
-
-    const noteElements = vfContainer.querySelectorAll('.vf-stavenote');
-
-    noteElements.forEach((el, index) => {
-        // Make the whole note group clickable
-        el.style.cursor = 'pointer';
-
-        el.addEventListener('click', () => {
-            if (!noteGrouped[index]) return;
-            playNotePreview(noteGrouped[index]);
-            flashNoteHighlight(el);
+        
+        beams.forEach(beam => {
+            beam.setContext(context).draw();
         });
-    });
-}
-
-    // Plays a short preview of the clicked note group
-    function playNotePreview(group) {
-        const previewSynth = new Tone.PolySynth(Tone.Synth, {
-            envelope: {
-                attack: 0.02,
-                decay: 0.1,
-                sustain: 0.4,
-                release: 0.8,
-            },
-        }).toDestination();
-
-        const noteNames = group.notes.map(n => n.name);
-        const duration = "4n"; // Always play as quarter note for preview
-
-        previewSynth.triggerAttackRelease(noteNames, duration, Tone.now());
-
-        // Clean up synth after playback
-        setTimeout(() => previewSynth.disconnect(), 2000);
-    }
-
-    // Briefly flashes the clicked note gold then returns to original color
-    function flashNoteHighlight(noteElement) {
-        const noteheads = noteElement.querySelectorAll('.vf-notehead path');
-
-        // Save originals and highlight
-        noteheads.forEach(path => {
-            path.setAttribute('data-click-original-fill', path.getAttribute('fill') || 'black');
-            path.setAttribute('fill', '#FFD700');
-            path.setAttribute('stroke', '#FFA500');
-            path.setAttribute('stroke-width', '2');
-        });
-
-        // Fade back after 600ms
-        setTimeout(() => {
-            noteheads.forEach(path => {
-                path.setAttribute('fill', path.getAttribute('data-click-original-fill') || 'black');
-                path.removeAttribute('stroke-width');
-                path.removeAttribute('data-click-original-fill');
-            });
-        }, 600);
     }
 
     function startNoteHighlighting(midi, delaySeconds, tempoScale) {

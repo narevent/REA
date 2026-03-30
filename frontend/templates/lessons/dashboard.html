@@ -1,0 +1,248 @@
+{% extends "frontend/base.html" %}
+
+{% block title %}Lessons | REA - Music Education{% endblock %}
+
+{% block content %}
+
+<!-- Hero -->
+<section class="hero-section">
+    <div class="container">
+        <div class="row align-items-center">
+            <div class="col-lg-7">
+                <h1 class="display-5 fw-bold mb-2">Lesson Library</h1>
+                <p class="lead mb-0">Browse the full curriculum — from absolute pitch fundamentals to relative tonal exercises.</p>
+            </div>
+            <div class="col-lg-5 mt-4 mt-lg-0">
+                <form method="get" action="{% url 'lesson-dashboard' %}" class="d-flex gap-2">
+                    <input
+                        type="text"
+                        name="search"
+                        value="{{ search }}"
+                        class="form-control"
+                        placeholder="Search lessons…"
+                        aria-label="Search lessons"
+                    >
+                    <button type="submit" class="btn btn-light px-4">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    {% if search %}
+                    <a href="{% url 'lesson-dashboard' %}" class="btn btn-outline-light px-3" title="Clear search">
+                        <i class="fas fa-times"></i>
+                    </a>
+                    {% endif %}
+                </form>
+            </div>
+        </div>
+    </div>
+</section>
+
+<div class="container py-5">
+
+    <!-- Stats row -->
+    <div class="row mb-4">
+        <div class="col-sm-4 mb-3">
+            <div class="card text-center h-100">
+                <div class="card-body py-3">
+                    <p class="display-6 fw-bold text-primary mb-0">{{ total_lessons }}</p>
+                    <p class="text-muted mb-0 small">Total Lessons</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-4 mb-3">
+            <div class="card text-center h-100">
+                <div class="card-body py-3">
+                    <p class="display-6 fw-bold proficiency-beginner mb-0">{{ total_exercises }}</p>
+                    <p class="text-muted mb-0 small">Linked Exercises</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-4 mb-3">
+            <div class="card text-center h-100">
+                <div class="card-body py-3">
+                    <p class="display-6 fw-bold proficiency-advanced mb-0">{{ all_categories.count }}</p>
+                    <p class="text-muted mb-0 small">Categories</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+
+        <!-- Sidebar: category quick-links -->
+        <div class="col-lg-3 mb-4">
+            <div class="dashboard-section h-100">
+                <h6 class="text-uppercase text-muted fw-semibold mb-3 small">Categories</h6>
+                <ul class="list-unstyled mb-0">
+                    <li class="mb-1">
+                        <a href="{% url 'lesson-dashboard' %}"
+                           class="d-flex justify-content-between align-items-center text-decoration-none py-1 px-2 rounded {% if not active_category %}fw-bold text-primary{% else %}text-dark{% endif %}">
+                            <span><i class="fas fa-th-large me-2 small"></i>All</span>
+                            <span class="badge bg-secondary">{{ total_lessons }}</span>
+                        </a>
+                    </li>
+                    {% for cat in all_categories %}
+                    <li class="mb-1">
+                        <a href="{% url 'lesson-dashboard' %}?category={{ cat.pk }}"
+                           class="d-flex justify-content-between align-items-center text-decoration-none py-1 px-2 rounded {% if active_category.pk == cat.pk %}fw-bold text-primary{% else %}text-dark{% endif %}">
+                            <span>
+                                <i class="fas {% if cat.name == 'tonal' %}fa-music{% elif cat.name == 'rhythm' %}fa-drum{% else %}fa-book{% endif %} me-2 small"></i>
+                                {{ cat }}
+                            </span>
+                            <span class="badge bg-light text-dark">{{ category_counts|default_if_none:"0" }}</span>
+                        </a>
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <!-- Main content area -->
+        <div class="col-lg-9">
+
+            <!-- Breadcrumb -->
+            {% if breadcrumb %}
+            <nav aria-label="breadcrumb" class="mb-3">
+                <ol class="breadcrumb">
+                    {% for label, url in breadcrumb %}
+                    {% if url %}
+                    <li class="breadcrumb-item"><a href="{{ url }}">{{ label }}</a></li>
+                    {% else %}
+                    <li class="breadcrumb-item active" aria-current="page">{{ label }}</li>
+                    {% endif %}
+                    {% endfor %}
+                </ol>
+            </nav>
+            {% endif %}
+
+            <!-- Search results heading -->
+            {% if search %}
+            <div class="alert alert-info d-flex align-items-center mb-4">
+                <i class="fas fa-search me-2"></i>
+                <span>Search results for <strong>"{{ search }}"</strong> — {{ lessons.count }} found</span>
+            </div>
+            {% endif %}
+
+            <!-- ── DRILL-DOWN: child folder items ── -->
+            {% if child_items %}
+            <div class="row g-3">
+                {% for item in child_items %}
+                <div class="col-sm-6 col-xl-4">
+                    {% if child_type == 'category' %}
+                    <a href="{% url 'lesson-dashboard' %}?category={{ item.pk }}" class="text-decoration-none">
+                    {% elif child_type == 'approach' %}
+                    <a href="{% url 'lesson-dashboard' %}?approach={{ item.pk }}" class="text-decoration-none">
+                    {% elif child_type == 'lesson_type' %}
+                    <a href="{% url 'lesson-dashboard' %}?lesson_type={{ item.pk }}" class="text-decoration-none">
+                    {% else %}
+                    <a href="{% url 'lesson-dashboard' %}?group={{ item.pk }}" class="text-decoration-none">
+                    {% endif %}
+                        <div class="card h-100 instrument-card">
+                            <div class="card-body d-flex align-items-start gap-3">
+                                <div class="feature-icon flex-shrink-0" style="width:2.5rem;height:2.5rem;border-radius:0.5rem;">
+                                    <i class="fas
+                                        {% if child_type == 'category' %}fa-layer-group
+                                        {% elif child_type == 'approach' %}fa-code-branch
+                                        {% elif child_type == 'lesson_type' %}fa-list-ul
+                                        {% else %}fa-folder
+                                        {% endif %}
+                                        fa-sm"></i>
+                                </div>
+                                <div>
+                                    <h6 class="card-title mb-1 text-dark">
+                                        {% if child_type == 'approach' %}
+                                            {{ item.get_name_display }}
+                                        {% else %}
+                                            {{ item.name }}
+                                        {% endif %}
+                                    </h6>
+                                    <p class="text-muted small mb-0">
+                                        {% if child_type == 'category' %}
+                                            {{ category_counts|default_if_none:"0" }} lessons
+                                        {% elif child_type == 'approach' %}
+                                            {{ item.lesson_types.count }} lesson type{{ item.lesson_types.count|pluralize }}
+                                        {% elif child_type == 'lesson_type' %}
+                                            {{ item.root_groups.count }} group{{ item.root_groups.count|pluralize }}
+                                        {% else %}
+                                            {% with cc=item.children.count lc=item.lessons.count %}
+                                                {% if cc %}{{ cc }} subfolder{{ cc|pluralize }}{% else %}{{ lc }} lesson{{ lc|pluralize }}{% endif %}
+                                            {% endwith %}
+                                        {% endif %}
+                                    </p>
+                                </div>
+                                <i class="fas fa-chevron-right ms-auto text-muted align-self-center"></i>
+                            </div>
+                        </div>
+                    </a>
+                </div>
+                {% empty %}
+                <div class="col-12">
+                    <div class="alert alert-secondary">No items found at this level.</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- ── LESSON CARDS (leaf level or search results) ── -->
+            {% if lessons %}
+            <div class="row g-3 {% if child_items %}mt-2{% endif %}">
+                {% for lesson in lessons %}
+                <div class="col-sm-6 col-xl-4">
+                    <div class="card h-100 instrument-card">
+                        <div class="card-body">
+                            <h6 class="card-title mb-2">
+                                {{ lesson.title|default:lesson.folder_name }}
+                            </h6>
+
+                            <div class="mb-2">
+                                {% with ex_count=lesson.exercises.count %}
+                                <span class="badge bg-primary">
+                                    <i class="fas fa-music me-1"></i>{{ ex_count }} exercise{{ ex_count|pluralize }}
+                                </span>
+                                {% endwith %}
+                                {% if lesson.group.key %}
+                                <span class="badge bg-info text-dark ms-1">{{ lesson.group.key }}</span>
+                                {% endif %}
+                            </div>
+
+                            {% if search %}
+                            <!-- Show ancestry path in search results -->
+                            <p class="text-muted small mb-2">
+                                <i class="fas fa-sitemap me-1"></i>
+                                {% with g=lesson.group %}
+                                    {% if g.lesson_type %}{{ g.lesson_type.approach.category }} › {{ g.lesson_type.approach.get_name_display }} › {{ g.lesson_type.name }}{% endif %}
+                                {% endwith %}
+                            </p>
+                            {% endif %}
+
+                            <p class="text-muted small mb-0">
+                                <i class="fas fa-clock me-1"></i>{{ lesson.created|date:"M d, Y" }}
+                            </p>
+                        </div>
+                        <div class="card-footer bg-transparent border-0">
+                            <a href="{% url 'lesson-detail' lesson.pk %}" class="btn btn-outline-primary btn-sm w-100">
+                                Open Lesson
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                {% empty %}
+                <div class="col-12">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        No lessons found{% if search %} for "{{ search }}"{% endif %}.
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if not child_items and not lessons %}
+            <div class="alert alert-secondary mt-2">
+                <i class="fas fa-folder-open me-2"></i> This folder appears to be empty.
+            </div>
+            {% endif %}
+
+        </div><!-- /col-lg-9 -->
+    </div><!-- /row -->
+</div>
+{% endblock %}
