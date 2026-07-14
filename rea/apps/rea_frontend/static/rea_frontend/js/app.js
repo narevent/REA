@@ -11,15 +11,15 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=40";
-import { renderLessonNotation } from "./views/lessonView.js?v=40";
-import { renderScaleNotation } from "./views/scaleView.js?v=40";
-import { AudioPlayer } from "./audioPlayer.js?v=40";
-import { PracticeController } from "./practiceController.js?v=40";
+import { API } from "./api.js?v=41";
+import { renderLessonNotation } from "./views/lessonView.js?v=41";
+import { renderScaleNotation } from "./views/scaleView.js?v=41";
+import { AudioPlayer } from "./audioPlayer.js?v=41";
+import { PracticeController } from "./practiceController.js?v=41";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=40";
+} from "./chapters.js?v=41";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -52,6 +52,36 @@ const ABS_FAMILIES = [
   { label: "Inverse · Extended", category: "FormulaInverse", span: "Extended" },
 ];
 
+// The chapter cards (1-10) already select the exercise type/number — the
+// only extra dimension absolute lessons need is *which part* of the
+// progressive sequence to practice (individual parts interleaved with their
+// cumulative unions), or the Extended grade level. This mirrors the "Key"
+// selector on the relative side; it must never duplicate the chapter choice.
+const PART_ORDER = ["1", "2", "1-2", "3", "1-3", "4", "1-4"];
+const GRADE_ORDER = ["2Grades", "3Grades"];
+
+function absPartKey(l) { return l.part || l.grades || ""; }
+
+function absPartLabel(key) {
+  if (key === "") return "All";
+  if (/^\dGrades$/.test(key)) return key.replace("Grades", " grades");
+  return "Part " + key;
+}
+
+function absPartOrder(key) {
+  let i = PART_ORDER.indexOf(key);
+  if (i >= 0) return i;
+  i = GRADE_ORDER.indexOf(key);
+  if (i >= 0) return 100 + i;
+  return 200;
+}
+
+function computeAbsParts(lessons) {
+  const keys = Array.from(new Set(lessons.map(absPartKey)));
+  keys.sort((a, b) => absPartOrder(a) - absPartOrder(b));
+  return keys.map((k) => ({ value: k, label: absPartLabel(k) }));
+}
+
 const player = new AudioPlayer();
 
 let state = {
@@ -65,6 +95,8 @@ let state = {
   contextLesson: null,
   absFamily: ABS_FAMILIES[1], // Formula · Octave
   absLessons: [],
+  absParts: [],
+  absPart: null,
   activeChapter: null,
 };
 
@@ -155,24 +187,34 @@ async function ensureAbsoluteLesson() {
   const fam = state.absFamily;
   state.absLessons = await API.listAbsoluteLessons({ category: fam.category, span: fam.span });
   if (!state.absLessons.length) {
+    state.absParts = [];
+    state.absPart = null;
+    state.contextLesson = null;
     setStatus("No absolute exercises for " + fam.label + ".");
     return;
   }
-  let target = null;
-  if (state.contextLesson && state.contextLesson.system === "absolute") {
-    target = state.absLessons.find((l) => l.id === state.contextLesson.id);
+  state.absParts = computeAbsParts(state.absLessons);
+  if (!state.absParts.find((p) => p.value === state.absPart)) {
+    state.absPart = state.absParts[0].value;
   }
-  if (!target) target = state.absLessons[0];
-  state.contextLesson = await API.getAbsoluteLesson(target.id);
-  state.contextLesson.system = "absolute";
+  const chapterId = (state.activeChapter && state.activeChapter.id) || 1;
+  pickAbsLesson(chapterId);
   setStatus("Ready");
 }
 
-/** Short label for an absolute lesson in the exercise select. */
-function absLessonLabel(l) {
-  return (l.part ? "part " + l.part + " · " : "") +
-    "ex-" + l.exercise_number + " " + String(l.exercise_type || "").replace(/_/g, " ") +
-    (l.timed ? " (timed)" : "");
+/**
+ * Select the absolute lesson matching the current family/part and the given
+ * chapter (exercise number). Falls back to any lesson in the current part
+ * when that exact chapter isn't available for this family (e.g. Extended
+ * families only cover chapters 3-10). Returns true iff an exact match for
+ * `chapterId` was found.
+ */
+function pickAbsLesson(chapterId) {
+  const inPart = state.absLessons.filter((l) => absPartKey(l) === state.absPart);
+  const exact = inPart.find((l) => l.exercise_number === chapterId);
+  state.contextLesson = exact || inPart[0] || state.absLessons[0] || null;
+  if (state.contextLesson) state.contextLesson.system = "absolute";
+  return !!exact;
 }
 
 async function setSystem(systemId) {
@@ -186,15 +228,15 @@ async function setAbsFamily(index) {
   const fam = ABS_FAMILIES[index];
   if (!fam) return;
   state.absFamily = fam;
-  state.contextLesson = null;
+  state.absPart = null;
   await ensureLesson();
 }
 
-async function setAbsLesson(lessonId) {
-  const l = state.absLessons.find((x) => String(x.id) === String(lessonId));
-  if (!l) return;
-  state.contextLesson = await API.getAbsoluteLesson(l.id);
-  state.contextLesson.system = "absolute";
+function setAbsPart(value) {
+  if (!value && value !== "") return;
+  state.absPart = value;
+  const chapterId = (state.activeChapter && state.activeChapter.id) || 1;
+  pickAbsLesson(chapterId);
 }
 
 async function setKey(keyId) {
@@ -310,9 +352,9 @@ function renderMap() {
                 '<option value="' + i + '"' + (state.absFamily === f ? " selected" : "") + ">" + f.label + "</option>"
               ).join("") + '</select>' +
             '</label>' +
-            '<label class="ctx-select"><span class="ctx-lbl">Exercise</span>' +
-              '<select id="map-exercise">' + state.absLessons.map((l) =>
-                '<option value="' + l.id + '"' + (state.contextLesson && l.id === state.contextLesson.id ? " selected" : "") + ">" + absLessonLabel(l) + "</option>"
+            '<label class="ctx-select"><span class="ctx-lbl">Part</span>' +
+              '<select id="map-part">' + state.absParts.map((p) =>
+                '<option value="' + p.value + '"' + (state.absPart === p.value ? " selected" : "") + ">" + p.label + "</option>"
               ).join("") + '</select>' +
             '</label>') +
         '<button id="reset-progress" class="link-btn">reset progress</button>' +
@@ -346,9 +388,9 @@ function renderMap() {
     renderHeader();
     renderMap();
   });
-  const exerciseSel = viewMap.querySelector("#map-exercise");
-  if (exerciseSel) exerciseSel.addEventListener("change", async () => {
-    await setAbsLesson(exerciseSel.value);
+  const partSel = viewMap.querySelector("#map-part");
+  if (partSel) partSel.addEventListener("change", () => {
+    setAbsPart(partSel.value);
     renderHeader();
     renderMap();
   });
@@ -381,6 +423,13 @@ function ringOffset(pct, r) {
 function openChapter(chapterId) {
   const chapter = CHAPTERS.find((c) => c.id === chapterId);
   if (!chapter) return;
+  if (state.system === "absolute") {
+    const found = pickAbsLesson(chapterId);
+    if (!found) {
+      setStatus("\"" + chapter.title + "\" isn't available for " + state.absFamily.label + " / " + absPartLabel(state.absPart) + ".");
+      return;
+    }
+  }
   if (!state.contextLesson) { setStatus("No lesson loaded."); return; }
   state.activeChapter = chapter;
   showSession();
@@ -414,8 +463,8 @@ function renderTopbar() {
       '<label>Family<select id="ctx-family">' + ABS_FAMILIES.map((f, i) =>
         '<option value="' + i + '"' + (state.absFamily === f ? " selected" : "") + ">" + f.label + "</option>"
       ).join("") + '</select></label>' +
-      '<label>Exercise<select id="ctx-exercise">' + state.absLessons.map((l) =>
-        '<option value="' + l.id + '"' + (state.contextLesson && l.id === state.contextLesson.id ? " selected" : "") + ">" + absLessonLabel(l) + "</option>"
+      '<label>Part<select id="ctx-part">' + state.absParts.map((p) =>
+        '<option value="' + p.value + '"' + (state.absPart === p.value ? " selected" : "") + ">" + p.label + "</option>"
       ).join("") + '</select></label>';
   } else {
     const keys = state.keys.map((k) =>
@@ -443,7 +492,16 @@ function renderTopbar() {
   const back = sessionTopbar.querySelector("#back-map");
   if (back) back.addEventListener("click", showMap);
   const reopen = () => {
+    if (state.system === "absolute" && state.activeChapter) {
+      const found = pickAbsLesson(state.activeChapter.id);
+      if (!found) {
+        setStatus("\"" + state.activeChapter.title + "\" isn't available for " + state.absFamily.label + " / " + absPartLabel(state.absPart) + ".");
+        return false;
+      }
+    }
     if (state.activeChapter && state.contextLesson) practice.openChapter(state.activeChapter, state.contextLesson);
+    setStatus("Ready");
+    return true;
   };
   const ctxSystem = sessionTopbar.querySelector("#ctx-system");
   if (ctxSystem) ctxSystem.addEventListener("change", async () => {
@@ -451,7 +509,6 @@ function renderTopbar() {
     await setSystem(ctxSystem.value);
     renderTopbar();
     reopen();
-    setStatus("Ready");
   });
   const ctxKey = sessionTopbar.querySelector("#ctx-key");
   if (ctxKey) ctxKey.addEventListener("change", async () => {
@@ -459,7 +516,6 @@ function renderTopbar() {
     await setKey(ctxKey.value);
     renderTopbar();
     reopen();
-    setStatus("Ready");
   });
   const ctxFormula = sessionTopbar.querySelector("#ctx-formula");
   if (ctxFormula) ctxFormula.addEventListener("change", async () => {
@@ -467,7 +523,6 @@ function renderTopbar() {
     await setFormula(ctxFormula.value);
     renderTopbar();
     reopen();
-    setStatus("Ready");
   });
   const ctxFamily = sessionTopbar.querySelector("#ctx-family");
   if (ctxFamily) ctxFamily.addEventListener("change", async () => {
@@ -475,15 +530,12 @@ function renderTopbar() {
     await setAbsFamily(parseInt(ctxFamily.value, 10));
     renderTopbar();
     reopen();
-    setStatus("Ready");
   });
-  const ctxExercise = sessionTopbar.querySelector("#ctx-exercise");
-  if (ctxExercise) ctxExercise.addEventListener("change", async () => {
-    setStatus("Loading exercise…");
-    await setAbsLesson(ctxExercise.value);
+  const ctxPart = sessionTopbar.querySelector("#ctx-part");
+  if (ctxPart) ctxPart.addEventListener("change", () => {
+    setAbsPart(ctxPart.value);
     renderTopbar();
     reopen();
-    setStatus("Ready");
   });
 }
 
