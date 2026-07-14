@@ -1,0 +1,48 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>REA — Relative Intonation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=39" />
+</head>
+<body>
+  <header class="app-header">
+    <button id="brand" class="brand" title="Back to chapter map">
+      <span class="brand-mark"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18" r="3"/><path d="M9 18V5l11-2v13"/><circle cx="17" cy="16" r="3"/></svg></span>
+      <span class="brand-text">
+        <span class="brand-name">REA</span>
+        <span class="brand-sub">Relative Intonation</span>
+      </span>
+    </button>
+    <div class="header-stats" id="header-stats"></div>
+  </header>
+
+  <main id="app">
+    <!-- Chapter map (landing) -->
+    <section id="view-map" class="view view-map"></section>
+
+    <!-- Chapter session -->
+    <section id="view-session" class="view view-session" hidden>
+      <div class="session-topbar" id="session-topbar"></div>
+      <div class="session-stage">
+        <div id="notation" class="notation"></div>
+        <div id="countdown-bar" class="countdown-bar" hidden><div class="cd-bar-fill" id="cd-bar-fill"></div></div>
+        <div id="legend" class="legend"></div>
+      </div>
+      <div id="info" class="info"></div>
+    </section>
+  </main>
+
+  <footer class="app-footer">
+    <span id="status">Ready</span>
+    <span class="footer-hint" id="footer-hint"></span>
+  </footer>
+
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=39"></script>
+  <script type="module" src="{% static 'rea_frontend/js/app.js' %}?v=39"></script>
+</body>
+</html>
