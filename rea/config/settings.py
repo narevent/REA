@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     # local apps
     "rea.apps.rea_api",
     "rea.apps.rea_api.intonation.relative",
+    "rea.apps.rea_api.intonation.absolute",
     "rea.apps.rea_frontend",
 ]
 
@@ -104,3 +105,5 @@ CORS_ALLOW_ALL_ORIGINS = True
 
 # Path to the relative data (key_models / exercises) living next to the project.
 REA_DATA_DIR = BASE_DIR / "relative"
+# Path to the absolute data (key_models / lessons) living next to the project.
+REA_ABSOLUTE_DATA_DIR = BASE_DIR / "absolute"

@@ -1,5 +1,5 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=39";
-import { modeChordToVexKey } from "../notation.js?v=39";
+import { NotationRenderer } from "../components/notationRenderer.js?v=40";
+import { modeChordToVexKey } from "../notation.js?v=40";
 
 let renderer = null;
 

@@ -11,15 +11,15 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=39";
-import { renderLessonNotation } from "./views/lessonView.js?v=39";
-import { renderScaleNotation } from "./views/scaleView.js?v=39";
-import { AudioPlayer } from "./audioPlayer.js?v=39";
-import { PracticeController } from "./practiceController.js?v=39";
+import { API } from "./api.js?v=40";
+import { renderLessonNotation } from "./views/lessonView.js?v=40";
+import { renderScaleNotation } from "./views/scaleView.js?v=40";
+import { AudioPlayer } from "./audioPlayer.js?v=40";
+import { PracticeController } from "./practiceController.js?v=40";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=39";
+} from "./chapters.js?v=40";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -36,16 +36,35 @@ const DEFAULT_FORMULA = "Octave";
 // formula_name values stored on imported lessons (Octave / Quinta / Extended).
 const FORMULAS = ["Octave", "Quinta", "Extended"];
 
+// Intonation systems: relative (solfege, key-based) or absolute (pitch-based).
+const SYSTEMS = [
+  { id: "relative", label: "Relative" },
+  { id: "absolute", label: "Absolute" },
+];
+
+// Absolute lesson families: category (Formula / FormulaInverse) x span.
+const ABS_FAMILIES = [
+  { label: "Formula · Quinta", category: "Formula", span: "Quinta" },
+  { label: "Formula · Octave", category: "Formula", span: "Octave" },
+  { label: "Formula · Extended", category: "Formula", span: "Extended" },
+  { label: "Inverse · Quinta", category: "FormulaInverse", span: "Quinta" },
+  { label: "Inverse · Octave", category: "FormulaInverse", span: "Octave" },
+  { label: "Inverse · Extended", category: "FormulaInverse", span: "Extended" },
+];
+
 const player = new AudioPlayer();
 
 let state = {
   view: "map",
   progress: loadProgress(),
+  system: "relative",
   keys: [],
   lessons: [],
   contextKey: null,
   contextFormula: DEFAULT_FORMULA,
   contextLesson: null,
+  absFamily: ABS_FAMILIES[1], // Formula · Octave
+  absLessons: [],
   activeChapter: null,
 };
 
@@ -112,6 +131,7 @@ async function loadKeys() {
 }
 
 async function ensureLesson() {
+  if (state.system === "absolute") return ensureAbsoluteLesson();
   if (!state.contextKey) return;
   setStatus("Loading lesson…");
   const formula = state.contextFormula || DEFAULT_FORMULA;
@@ -126,7 +146,55 @@ async function ensureLesson() {
   }
   state.contextLesson = state.lessons.find((l) => !l.variant) || state.lessons[0];
   state.contextLesson = await API.getLesson(state.contextLesson.id);
+  state.contextLesson.system = "relative";
   setStatus("Ready");
+}
+
+async function ensureAbsoluteLesson() {
+  setStatus("Loading exercises…");
+  const fam = state.absFamily;
+  state.absLessons = await API.listAbsoluteLessons({ category: fam.category, span: fam.span });
+  if (!state.absLessons.length) {
+    setStatus("No absolute exercises for " + fam.label + ".");
+    return;
+  }
+  let target = null;
+  if (state.contextLesson && state.contextLesson.system === "absolute") {
+    target = state.absLessons.find((l) => l.id === state.contextLesson.id);
+  }
+  if (!target) target = state.absLessons[0];
+  state.contextLesson = await API.getAbsoluteLesson(target.id);
+  state.contextLesson.system = "absolute";
+  setStatus("Ready");
+}
+
+/** Short label for an absolute lesson in the exercise select. */
+function absLessonLabel(l) {
+  return (l.part ? "part " + l.part + " · " : "") +
+    "ex-" + l.exercise_number + " " + String(l.exercise_type || "").replace(/_/g, " ") +
+    (l.timed ? " (timed)" : "");
+}
+
+async function setSystem(systemId) {
+  if (!systemId || systemId === state.system) return;
+  state.system = systemId;
+  state.contextLesson = null;
+  await ensureLesson();
+}
+
+async function setAbsFamily(index) {
+  const fam = ABS_FAMILIES[index];
+  if (!fam) return;
+  state.absFamily = fam;
+  state.contextLesson = null;
+  await ensureLesson();
+}
+
+async function setAbsLesson(lessonId) {
+  const l = state.absLessons.find((x) => String(x.id) === String(lessonId));
+  if (!l) return;
+  state.contextLesson = await API.getAbsoluteLesson(l.id);
+  state.contextLesson.system = "absolute";
 }
 
 async function setKey(keyId) {
@@ -221,22 +289,44 @@ function renderMap() {
       '</div>' +
       '<div class="chapter-grid">' + cards + '</div>' +
       '<div class="map-foot">' +
-        '<label class="ctx-select"><span class="ctx-lbl">Key</span>' +
-          '<select id="map-key">' + state.keys.map((k) =>
-            '<option value="' + k.id + '"' + (state.contextKey && k.id === state.contextKey.id ? " selected" : "") + ">" + k.name + " (" + k.mode + ")</option>"
+        '<label class="ctx-select"><span class="ctx-lbl">System</span>' +
+          '<select id="map-system">' + SYSTEMS.map((s) =>
+            '<option value="' + s.id + '"' + (state.system === s.id ? " selected" : "") + ">" + s.label + "</option>"
           ).join("") + '</select>' +
         '</label>' +
-        '<label class="ctx-select"><span class="ctx-lbl">Formula</span>' +
-          '<select id="map-formula">' + FORMULAS.map((f) =>
-            '<option value="' + f + '"' + (state.contextLesson && state.contextLesson.formula_name === f ? " selected" : "") + ">" + f + "</option>"
-          ).join("") + '</select>' +
-        '</label>' +
+        (state.system === "relative"
+          ? '<label class="ctx-select"><span class="ctx-lbl">Key</span>' +
+              '<select id="map-key">' + state.keys.map((k) =>
+                '<option value="' + k.id + '"' + (state.contextKey && k.id === state.contextKey.id ? " selected" : "") + ">" + k.name + " (" + k.mode + ")</option>"
+              ).join("") + '</select>' +
+            '</label>' +
+            '<label class="ctx-select"><span class="ctx-lbl">Formula</span>' +
+              '<select id="map-formula">' + FORMULAS.map((f) =>
+                '<option value="' + f + '"' + (state.contextLesson && state.contextLesson.formula_name === f ? " selected" : "") + ">" + f + "</option>"
+              ).join("") + '</select>' +
+            '</label>'
+          : '<label class="ctx-select"><span class="ctx-lbl">Family</span>' +
+              '<select id="map-family">' + ABS_FAMILIES.map((f, i) =>
+                '<option value="' + i + '"' + (state.absFamily === f ? " selected" : "") + ">" + f.label + "</option>"
+              ).join("") + '</select>' +
+            '</label>' +
+            '<label class="ctx-select"><span class="ctx-lbl">Exercise</span>' +
+              '<select id="map-exercise">' + state.absLessons.map((l) =>
+                '<option value="' + l.id + '"' + (state.contextLesson && l.id === state.contextLesson.id ? " selected" : "") + ">" + absLessonLabel(l) + "</option>"
+              ).join("") + '</select>' +
+            '</label>') +
         '<button id="reset-progress" class="link-btn">reset progress</button>' +
       '</div>' +
     '</div>';
 
   viewMap.querySelectorAll(".chapter-card").forEach((card) => {
     card.addEventListener("click", () => openChapter(parseInt(card.dataset.chapter, 10)));
+  });
+  const systemSel = viewMap.querySelector("#map-system");
+  if (systemSel) systemSel.addEventListener("change", async () => {
+    await setSystem(systemSel.value);
+    renderHeader();
+    renderMap();
   });
   const keySel = viewMap.querySelector("#map-key");
   if (keySel) keySel.addEventListener("change", async () => {
@@ -247,6 +337,18 @@ function renderMap() {
   const formulaSel = viewMap.querySelector("#map-formula");
   if (formulaSel) formulaSel.addEventListener("change", async () => {
     await setFormula(formulaSel.value);
+    renderHeader();
+    renderMap();
+  });
+  const familySel = viewMap.querySelector("#map-family");
+  if (familySel) familySel.addEventListener("change", async () => {
+    await setAbsFamily(parseInt(familySel.value, 10));
+    renderHeader();
+    renderMap();
+  });
+  const exerciseSel = viewMap.querySelector("#map-exercise");
+  if (exerciseSel) exerciseSel.addEventListener("change", async () => {
+    await setAbsLesson(exerciseSel.value);
     renderHeader();
     renderMap();
   });
@@ -306,9 +408,25 @@ function showMap() {
 function renderTopbar() {
   const c = state.activeChapter;
   if (!c) return;
-  const keys = state.keys.map((k) =>
-    '<option value="' + k.id + '"' + (state.contextKey && k.id === state.contextKey.id ? " selected" : "") + ">" + k.name + " (" + k.mode + ")</option>"
-  ).join("");
+  let ctx;
+  if (state.system === "absolute") {
+    ctx =
+      '<label>Family<select id="ctx-family">' + ABS_FAMILIES.map((f, i) =>
+        '<option value="' + i + '"' + (state.absFamily === f ? " selected" : "") + ">" + f.label + "</option>"
+      ).join("") + '</select></label>' +
+      '<label>Exercise<select id="ctx-exercise">' + state.absLessons.map((l) =>
+        '<option value="' + l.id + '"' + (state.contextLesson && l.id === state.contextLesson.id ? " selected" : "") + ">" + absLessonLabel(l) + "</option>"
+      ).join("") + '</select></label>';
+  } else {
+    const keys = state.keys.map((k) =>
+      '<option value="' + k.id + '"' + (state.contextKey && k.id === state.contextKey.id ? " selected" : "") + ">" + k.name + " (" + k.mode + ")</option>"
+    ).join("");
+    ctx =
+      '<label>Key<select id="ctx-key">' + keys + '</select></label>' +
+      '<label>Formula<select id="ctx-formula">' + FORMULAS.map((f) =>
+        '<option value="' + f + '"' + (state.contextFormula === f ? " selected" : "") + ">" + f + "</option>"
+      ).join("") + '</select></label>';
+  }
   sessionTopbar.innerHTML =
     '<button id="back-map" class="back-btn">' + glyph("back", 16) + '<span>Chapters</span></button>' +
     '<div class="topbar-chapter" style="--cc:' + c.color + '">' +
@@ -317,19 +435,30 @@ function renderTopbar() {
     '</div>' +
     '<div class="topbar-spacer"></div>' +
     '<div class="topbar-ctx">' +
-      '<label>Key<select id="ctx-key">' + keys + '</select></label>' +
-      '<label>Formula<select id="ctx-formula">' + FORMULAS.map((f) =>
-        '<option value="' + f + '"' + (state.contextFormula === f ? " selected" : "") + ">" + f + "</option>"
+      '<label>System<select id="ctx-system">' + SYSTEMS.map((s) =>
+        '<option value="' + s.id + '"' + (state.system === s.id ? " selected" : "") + ">" + s.label + "</option>"
       ).join("") + '</select></label>' +
+      ctx +
     '</div>';
   const back = sessionTopbar.querySelector("#back-map");
   if (back) back.addEventListener("click", showMap);
+  const reopen = () => {
+    if (state.activeChapter && state.contextLesson) practice.openChapter(state.activeChapter, state.contextLesson);
+  };
+  const ctxSystem = sessionTopbar.querySelector("#ctx-system");
+  if (ctxSystem) ctxSystem.addEventListener("change", async () => {
+    setStatus("Loading system…");
+    await setSystem(ctxSystem.value);
+    renderTopbar();
+    reopen();
+    setStatus("Ready");
+  });
   const ctxKey = sessionTopbar.querySelector("#ctx-key");
   if (ctxKey) ctxKey.addEventListener("change", async () => {
     setStatus("Loading key…");
     await setKey(ctxKey.value);
     renderTopbar();
-    if (state.activeChapter && state.contextLesson) practice.openChapter(state.activeChapter, state.contextLesson);
+    reopen();
     setStatus("Ready");
   });
   const ctxFormula = sessionTopbar.querySelector("#ctx-formula");
@@ -337,7 +466,23 @@ function renderTopbar() {
     setStatus("Loading formula…");
     await setFormula(ctxFormula.value);
     renderTopbar();
-    if (state.activeChapter && state.contextLesson) practice.openChapter(state.activeChapter, state.contextLesson);
+    reopen();
+    setStatus("Ready");
+  });
+  const ctxFamily = sessionTopbar.querySelector("#ctx-family");
+  if (ctxFamily) ctxFamily.addEventListener("change", async () => {
+    setStatus("Loading family…");
+    await setAbsFamily(parseInt(ctxFamily.value, 10));
+    renderTopbar();
+    reopen();
+    setStatus("Ready");
+  });
+  const ctxExercise = sessionTopbar.querySelector("#ctx-exercise");
+  if (ctxExercise) ctxExercise.addEventListener("change", async () => {
+    setStatus("Loading exercise…");
+    await setAbsLesson(ctxExercise.value);
+    renderTopbar();
+    reopen();
     setStatus("Ready");
   });
 }
