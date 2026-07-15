@@ -90,10 +90,13 @@ export const API = {
    * pages so the chapter picker can match by exercise_number / exercise_type.
    * Any falsy parameter is omitted so the call can be scoped at any level
    * (full category for subgroup options, or a fully specific single lesson).
+   * ``pageSize`` lets the combo category fetch use a large page to cut the
+   * number of round-trips (default 50 → e.g. 2000 for a full category).
    */
   async listAbsolutePolyLessons({
     category = null, quality = null, intervalSize = null, inversion = null,
     phase = null, part = null, exerciseNumber = null, exerciseType = null,
+    pageSize = null,
   } = {}) {
     const p = new URLSearchParams();
     p.set("texture", "poly");
@@ -105,6 +108,7 @@ export const API = {
     if (part) p.set("part", part);
     if (exerciseNumber !== null && exerciseNumber !== "") p.set("exercise_number", exerciseNumber);
     if (exerciseType) p.set("exercise_type", exerciseType);
+    if (pageSize) p.set("page_size", pageSize);
     return fetchAllPages(`${ABS_BASE}/lessons/?${p.toString()}`);
   },
 

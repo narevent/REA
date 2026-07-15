@@ -1,5 +1,6 @@
 from rest_framework import viewsets
 
+from ...pagination import LargePageSizePagination
 from .models import Bar, ChromaticBase, Lesson, MusicEvent
 from .serializers import (
     BarSerializer,
@@ -23,12 +24,16 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
     frontend only needs scalar fields to filter and pick a lesson id, then
     fetches the bars via the DETAIL endpoint for the one lesson it renders.
     RETRIEVE uses the full :class:`LessonSerializer` with nested bars/events.
+    Pagination allows a client ``page_size`` (capped at 2000) so the
+    combination-category fetch can be done in few round-trips.
     """
     queryset = Lesson.objects.select_related("base").order_by(
         "texture", "category", "span", "grades",
         "quality", "interval_size", "inversion",
         "part", "phase", "exercise_number",
     )
+    serializer_class = LessonSerializer
+    pagination_class = LargePageSizePagination
     filterset_fields = {
         "texture": ["exact"],
         "category": ["exact"],

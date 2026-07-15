@@ -431,20 +431,40 @@ async function buildComboLesson(cat) {
     lessons = lessons.concat(scoped);
   });
   if (!lessons.length) return null;
-  // Fetch the bars for every leaf in parallel (list items are summary-only).
+  // Fetch the bars for every leaf with bounded concurrency (list items are
+  // summary-only).  De-duplicate by id.
   const seen = new Set();
   const uniq = lessons.filter((l) => (seen.has(l.id) ? false : (seen.add(l.id), true)));
-  const withBars = await Promise.all(uniq.map((l) => API.getLesson(l.id)));
+  const withBars = await mapBounded(uniq, 6, (l) => API.getLesson(l.id));
   return mergeLessons(withBars);
+}
+
+/** Run async mappers over `items` with a bounded concurrency so we don't
+ *  fire hundreds of simultaneous HTTP requests (the dev server is
+ *  single-threaded; production shouldn't be flooded either). */
+async function mapBounded(items, limit, mapper) {
+  const out = new Array(items.length);
+  let i = 0;
+  const workers = new Array(Math.min(limit, items.length)).fill(0).map(async () => {
+    while (i < items.length) {
+      const idx = i++;
+      out[idx] = await mapper(items[idx], idx);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 /** Fetch the single-subgroup lessons for an absolute-poly combination across
  *  every selected subgroup option + quality + phase, scoped to the selected
- *  part.  The leaves are derived client-side from the already-cached category
- *  fetch (no per-leaf list round-trips), then their bars are fetched in
- *  parallel via the detail endpoint and merged into one practice lesson.
- *  Returns the merged lesson object (or null). */
-async function buildAbsComboLesson(cat) {
+ *  part and (optionally) one exercise number.  When ``exerciseNumber`` is
+ *  given, only the lesson matching that chapter is taken per
+ *  subgroup×quality×phase — so a combination practice session holds one bar
+ *  set per selected leaf instead of every exercise at once (which would be
+ *  hundreds of bars).  The leaves are derived client-side from the cached
+ *  category fetch; their bars are fetched with bounded concurrency via the
+ *  detail endpoint and merged.  Returns the merged lesson object (or null). */
+async function buildAbsComboLesson(cat, exerciseNumber) {
   const baseCat = comboBaseCategory(cat);
   const cfg = absComboSubgroupCfg(cat);
   if (!cfg) return null;
@@ -464,23 +484,29 @@ async function buildAbsComboLesson(cat) {
     const useQuals = quals.length ? quals : qualsForSub;
     for (const q of useQuals) {
       for (const ph of selPhases) {
-        const matched = all.filter((l) =>
+        let matched = all.filter((l) =>
           (l.category || "") === baseCat &&
           (l[cfg.field] || "") === sub &&
           (q === "" ? !l.quality : (l.quality || "") === q) &&
           (l.phase || 0) === ph &&
           (!part || (l.part || "") === part));
+        // Scope to one exercise per leaf when a chapter is chosen, so the
+        // merged lesson stays a single practice set (not every exercise).
+        if (exerciseNumber != null) {
+          const exact = matched.find((l) => l.exercise_number === exerciseNumber);
+          matched = exact ? [exact] : [];
+        }
         leaves.push(...matched);
       }
     }
   }
   if (!leaves.length) return null;
-  // Fetch the bars for every selected leaf in parallel (the list endpoint
-  // is summary-only; bars come from the detail endpoint).  De-duplicate by id
-  // so a leaf appearing twice (e.g. single-quality intervals) is fetched once.
+  // Fetch the bars for every selected leaf with bounded concurrency (the
+  // list endpoint is summary-only; bars come from the detail endpoint).
+  // De-duplicate by id so a leaf appearing twice is fetched once.
   const seen = new Set();
   const uniq = leaves.filter((l) => (seen.has(l.id) ? false : (seen.add(l.id), true)));
-  const withBars = await Promise.all(uniq.map((l) => API.getAbsoluteLesson(l.id)));
+  const withBars = await mapBounded(uniq, 6, (l) => API.getAbsoluteLesson(l.id));
   return mergeLessons(withBars);
 }
 
@@ -750,7 +776,15 @@ async function ensureComboLesson(cat) {
   }
 
   // Build the merged lesson across every selected key + inversion.
-  const merged = await buildComboLesson(cat);
+  let merged;
+  try {
+    merged = await buildComboLesson(cat);
+  } catch (e) {
+    state.contextLesson = null;
+    state.polyLessons = [];
+    setStatus("Could not load combinations: " + e.message);
+    return;
+  }
   if (!merged) {
     state.contextLesson = null;
     state.polyLessons = [];
@@ -771,9 +805,10 @@ async function ensureAbsPolyLesson() {
 
   // 1. Fetch the whole category once (paginated-safe) so we can offer
   //    complete subgroup + quality option lists.  Cache it per category.
+  //    A large page_size keeps the category fetch to 1-2 round-trips.
   const cacheKey = cat;
   if (state._polyCatCacheKey !== cacheKey) {
-    state.polyCategoryLessons = await API.listAbsolutePolyLessons({ category: cat });
+    state.polyCategoryLessons = await API.listAbsolutePolyLessons({ category: cat, pageSize: 2000 });
     state._polyCatCacheKey = cacheKey;
   }
   const all = state.polyCategoryLessons;
@@ -875,16 +910,19 @@ async function ensureAbsComboLesson(cat) {
   const cfg = absComboSubgroupCfg(cat);
   if (!cfg) { state.contextLesson = null; return; }
 
-  // Fetch the base category once for option/part derivation (cached).
+  // Fetch the base category once for option/part derivation (cached).  A
+  // large page_size keeps the fetch to 1-2 round-trips.
   const cacheKey = cat;
   if (state._absComboCatKey !== cacheKey) {
-    state.polyCategoryLessons = await API.listAbsolutePolyLessons({ category: baseCat });
+    state.polyCategoryLessons = await API.listAbsolutePolyLessons({ category: baseCat, pageSize: 2000 });
     state._absComboCatKey = cacheKey;
   }
   const all = state.polyCategoryLessons;
 
   // Available subgroup options (restricted to those present in the data).
-  state.absComboSubgroups = computeAbsComboSubgroups(cat, all);
+  // Stored as plain values (like absComboQualities/absComboPhases) — the
+  // selectors below and buildAbsComboLesson index absComboSelected by value.
+  state.absComboSubgroups = computeAbsComboSubgroups(cat, all).map((o) => o.value);
   // Available qualities = union of every subgroup option's qualities.
   const qualSet = new Set();
   for (const o of cfg.options) for (const q of o.qualities) qualSet.add(q.value);
@@ -906,8 +944,19 @@ async function ensureAbsComboLesson(cat) {
     state.polyPart = state.polyParts[0] ? state.polyParts[0].value : null;
   }
 
-  // Build the merged lesson across every selected subgroup × quality × phase.
-  const merged = await buildAbsComboLesson(cat);
+  // Build the merged lesson across every selected subgroup × quality ×
+  // phase, scoped to exercise 1 by default (the first chapter).  Opening a
+  // chapter rebuilds with that chapter's exercise number.
+  const chapterId = (state.activeChapter && state.activeChapter.id) || 1;
+  let merged;
+  try {
+    merged = await buildAbsComboLesson(cat, chapterId);
+  } catch (e) {
+    state.contextLesson = null;
+    state.polyLessons = [];
+    setStatus("Could not load combinations: " + e.message);
+    return;
+  }
   if (!merged) {
     state.contextLesson = null;
     state.polyLessons = [];
@@ -1624,13 +1673,31 @@ async function openChapter(chapterId) {
   if (!chapter) return;
   const absPolyCombo = state.texture === "poly" && state.system === "absolute" &&
     isComboCategory(state.polyCategory ? state.polyCategory.value : "");
-  if (state.texture === "poly" && state.system === "absolute" && !absPolyCombo) {
+  if (absPolyCombo) {
+    // Rebuild the combination scoped to this chapter's exercise number so the
+    // merged lesson holds one bar set per selected leaf for this exercise.
+    state.activeChapter = chapter;
+    const cat = state.polyCategory ? state.polyCategory.value : "";
+    let merged;
+    try {
+      merged = await buildAbsComboLesson(cat, chapterId);
+    } catch (e) {
+      setStatus("Could not load combinations: " + e.message);
+      return;
+    }
+    if (!merged) {
+      setStatus("\"" + chapter.title + "\" isn't available for the selected combinations / " + polyPartLabel(state.polyPart) + ".");
+      return;
+    }
+    merged.system = "absolute";
+    state.contextLesson = merged;
+  } else if (state.texture === "poly" && state.system === "absolute") {
     const found = await pickAbsPolyLesson(chapterId);
     if (!found) {
       setStatus("\"" + chapter.title + "\" isn't available for " + (state.polyCategory ? state.polyCategory.label : "") + " / " + polyPartLabel(state.polyPart) + ".");
       return;
     }
-  } else if (state.system === "absolute" && !absPolyCombo) {
+  } else if (state.system === "absolute") {
     const found = await pickAbsLesson(chapterId);
     if (!found) {
       setStatus("\"" + chapter.title + "\" isn't available for " + state.absFamily.label + " / " + absPartLabel(state.absPart) + ".");
