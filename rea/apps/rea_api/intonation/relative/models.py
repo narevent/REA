@@ -134,22 +134,62 @@ class KeyModel(models.Model):
 
 
 class Lesson(models.Model):
-    """A formula lesson built on top of a key.
+    """A lesson built on top of a key.
 
-    Populated from the ``lessons`` JSON files.
+    Populated from the ``lessons`` JSON files.  Two textures exist:
+
+    * **mono** (melodic): single-voice formula lessons under ``lessons/mono``,
+      identified by ``formula_name`` + ``variant``.
+    * **poly** (harmonic): multi-voice lessons under ``lessons/poly`` —
+      diatonic triads / seventh chords (with figured-bass inversions),
+      intervals within the key, and the tonal-trichord formula.  Identified
+      by ``category`` (+ ``inversion`` / ``interval_name``) + ``part`` +
+      ``variant``.
     """
+
+    class Texture(models.TextChoices):
+        MONO = "mono", "Monophonic (melodic)"
+        POLY = "poly", "Polyphonic (harmonic)"
+
+    class PolyCategory(models.TextChoices):
+        FORMULA = "Formula", "Tonal-trichord formula"
+        CHORDS_THIRDS = "ChordsThirds", "Triads"
+        CHORDS_SEVENTHS = "ChordsSevenths", "Seventh chords"
+        INTERVALS = "Intervals", "Intervals"
 
     key_model = models.ForeignKey(
         KeyModel, related_name="lessons", on_delete=models.CASCADE
     )
+    texture = models.CharField(
+        max_length=8, choices=Texture.choices, default=Texture.MONO, db_index=True
+    )
     formula_name = models.CharField(
-        max_length=255,
-        help_text="Formula family: 'Octave', 'Quinta', 'Extended', etc.",
+        max_length=255, default="", blank=True, db_index=True,
+        help_text="Mono formula family: 'Octave', 'Quinta', 'Extended'. Empty for poly.",
+    )
+    category = models.CharField(
+        max_length=32, choices=PolyCategory.choices, default="", blank=True, db_index=True,
+        help_text="Poly lesson category. Empty for mono.",
+    )
+    inversion = models.CharField(
+        max_length=8, default="", blank=True, db_index=True,
+        help_text="Figured-bass digits for poly chords: 53/63/64 (triads), 7/65/43/2 (sevenths).",
+    )
+    interval_name = models.CharField(
+        max_length=16, default="", blank=True, db_index=True,
+        help_text="Poly interval family: 'Thirds', 'Fourths', 'Fifths', 'Sixths', 'Sevenths'.",
+    )
+    part = models.CharField(
+        max_length=8, default="", blank=True, db_index=True,
+        help_text="Poly progressive section: '1', '2', '1-2', '3', '1-3'. Empty for mono.",
     )
     variant = models.CharField(
-        max_length=255,
-        default="",
-        help_text="Sub-variant: 'SKALA', 'ABC', 'KROM', '' (plain), ...",
+        max_length=255, default="", db_index=True,
+        help_text=(
+            "Mono: 'SKALA', 'ABC', 'KROM', '' (plain), ... "
+            "Poly: 'v<N>_<F|ABC>[+T]' — v1 = guided model (chord walk-up / "
+            "interval with tonic), v2 = plain tones, v3 = letter names."
+        ),
     )
     source_file = models.CharField(max_length=512, default="")
     tempo = models.PositiveIntegerField(default=86)
@@ -161,10 +201,26 @@ class Lesson(models.Model):
 
     class Meta:
         app_label = "relative"
-        unique_together = ("key_model", "formula_name", "variant")
+        unique_together = (
+            "key_model", "texture", "formula_name",
+            "category", "inversion", "interval_name", "part", "variant",
+        )
+
+    @property
+    def display_name(self) -> str:
+        if self.texture == self.Texture.POLY:
+            bits = [self.get_category_display() or self.category]
+            if self.inversion:
+                bits.append("-".join(self.inversion))
+            if self.interval_name:
+                bits.append(self.interval_name)
+            if self.part:
+                bits.append(f"part {self.part}")
+            return f"{self.key_model.name} – " + " ".join(bits) + f" ({self.variant})"
+        return f"{self.key_model.name} – {self.formula_name} {self.variant}".strip()
 
     def __str__(self) -> str:
-        return f"{self.key_model} – {self.formula_name} {self.variant}".strip()
+        return self.display_name
 
 
 class Bar(models.Model):
@@ -191,6 +247,12 @@ class Bar(models.Model):
     music_mode_chord = models.CharField(max_length=64, default="")
     is_incomplete_bar = models.BooleanField(default=False)
     incomplete_bar_playback_count = models.PositiveSmallIntegerField(default=0)
+    label = models.CharField(
+        max_length=32,
+        default="",
+        blank=True,
+        help_text="Harmonic-function label from the source (e.g. Roman numeral 'I', 'IV').",
+    )
 
     class Meta:
         app_label = "relative"

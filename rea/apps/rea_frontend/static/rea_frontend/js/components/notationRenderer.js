@@ -12,7 +12,7 @@
  *  - per-note SVG references so the UI can highlight notes during playback.
  */
 
-import { modeChordToVexKey, noteNameToVexflow, parseNoteToken } from "../notation.js?v=41";
+import { modeChordToVexKey, noteNameToVexflow, parseNoteToken } from "../notation.js?v=45";
 
 const PX_PER_WHOLE = 260;
 const STAVE_PADDING = 26;
@@ -103,9 +103,15 @@ export class NotationRenderer {
     // Each bar's preferred width is driven by its note durations so notes
     // never collide.  These are upper bounds; rows scale down to fit.
     const prefWidths = bars.map((bar, i) => {
-      const totalWhole = (bar.notes || []).reduce(
-        (s, n) => s + (n.duration || 0.125), 0);
-      const noteArea = Math.ceil(totalWhole * PX_PER_WHOLE) + STAVE_PADDING * 2;
+      const notes = bar.notes || [];
+      const totalWhole = notes.reduce((s, n) => s + (n.duration || 0.125), 0);
+      // Width must fit *both* the total duration and every notehead: poly
+      // bars pack many short (sixteenth) notes whose total duration is small
+      // but which need horizontal room so they don't collide.  Reserve a
+      // minimum per-note slot and take the larger of the two estimates.
+      const durArea = Math.ceil(totalWhole * PX_PER_WHOLE);
+      const countArea = notes.length * 26; // ~26px per notehead + spacing
+      const noteArea = Math.max(durArea, countArea) + STAVE_PADDING * 2;
       return Math.max(MIN_BAR_WIDTH, noteArea) + (i === 0 ? prefixWidth : 0);
     });
 
@@ -175,6 +181,23 @@ export class NotationRenderer {
       stave.setContext(context).draw();
       const noteStartX = stave.getNoteStartX();
       const noteStart = globalIndex; // first note index of this bar
+
+      // Per-bar text label (e.g. Roman-numeral harmonic function "I", "IV"
+      // on polyphonic lessons) drawn above the stave.  NB: we deliberately
+      // do NOT use stave.setText() — in VexFlow 5.0.0 adding a text modifier
+      // collapses stave.getWidth() to the text's measured width, shrinking
+      // the staff to a sliver.  Drawing the label directly via the context
+      // after the stave avoids that bug entirely.  We estimate the label
+      // width (~8px per char at this font size) to center it on the bar.
+      if (bar.label) {
+        try {
+          const lx = stave.getX() + (stave.getWidth() / 2) - (bar.label.length * 4);
+          const ly = placement[i].y - 6;
+          context.setFont("Arial", 11);
+          context.setFillStyle("#1a1a1a");
+          context.fillText(bar.label, lx, ly);
+        } catch (e) { /* label best-effort */ }
+      }
 
       const barStart = Object.assign({}, effective);
       const notes = [];

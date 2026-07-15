@@ -11,7 +11,7 @@
  * without depending on the main app state.
  */
 
-import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=41";
+import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=45";
 
 const DEFAULT_TEMPO = 80;
 const OFFSET_GAIN = 12;
@@ -30,10 +30,21 @@ export function keySigMap(item) {
   return {};
 }
 
-/** Tempo, with a sane floor. */
+/** Tempo, with a sane floor.
+ *
+ * Polyphonic (harmonic) lessons notate their material in sixteenths
+ * (duration 0.0625) rather than the eighths (0.125) used by the monophonic
+ * (melodic) lessons, and they carry a higher tempo — so the same
+ * `wholeMs = 4·60000 / tempo` mapping makes each poly note sound at roughly
+ * half the millisecond length of a mono note, i.e. they play back far too
+ * fast.  The mono exercises feel right, so to give the poly exercises the
+ * same comfortable pace we halve the effective tempo for poly-texture items
+ * (a sixteenth at half-tempo lands on the same wall-clock duration as an
+ * eighth at full tempo).  Mono and key-model items are unaffected. */
 export function tempoOf(item) {
-  const t = item.tempo || DEFAULT_TEMPO;
-  return t > 10 ? t : DEFAULT_TEMPO;
+  const raw = item.tempo || DEFAULT_TEMPO;
+  const t = raw > 10 ? raw : DEFAULT_TEMPO;
+  return item.texture === "poly" ? t / 2 : t;
 }
 
 /** VexFlow key name for the lesson/key (from the first bar's mode chord). */

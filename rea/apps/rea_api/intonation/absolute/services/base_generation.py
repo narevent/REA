@@ -42,6 +42,7 @@ def import_chromatic_base(data: dict, filename: str, *, clear: bool = True) -> C
             music_mode_chord=raw_bar.music_mode_chord,
             is_incomplete_bar=raw_bar.is_incomplete_bar,
             incomplete_bar_playback_count=raw_bar.incomplete_bar_playback_count,
+            label=raw_bar.label,
         )
         for ev_index, ev in enumerate(raw_bar.events):
             note = ev.note

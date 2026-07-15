@@ -52,6 +52,7 @@ class RawBar:
     music_mode_chord: str = ""
     is_incomplete_bar: bool = False
     incomplete_bar_playback_count: int = 0
+    label: str = ""  # text_utility harmonic-function label (e.g. 'I', 'IV')
     incdec: list[IncDec] = field(default_factory=list)
     events: list[RawEvent] = field(default_factory=list)
 
@@ -89,12 +90,14 @@ def parse_music_strain(data: dict) -> RawMusicStrain:
         default_music_clef=ms.get("default_music_clef", "Violin"),
     )
     for bar in ms.get("sequence", []) or []:
+        text_utility = bar.get("text_utility") or {}
         raw_bar = RawBar(
             music_clef=bar.get("music_clef", strain.default_music_clef),
             music_rhythm=bar.get("music_rhythm", "FreeStyle"),
             music_mode_chord=bar.get("music_mode_chord", ""),
             is_incomplete_bar=bool(bar.get("is_incomplete_bar", False)),
             incomplete_bar_playback_count=int(bar.get("incomplete_bar_playback_count", 0)),
+            label=str(text_utility.get("text", "") or "") if isinstance(text_utility, dict) else "",
             incdec=_normalise_incdec(bar.get("incdec")),
         )
         for ev in bar.get("music_event", []) or []:

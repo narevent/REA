@@ -190,6 +190,59 @@ body {
 .link-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; text-decoration: underline; font-family: var(--font-sans); margin-left: auto; }
 .link-btn:hover { color: var(--fg); }
 
+/* Combinations multi-select (inversions + tonalities) */
+.combo-selectors { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.combo-col { display: flex; flex-direction: column; gap: 6px; }
+.combo-col .ctx-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; }
+.combo-chks { display: flex; flex-wrap: wrap; gap: 6px; max-width: 360px; }
+.combo-chk { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--fg-dim); cursor: pointer; user-select: none; }
+.combo-chk input { accent-color: var(--accent); cursor: pointer; margin: 0; }
+.combo-chk:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--fg); }
+
+/* Tonality popover (compact trigger + dropdown panel) */
+.combo-pop { position: relative; }
+.combo-trigger {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
+  background: var(--panel-2); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 999px; font-size: 13px; font-family: var(--font-sans); cursor: pointer;
+}
+.combo-trigger:hover { border-color: var(--accent); }
+.combo-trigger::after {
+  content: ""; width: 0; height: 0; border-left: 4px solid transparent;
+  border-right: 4px solid transparent; border-top: 5px solid currentColor; opacity: 0.6; margin-left: 2px;
+}
+.combo-pop-panel {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+  width: min(420px, 92vw);
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md);
+  box-shadow: var(--shadow-2); padding: 10px;
+}
+/* Map (foot) anchors left; align the popover to the trigger's left edge. */
+.map-foot .combo-pop-panel { right: auto; left: 0; }
+/* Session topbar anchors right; flip the popover left so it never overflows. */
+.topbar-ctx .combo-pop-panel { right: 0; left: auto; }
+.combo-pop-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border-soft); }
+.combo-pop-act {
+  background: var(--panel-2); color: var(--fg-dim); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 9px; font-size: 11px; font-family: var(--font-sans); cursor: pointer;
+}
+.combo-pop-act:hover { color: var(--fg); border-color: var(--accent); }
+/* Two side-by-side columns (Major | Minor), each a tight checkbox grid. */
+.combo-pop-scroll { display: flex; gap: 14px; max-height: 260px; overflow-y: auto; }
+.combo-pop-group { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.combo-pop-group-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; margin-bottom: 2px; }
+.combo-pop-chk {
+  display: flex; align-items: center; gap: 7px; padding: 3px 6px; border-radius: 7px;
+  font-size: 12px; color: var(--fg-dim); cursor: pointer; user-select: none; line-height: 1.2;
+}
+.combo-pop-chk:hover { background: var(--panel-2); }
+.combo-pop-chk input { accent-color: var(--accent); cursor: pointer; margin: 0; width: 13px; height: 13px; }
+.combo-pop-chk:has(input:checked) { color: var(--fg); }
+
+.topbar-ctx .combo-selectors { gap: 22px; }
+.topbar-ctx .combo-chk { padding: 5px 9px; font-size: 11px; }
+.topbar-ctx .combo-trigger { padding: 7px 11px; font-size: 12px; }
+
 /* ======================================================================= */
 /* Session view                                                            */
 /* ======================================================================= */

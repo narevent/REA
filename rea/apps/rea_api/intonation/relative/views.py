@@ -4,6 +4,7 @@ from .models import Bar, Lesson, KeyModel, MusicEvent, ScaleModel
 from .serializers import (
     BarSerializer,
     LessonSerializer,
+    LessonSummarySerializer,
     KeyModelSerializer,
     MusicEventSerializer,
     ScaleModelSerializer,
@@ -22,15 +23,33 @@ class KeyModelViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class LessonViewSet(viewsets.ReadOnlyModelViewSet):
+    """Relative lessons.
+
+    LIST uses :class:`LessonSummarySerializer` (no nested bars/events) so
+    category fetches stay small and fast — the frontend only needs scalar
+    fields to filter and pick a lesson id, then fetches the bars via the
+    DETAIL endpoint for the one lesson it renders.  RETRIEVE uses the full
+    :class:`LessonSerializer` with nested bars/events.
+    """
     queryset = Lesson.objects.select_related("key_model").order_by(
-        "key_model__name", "formula_name", "variant"
+        "key_model__name", "texture", "formula_name",
+        "category", "inversion", "interval_name", "part", "variant",
     )
-    serializer_class = LessonSerializer
     filterset_fields = {
         "key_model": ["exact"],
+        "texture": ["exact"],
         "formula_name": ["exact", "icontains"],
+        "category": ["exact"],
+        "inversion": ["exact"],
+        "interval_name": ["exact"],
+        "part": ["exact"],
         "variant": ["exact", "icontains"],
     }
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return LessonSummarySerializer
+        return LessonSerializer
 
 
 class BarViewSet(viewsets.ReadOnlyModelViewSet):

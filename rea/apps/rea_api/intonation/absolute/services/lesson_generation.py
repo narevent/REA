@@ -39,22 +39,24 @@ def import_lesson(data: dict, filename: str, *, clear: bool = True) -> Optional[
     if base is None:
         return None
 
-    if clear:
-        Lesson.objects.filter(
-            category=meta.category,
-            span=meta.span,
-            grades=meta.grades,
-            part=meta.part,
-            exercise_number=meta.exercise_number,
-        ).delete()
-
-    lesson = Lesson.objects.create(
-        base=base,
+    identity = dict(
+        texture=meta.texture,
         category=meta.category,
         span=meta.span,
         grades=meta.grades,
+        quality=meta.quality,
+        interval_size=meta.interval_size,
+        inversion=meta.inversion,
         part=meta.part,
+        phase=meta.phase,
         exercise_number=meta.exercise_number,
+    )
+    if clear:
+        Lesson.objects.filter(**identity).delete()
+
+    lesson = Lesson.objects.create(
+        base=base,
+        **identity,
         exercise_type=meta.exercise_type,
         timed=meta.timed,
         chromatic=meta.chromatic,
@@ -76,6 +78,7 @@ def import_lesson(data: dict, filename: str, *, clear: bool = True) -> Optional[
             music_mode_chord=raw_bar.music_mode_chord,
             is_incomplete_bar=raw_bar.is_incomplete_bar,
             incomplete_bar_playback_count=raw_bar.incomplete_bar_playback_count,
+            label=raw_bar.label,
         )
         for ev_index, ev in enumerate(raw_bar.events):
             note = ev.note

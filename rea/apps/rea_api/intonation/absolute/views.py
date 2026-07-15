@@ -5,6 +5,7 @@ from .serializers import (
     BarSerializer,
     ChromaticBaseSerializer,
     LessonSerializer,
+    LessonSummarySerializer,
     MusicEventSerializer,
 )
 
@@ -15,20 +16,39 @@ class ChromaticBaseViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class LessonViewSet(viewsets.ReadOnlyModelViewSet):
+    """Absolute lessons.
+
+    LIST uses :class:`LessonSummarySerializer` (no nested bars/events, no
+    multi-KB ``raw`` blob) so category fetches stay small and fast — the
+    frontend only needs scalar fields to filter and pick a lesson id, then
+    fetches the bars via the DETAIL endpoint for the one lesson it renders.
+    RETRIEVE uses the full :class:`LessonSerializer` with nested bars/events.
+    """
     queryset = Lesson.objects.select_related("base").order_by(
-        "category", "span", "grades", "part", "exercise_number"
+        "texture", "category", "span", "grades",
+        "quality", "interval_size", "inversion",
+        "part", "phase", "exercise_number",
     )
-    serializer_class = LessonSerializer
     filterset_fields = {
+        "texture": ["exact"],
         "category": ["exact"],
         "span": ["exact"],
         "grades": ["exact"],
+        "quality": ["exact"],
+        "interval_size": ["exact"],
+        "inversion": ["exact"],
         "part": ["exact"],
+        "phase": ["exact"],
         "exercise_number": ["exact"],
         "exercise_type": ["exact", "icontains"],
         "timed": ["exact"],
         "chromatic": ["exact"],
     }
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return LessonSummarySerializer
+        return LessonSerializer
 
 
 class BarViewSet(viewsets.ReadOnlyModelViewSet):

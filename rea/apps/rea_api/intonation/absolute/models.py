@@ -38,11 +38,34 @@ class ChromaticBase(models.Model):
 
 
 class Lesson(models.Model):
-    """An absolute-pitch exercise, from the ``lessons/mono`` JSON files."""
+    """An absolute-pitch exercise, from the ``lessons/mono`` and
+    ``lessons/poly`` JSON files.
+
+    Two textures exist:
+
+    * **mono** (melodic): pitch-formula exercises under ``lessons/mono``,
+      identified by ``category`` (Formula/FormulaInverse) + ``span`` +
+      ``grades`` + ``part`` + ``exercise_number``.
+    * **poly** (harmonic): interval/chord exercises under ``lessons/poly``,
+      identified by ``category`` (Intervals/ChordsThirds/ChordsSevenths) +
+      ``quality`` / ``interval_size`` + ``inversion`` + ``part`` + ``phase``
+      + ``exercise_number``.  Each part runs in two pedagogical phases:
+      phase 1 presents the material melodically (models, ex 1-5), phase 2
+      harmonically (simultaneous sounding, ex 1-10).
+    """
+
+    class Texture(models.TextChoices):
+        MONO = "mono", "Monophonic (melodic)"
+        POLY = "poly", "Polyphonic (harmonic)"
 
     class Category(models.TextChoices):
+        # mono
         FORMULA = "Formula", "Formula"
         FORMULA_INVERSE = "FormulaInverse", "Formula inverse"
+        # poly
+        INTERVALS = "Intervals", "Intervals"
+        CHORDS_THIRDS = "ChordsThirds", "Triads"
+        CHORDS_SEVENTHS = "ChordsSevenths", "Seventh chords"
 
     class Span(models.TextChoices):
         QUINTA = "Quinta", "Quinta (within a fifth)"
@@ -52,26 +75,49 @@ class Lesson(models.Model):
     base = models.ForeignKey(
         ChromaticBase, related_name="lessons", on_delete=models.PROTECT
     )
-    category = models.CharField(max_length=32, choices=Category.choices)
-    span = models.CharField(max_length=32, choices=Span.choices)
+    texture = models.CharField(
+        max_length=8, choices=Texture.choices, default=Texture.MONO, db_index=True
+    )
+    category = models.CharField(max_length=32, choices=Category.choices, db_index=True)
+    span = models.CharField(
+        max_length=32, choices=Span.choices, default="", blank=True, db_index=True,
+        help_text="Mono pitch range. Empty for poly.",
+    )
     grades = models.CharField(
-        max_length=16,
-        default="",
-        blank=True,
-        help_text="Extended-span grade level: '2Grades', '3Grades' or ''.",
+        max_length=16, default="", blank=True, db_index=True,
+        help_text="Mono Extended-span grade level: '2Grades', '3Grades' or ''.",
+    )
+    quality = models.CharField(
+        max_length=32, default="", blank=True, db_index=True,
+        help_text=(
+            "Poly quality: chord quality ('DominantSeventh', ..., 'Major', "
+            "'Diminished') or interval quality ('Major', 'Minor', 'Perfect', "
+            "'Augmented'; empty for fifths/octaves)."
+        ),
+    )
+    interval_size = models.CharField(
+        max_length=16, default="", blank=True, db_index=True,
+        help_text="Poly interval size: 'Seconds'..'Sevenths', 'Eights' (octaves).",
+    )
+    inversion = models.CharField(
+        max_length=8, default="", blank=True, db_index=True,
+        help_text="Figured-bass digits for poly chords: 53/63/64 (triads), 7/65/43/2 (sevenths).",
     )
     part = models.CharField(
-        max_length=8,
-        default="",
-        blank=True,
+        max_length=8, default="", blank=True, db_index=True,
         help_text="Progressive section: '1'..'4' or cumulative '1-2', '1-3', '1-4'; '' when the span has no parts.",
     )
+    phase = models.PositiveSmallIntegerField(
+        default=0, db_index=True,
+        help_text="Poly pedagogical phase: 1 = melodic presentation, 2 = harmonic. 0 = n/a (mono).",
+    )
     exercise_number = models.PositiveSmallIntegerField(
+        db_index=True,
         help_text="The ex-N number from the source filename (1-12)."
     )
     exercise_type = models.CharField(
-        max_length=64,
-        help_text="e.g. 'listening_model', 'guessing_notes', 'singing_given_model'.",
+        max_length=64, db_index=True,
+        help_text="e.g. 'listening_model', 'guessing_notes', 'guessing_chord'.",
     )
     timed = models.BooleanField(default=False)
     chromatic = models.BooleanField(
@@ -87,16 +133,34 @@ class Lesson(models.Model):
 
     class Meta:
         app_label = "absolute"
-        unique_together = ("category", "span", "grades", "part", "exercise_number")
-        ordering = ("category", "span", "grades", "part", "exercise_number")
+        unique_together = (
+            "texture", "category", "span", "grades",
+            "quality", "interval_size", "inversion",
+            "part", "phase", "exercise_number",
+        )
+        ordering = (
+            "texture", "category", "span", "grades",
+            "quality", "interval_size", "inversion",
+            "part", "phase", "exercise_number",
+        )
 
     @property
     def display_name(self) -> str:
-        bits = [self.category, self.span]
+        bits = [self.category]
+        if self.span:
+            bits.append(self.span)
         if self.grades:
             bits.append(self.grades)
+        if self.quality:
+            bits.append(self.quality)
+        if self.interval_size:
+            bits.append(self.interval_size)
+        if self.inversion:
+            bits.append("-".join(self.inversion))
         if self.part:
             bits.append(f"part {self.part}")
+        if self.phase:
+            bits.append(f"phase {self.phase}")
         label = f"ex-{self.exercise_number} {self.exercise_type.replace('_', ' ')}"
         if self.timed:
             label += " (timed)"
@@ -124,6 +188,12 @@ class Bar(models.Model):
     music_mode_chord = models.CharField(max_length=64, default="")
     is_incomplete_bar = models.BooleanField(default=False)
     incomplete_bar_playback_count = models.PositiveSmallIntegerField(default=0)
+    label = models.CharField(
+        max_length=32,
+        default="",
+        blank=True,
+        help_text="Text label from the source (e.g. chord/interval name shown above the bar).",
+    )
 
     class Meta:
         app_label = "absolute"

@@ -1,13 +1,14 @@
-"""Import ``lessons`` (formula) JSON files into the database.
+"""Import ``lessons`` JSON files (mono and poly) into the database.
 
 Usage::
 
     python manage.py import_formula
-    python manage.py import_formula relative/lessons/Major/Octave
-    python manage.py import_formula relative/lessons/Major/Octave/CMajor
+    python manage.py import_formula relative/lessons/mono/Major/Octave
+    python manage.py import_formula relative/lessons/poly/ChordsThirds
 
-Requires that the referenced key models already exist in the database
-(run ``import_key_model`` first).
+Files under a ``poly`` folder are imported as polyphonic (harmonic) lessons;
+everything else as monophonic formula lessons.  Requires that the referenced
+key models already exist in the database (run ``import_key_model`` first).
 """
 
 from __future__ import annotations
@@ -17,9 +18,11 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 
 from ...models import KeyModel
 from ...services.lesson_generation import generate_lesson_for_key, import_lesson
+from ...services.poly_import import import_poly_lesson
 
 
 class Command(BaseCommand):
@@ -68,30 +71,33 @@ class Command(BaseCommand):
 
         created = 0
         skipped = 0
-        for fp in files:
-            rel = fp.relative_to(data_dir.parent)
-            # ``__``-prefixed files are template/backup copies (their content
-            # names a different key than the folder they live in) — skip them.
-            if fp.name.startswith("__"):
-                skipped += 1
-                continue
-            try:
-                data = json.loads(fp.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as exc:
-                self.stderr.write(self.style.ERROR(f"  ! {rel}: {exc}"))
-                continue
-            ex = import_lesson(data, str(rel), clear=options["clear"])
-            if ex is None:
-                self.stderr.write(self.style.WARNING(f"  ~ {rel}: no matching key model, skipped"))
-                skipped += 1
-                continue
-            self.stdout.write(self.style.SUCCESS(
-                f"  + {ex.key_model.name} – {ex.formula_name} {ex.variant}".strip()
-            ))
-            created += 1
+        with transaction.atomic():
+            for fp in files:
+                rel = fp.relative_to(data_dir.parent)
+                # ``_``-prefixed files are template/backup copies (their content
+                # names a different key than the folder they live in) — skip them.
+                if fp.name.startswith("_"):
+                    skipped += 1
+                    continue
+                try:
+                    data = json.loads(fp.read_text(encoding="utf-8"))
+                except json.JSONDecodeError as exc:
+                    self.stderr.write(self.style.ERROR(f"  ! {rel}: {exc}"))
+                    continue
+                is_poly = "poly" in rel.parts
+                if is_poly:
+                    ex = import_poly_lesson(data, str(rel), clear=options["clear"])
+                else:
+                    ex = import_lesson(data, str(rel), clear=options["clear"])
+                if ex is None:
+                    self.stderr.write(self.style.WARNING(f"  ~ {rel}: unparseable or no matching key model, skipped"))
+                    skipped += 1
+                    continue
+                self.stdout.write(self.style.SUCCESS(f"  + {ex}"))
+                created += 1
 
-            if options["generate_all_keys"]:
-                self._regenerate_for_all_keys(ex)
+                if options["generate_all_keys"] and not is_poly:
+                    self._regenerate_for_all_keys(ex)
 
         self.stdout.write(self.style.SUCCESS(
             f"\nImported {created} lesson(s); skipped {skipped}."

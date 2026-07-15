@@ -27,12 +27,27 @@ from typing import Optional
 # one place.
 from ...relative.services.json_import import parse_music_strain  # noqa: F401
 
-_CATEGORIES = {"formula": "Formula", "formulainverse": "FormulaInverse"}
+_CATEGORIES = {
+    "formula": "Formula",
+    "formulainverse": "FormulaInverse",
+    "intervals": "Intervals",
+    "chordsthirds": "ChordsThirds",
+    "chordssevenths": "ChordsSevenths",
+}
+_MONO_CATEGORIES = {"Formula", "FormulaInverse"}
 _SPANS = {"octave": "Octave", "quinta": "Quinta", "extended": "Extended"}
 _GRADES = {"2grades": "2Grades", "3grades": "3Grades"}
+_INTERVAL_SIZES = {
+    "Seconds", "Thirds", "Fourths", "Fifths", "Sixths", "Sevenths", "Eights",
+}
+_INTERVAL_QUALITIES = {"Major", "Minor", "Perfect", "Augmented"}
+_TRIAD_QUALITIES = {"Major", "Minor", "Augmented", "Diminished"}
 
 _PART_RE = re.compile(r"(\d+(?:-\d+)?)_part")
 _EX_RE = re.compile(r"ex-(\d+)")
+_PHASE_RE = re.compile(r"(\d)-phase")
+_SEVENTH_QUALITY_RE = re.compile(r"^\d+_(\w+Seventh)$")
+_INVERSION_DIRS = {"2", "7", "43", "53", "63", "64", "65"}
 # Everything between "ex-N_" and the trailing "_AF"/"_A-inv" marker holds the
 # exercise-type words plus optional flag tokens (timed / CHROMATIC / SCALE).
 _TYPE_RE = re.compile(r"ex-\d+_(.+?)_(?:AF|A-inv)")
@@ -42,12 +57,17 @@ _FLAG_TOKENS = {"timed", "chromatic", "scale"}
 
 @dataclass
 class LessonMeta:
-    category: str  # "Formula" / "FormulaInverse"
-    span: str  # "Octave" / "Quinta" / "Extended"
-    grades: str  # "2Grades" / "3Grades" / ""
+    texture: str  # "mono" / "poly"
+    category: str  # Formula / FormulaInverse / Intervals / ChordsThirds / ChordsSevenths
+    span: str  # mono: "Octave" / "Quinta" / "Extended"; "" for poly
+    grades: str  # mono: "2Grades" / "3Grades" / ""
+    quality: str  # poly: chord/interval quality or ""
+    interval_size: str  # poly Intervals: "Seconds".."Eights"
+    inversion: str  # poly chords: figured-bass digits
     part: str  # "1".."4", "1-2", "1-3", "1-4" or ""
+    phase: int  # poly: 1 or 2; 0 for mono
     exercise_number: int
-    exercise_type: str  # e.g. "guessing_notes"
+    exercise_type: str  # e.g. "guessing_notes", "guessing_chord"
     timed: bool
     chromatic: bool
 
@@ -55,29 +75,69 @@ class LessonMeta:
 def parse_lesson_path(path: str) -> Optional[LessonMeta]:
     """Derive :class:`LessonMeta` from an absolute lesson file path.
 
-    Returns ``None`` when the path does not look like an absolute lesson
-    file (no ``ex-N`` marker or no recognised category/span folders).
+    Handles both the mono tree (``lessons/mono/<Category>/<Span>/...``) and
+    the poly tree (``lessons/poly/<Category>/<Quality|Size>/...``).  Returns
+    ``None`` when the path does not look like an absolute lesson file.
     """
     parts = [p for p in path.replace("\\", "/").split("/") if p]
     fname = parts[-1] if parts else ""
+    if fname.startswith("_"):
+        return None  # helper/template copies
     stem = fname[:-5] if fname.endswith(".json") else fname
 
+    texture = "poly" if "poly" in parts else "mono"
     category = ""
     span = ""
     grades = ""
-    for p in parts[:-1]:
+    cat_index = -1
+    for idx, p in enumerate(parts[:-1]):
         low = p.lower()
-        if low in _CATEGORIES:
+        if low in _CATEGORIES and not category:
             category = _CATEGORIES[low]
+            cat_index = idx
         elif low in _SPANS:
             span = _SPANS[low]
         elif low in _GRADES:
             grades = _GRADES[low]
 
     ex_match = _EX_RE.search(stem)
-    if not category or not span or not ex_match:
+    if not category or not ex_match:
         return None
     exercise_number = int(ex_match.group(1))
+
+    quality = ""
+    interval_size = ""
+    inversion = ""
+    phase = 0
+    if texture == "poly":
+        if category in _MONO_CATEGORIES:
+            return None  # poly tree only holds interval/chord categories
+        sub_dirs = parts[cat_index + 1:-1]
+        if category == "ChordsSevenths":
+            for d in sub_dirs:
+                m = _SEVENTH_QUALITY_RE.match(d)
+                if m:
+                    quality = m.group(1)
+                elif d in _INVERSION_DIRS:
+                    inversion = d
+        elif category == "ChordsThirds":
+            for d in sub_dirs:
+                if d in _TRIAD_QUALITIES:
+                    quality = d
+                elif d in _INVERSION_DIRS:
+                    inversion = d
+        elif category == "Intervals":
+            for d in sub_dirs:
+                if d in _INTERVAL_SIZES:
+                    interval_size = d
+                elif d in _INTERVAL_QUALITIES:
+                    quality = d
+        phase_match = _PHASE_RE.search(stem)
+        phase = int(phase_match.group(1)) if phase_match else 0
+        span = ""
+        grades = ""
+    elif not span:
+        return None  # mono lessons always live under a span folder
 
     # Part: prefer the filename prefix ("1-3_part_..."), fall back to the
     # parent folder ("5_AF-8_1-3_part").
@@ -115,10 +175,15 @@ def parse_lesson_path(path: str) -> Optional[LessonMeta]:
         chromatic = True
 
     return LessonMeta(
+        texture=texture,
         category=category,
         span=span,
         grades=grades,
+        quality=quality,
+        interval_size=interval_size,
+        inversion=inversion,
         part=part,
+        phase=phase,
         exercise_number=exercise_number,
         exercise_type=exercise_type,
         timed=timed,

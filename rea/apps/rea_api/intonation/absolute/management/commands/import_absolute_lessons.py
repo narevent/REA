@@ -1,10 +1,10 @@
-"""Import absolute ``lessons/mono`` JSON files into the database.
+"""Import absolute ``lessons`` JSON files (mono and poly) into the database.
 
 Usage::
 
     python manage.py import_absolute_lessons
     python manage.py import_absolute_lessons absolute/lessons/mono/Formula/Octave
-    python manage.py import_absolute_lessons absolute/lessons/mono/FormulaInverse
+    python manage.py import_absolute_lessons absolute/lessons/poly/ChordsSevenths
 
 Requires that the chromatic base already exists in the database
 (run ``import_absolute_base`` first).
@@ -17,19 +17,20 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from django.db import transaction
 
 from ...models import ChromaticBase
 from ...services.lesson_generation import import_lesson
 
 
 class Command(BaseCommand):
-    help = "Import absolute lessons (mono) JSON files into the database."
+    help = "Import absolute lessons (mono and poly) JSON files into the database."
 
     def add_arguments(self, parser):
         parser.add_argument(
             "path",
             nargs="?",
-            default="absolute/lessons/mono",
+            default="absolute/lessons",
             help="A file or directory of lesson JSON files (relative to project root).",
         )
         parser.add_argument(
@@ -59,20 +60,24 @@ class Command(BaseCommand):
 
         created = 0
         skipped = 0
-        for fp in files:
-            rel = fp.relative_to(data_dir.parent)
-            try:
-                data = json.loads(fp.read_text(encoding="utf-8"))
-            except json.JSONDecodeError as exc:
-                self.stderr.write(self.style.ERROR(f"  ! {rel}: {exc}"))
-                continue
-            lesson = import_lesson(data, str(rel), clear=options["clear"])
-            if lesson is None:
-                self.stderr.write(self.style.WARNING(f"  ~ {rel}: unparseable path, skipped"))
-                skipped += 1
-                continue
-            self.stdout.write(self.style.SUCCESS(f"  + {lesson.display_name}"))
-            created += 1
+        with transaction.atomic():
+            for fp in files:
+                rel = fp.relative_to(data_dir.parent)
+                if fp.name.startswith("_"):
+                    skipped += 1
+                    continue
+                try:
+                    data = json.loads(fp.read_text(encoding="utf-8"))
+                except json.JSONDecodeError as exc:
+                    self.stderr.write(self.style.ERROR(f"  ! {rel}: {exc}"))
+                    continue
+                lesson = import_lesson(data, str(rel), clear=options["clear"])
+                if lesson is None:
+                    self.stderr.write(self.style.WARNING(f"  ~ {rel}: unparseable path, skipped"))
+                    skipped += 1
+                    continue
+                self.stdout.write(self.style.SUCCESS(f"  + {lesson.display_name}"))
+                created += 1
 
         self.stdout.write(self.style.SUCCESS(
             f"\nImported {created} lesson(s); skipped {skipped}."

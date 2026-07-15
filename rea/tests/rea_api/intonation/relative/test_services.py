@@ -73,7 +73,7 @@ class LessonImportTests(TestCase):
         import_key_model(_load("key_models/Major/G-dur_8.json"), "G-dur_8.json")
 
     def test_import_octave_lesson(self):
-        rel = "lessons/Major/Octave/CMajor/1_ C-dur formula 8/1_1_1_C-dur_formula_8.json"
+        rel = "lessons/mono/Major/Octave/CMajor/1_ C-dur formula 8/1_1_1_C-dur_formula_8.json"
         data = _load(rel)
         ex = import_lesson(data, rel)
         self.assertIsNotNone(ex)
@@ -86,13 +86,13 @@ class LessonImportTests(TestCase):
         )
 
     def test_import_skala_variant(self):
-        rel = "lessons/Major/Octave/CMajor/1_ C-dur formula 8/1_1_3_ C-dur formula SKALA 8.json"
+        rel = "lessons/mono/Major/Octave/CMajor/1_ C-dur formula 8/1_1_3_ C-dur formula SKALA 8.json"
         data = _load(rel)
         ex = import_lesson(data, rel)
         self.assertEqual(ex.variant, "SKALA")
 
     def test_lesson_without_key_returns_none(self):
-        rel = "lessons/Major/Octave/CMajor/1_ C-dur formula 8/1_1_1_C-dur_formula_8.json"
+        rel = "lessons/mono/Major/Octave/CMajor/1_ C-dur formula 8/1_1_1_C-dur_formula_8.json"
         KeyModel.objects.filter(name="C-dur").delete()
         data = _load(rel)
         self.assertIsNone(import_lesson(data, rel))
@@ -102,7 +102,7 @@ class LessonRegenerationTests(TestCase):
     def setUp(self):
         import_key_model(_load("key_models/Major/C-dur_8.json"), "C-dur_8.json")
         import_key_model(_load("key_models/Major/G-dur_8.json"), "G-dur_8.json")
-        rel = "lessons/Major/Octave/CMajor/1_ C-dur formula 8/1_1_1_C-dur_formula_8.json"
+        rel = "lessons/mono/Major/Octave/CMajor/1_ C-dur formula 8/1_1_1_C-dur_formula_8.json"
         self.source = import_lesson(_load(rel), rel)
 
     def test_regenerate_to_other_key(self):
