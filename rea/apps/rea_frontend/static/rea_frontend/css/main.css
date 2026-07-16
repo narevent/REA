@@ -75,7 +75,18 @@ body {
 .brand-name { font-size: 16px; font-weight: 800; letter-spacing: -0.01em; }
 .brand-sub { font-size: 11px; color: var(--muted); letter-spacing: 0.02em; }
 
+/* Top-level product nav (Intonation / Soundcheck / ... a future Rhythm). */
+.app-nav { display: flex; gap: 4px; margin: 0 auto; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+.app-nav-btn {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  font-family: var(--font-sans); font-size: 13px; font-weight: 600;
+  padding: 7px 16px; border-radius: 999px; transition: color .12s, background .12s;
+}
+.app-nav-btn:hover { color: var(--fg-dim); }
+.app-nav-btn.active { color: #07101e; background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+
 .header-stats { display: flex; gap: 22px; align-items: center; }
+.header-stats[hidden] { display: none; }
 .hstat { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
 .hstat-num { font-size: 18px; font-weight: 800; font-family: var(--font-mono); }
 .hstat-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); margin-top: 2px; }
@@ -179,27 +190,42 @@ body {
 .card-badge.done { background: var(--accent-2); color: #062018; }
 .card-badge.try { background: var(--warn); color: #1a0f00; width: 10px; height: 10px; top: 18px; right: 18px; }
 
-.map-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 26px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
-.map-foot b { color: var(--fg); }
-.ctx-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; }
-.ctx-pill .ctx-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; }
-.ctx-select { display: inline-flex; align-items: center; gap: 8px; padding: 4px 6px 4px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; }
-.ctx-select .ctx-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; }
-.ctx-select select { background: var(--panel-2); color: var(--fg); border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; font-size: 13px; font-family: var(--font-sans); cursor: pointer; }
-.ctx-select select:hover { border-color: var(--accent); }
-.link-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; text-decoration: underline; font-family: var(--font-sans); margin-left: auto; }
+/* Filters panel — sits between the hero and the chapter grid (never below
+   the grid: its contents change shape as category/system change, so it
+   needs to read as a stable settings panel, not part of the card layout).
+   Grouped into rows of controls that belong together (Mode: texture/system;
+   Practice: category + whatever selectors that category needs) so the
+   layout doesn't visually reshuffle when the group's content changes. */
+.map-filters {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 22px 36px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
+  padding: 20px 24px; margin-bottom: 26px;
+}
+.filters-group { display: flex; flex-direction: column; gap: 10px; }
+.filters-group-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted-2); font-weight: 700; }
+.filters-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 18px; }
+.filters-practice { flex: 1; min-width: 240px; }
+.map-filters .link-btn { margin-left: auto; align-self: center; }
+.link-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; text-decoration: underline; font-family: var(--font-sans); }
 .link-btn:hover { color: var(--fg); }
 
-/* Combinations multi-select (inversions + tonalities) */
+/* One filter control: small uppercase label above a pill-styled <select>,
+   sized to match the combo dropdowns' trigger pill (see .combo-trigger)
+   so every control in a filters row lines up the same way. */
+.filter-item { display: flex; flex-direction: column; gap: 6px; }
+.filter-item select {
+  background: var(--panel-2); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 999px; padding: 6px 12px; font-size: 13px; font-family: var(--font-sans); cursor: pointer;
+}
+.filter-item select:hover { border-color: var(--accent); }
+
+/* Combinations multi-select (subgroups, qualities, phase, tonalities, ...) —
+   every dimension is a dropdown: compact trigger + checkbox popover panel. */
 .combo-selectors { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
 .combo-col { display: flex; flex-direction: column; gap: 6px; }
-.combo-col .ctx-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; }
-.combo-chks { display: flex; flex-wrap: wrap; gap: 6px; max-width: 360px; }
-.combo-chk { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--fg-dim); cursor: pointer; user-select: none; }
-.combo-chk input { accent-color: var(--accent); cursor: pointer; margin: 0; }
-.combo-chk:has(input:checked) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); color: var(--fg); }
+.filter-item .ctx-lbl, .combo-col .ctx-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; }
 
-/* Tonality popover (compact trigger + dropdown panel) */
+/* Dropdown popover (compact trigger + checkbox panel) */
 .combo-pop { position: relative; }
 .combo-trigger {
   display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
@@ -217,8 +243,8 @@ body {
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md);
   box-shadow: var(--shadow-2); padding: 10px;
 }
-/* Map (foot) anchors left; align the popover to the trigger's left edge. */
-.map-foot .combo-pop-panel { right: auto; left: 0; }
+/* Filters panel anchors left; align the popover to the trigger's left edge. */
+.map-filters .combo-pop-panel { right: auto; left: 0; }
 /* Session topbar anchors right; flip the popover left so it never overflows. */
 .topbar-ctx .combo-pop-panel { right: 0; left: auto; }
 .combo-pop-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border-soft); }
@@ -227,7 +253,8 @@ body {
   border-radius: 999px; padding: 3px 9px; font-size: 11px; font-family: var(--font-sans); cursor: pointer;
 }
 .combo-pop-act:hover { color: var(--fg); border-color: var(--accent); }
-/* Two side-by-side columns (Major | Minor), each a tight checkbox grid. */
+/* One or more side-by-side groups (e.g. Tonality's Major | Minor split),
+   each a tight checkbox grid; a single-group dropdown just fills the width. */
 .combo-pop-scroll { display: flex; gap: 14px; max-height: 260px; overflow-y: auto; }
 .combo-pop-group { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .combo-pop-group-lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 600; margin-bottom: 2px; }
@@ -240,7 +267,6 @@ body {
 .combo-pop-chk:has(input:checked) { color: var(--fg); }
 
 .topbar-ctx .combo-selectors { gap: 22px; }
-.topbar-ctx .combo-chk { padding: 5px 9px; font-size: 11px; }
 .topbar-ctx .combo-trigger { padding: 7px 11px; font-size: 12px; }
 
 /* ======================================================================= */
@@ -283,7 +309,11 @@ body {
   background: #fbfbf7; border-radius: var(--r-lg); color: #1a1a1a; min-height: 180px;
   padding: 22px; box-shadow: var(--shadow-2); overflow: visible; border: 1px solid rgba(0,0,0,0.04);
 }
-.notation svg { display: block; }
+/* overflow: visible on the <svg> itself (not just its container) - the SVG
+   root clips its own viewport by default, so a live sung-pitch marker drawn
+   further above/below the stave than the score's own notes (e.g. Soundcheck's
+   extended-octave-range marker) would otherwise be cut off at the SVG edge. */
+.notation svg { display: block; overflow: visible; }
 .legend { font-size: 12px; color: var(--muted); padding: 8px 6px 0; letter-spacing: 0.01em; }
 
 /* realtime countdown bar (timed modes) — thin, full-width, below the stave */
@@ -462,6 +492,87 @@ body {
 .cfg .cfg-check { flex-direction: row; align-items: center; gap: 7px; text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--fg); font-weight: 600; }
 .cfg .cfg-check input { width: auto; margin: 0; }
 
+/* ======================================================================= */
+/* Soundcheck (mic + pitch-tracker calibration)                            */
+/* ======================================================================= */
+.sc-wrap { max-width: 900px; margin: 0 auto; padding: 28px 24px 64px; display: flex; flex-direction: column; gap: 20px; }
+
+.sc-hero {
+  background: linear-gradient(135deg, rgba(106,169,255,0.10), rgba(76,214,180,0.06));
+  border: 1px solid var(--border); border-radius: var(--r-xl);
+  padding: 26px 30px; box-shadow: var(--shadow-1);
+}
+.sc-hero h2 { margin: 0 0 8px; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+.sc-hero p { margin: 0; color: var(--fg-dim); font-size: 14px; line-height: 1.6; max-width: 68ch; }
+
+.sc-panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 20px 22px; }
+.sc-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.sc-panel-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted-2); font-weight: 700; }
+
+.sc-mic-status { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-dim); }
+.sc-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted-2); flex: none; }
+.sc-dot.connecting { background: var(--warn); animation: sc-pulse 1s ease-in-out infinite; }
+.sc-dot.on { background: var(--accent-2); animation: sc-pulse 1.6s ease-in-out infinite; }
+.sc-dot.error { background: var(--bad); }
+@keyframes sc-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+.sc-btn {
+  background: var(--panel-2); color: var(--fg); border: 1px solid var(--border);
+  border-radius: 999px; padding: 10px 20px; font-size: 13px; font-weight: 600;
+  font-family: var(--font-sans); cursor: pointer;
+}
+.sc-btn:hover { border-color: var(--accent); }
+.sc-btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent-strong)); color: #07101e; border-color: transparent; }
+.sc-btn.primary:hover { filter: brightness(1.08); }
+
+/* Voice profile (octave compensation) — a single row holds the reference-tone
+   play button, octave-stepper and auto-detect controls in one compact card. */
+.sc-profile-cur { font-size: 12.5px; font-weight: 700; color: var(--accent-2); }
+.sc-profile-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.sc-stepper { display: inline-flex; align-items: center; gap: 2px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 3px; }
+.sc-step-btn {
+  width: 26px; height: 26px; border-radius: 50%; border: none; cursor: pointer;
+  background: transparent; color: var(--fg); font-size: 16px; font-weight: 700; line-height: 1;
+  font-family: var(--font-sans); display: grid; place-items: center;
+}
+.sc-step-btn:hover { background: var(--panel-3); }
+.sc-oct-val { min-width: 28px; text-align: center; font-family: var(--font-mono); font-size: 13px; font-weight: 700; }
+.sc-autodetect-status { font-size: 12.5px; color: var(--muted); }
+.sc-autodetect-status.busy { color: var(--accent); }
+.sc-autodetect-status.good { color: var(--accent-2); }
+.sc-autodetect-status.warn { color: var(--warn); }
+.sc-btn:disabled { opacity: 0.5; cursor: default; }
+
+.sc-readout { display: flex; align-items: baseline; gap: 14px; margin-bottom: 16px; }
+.sc-note { font-size: 40px; font-weight: 800; font-family: var(--font-mono); letter-spacing: -0.01em; }
+.sc-hz { font-size: 15px; color: var(--muted); font-family: var(--font-mono); }
+
+.sc-meter { margin-bottom: 10px; }
+.sc-meter-track { position: relative; height: 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--border); }
+.sc-meter-zero { position: absolute; left: 50%; top: -3px; bottom: -3px; width: 2px; background: var(--border-soft); transform: translateX(-50%); }
+.sc-meter-needle {
+  position: absolute; top: 50%; left: 50%; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--muted-2); border: 2px solid var(--bg); transform: translate(-50%, -50%);
+  transition: left .08s linear, background .15s;
+}
+.sc-meter-needle.good { background: #2ecc71; }
+.sc-meter-needle.ok { background: #f5a623; }
+.sc-meter-needle.off { background: #e74c3c; }
+.sc-meter-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+
+.sc-cents { font-size: 13px; font-weight: 700; margin-bottom: 16px; }
+.sc-cents.good { color: #2ecc71; }
+.sc-cents.ok { color: #f5a623; }
+.sc-cents.off { color: #e74c3c; }
+.sc-cents.muted { color: var(--muted); font-weight: 500; }
+
+.sc-notation { min-height: 140px; }
+
+@media (min-width: 720px) {
+  .sc-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .sc-hero, .sc-live { grid-column: 1 / -1; }
+}
+
 /* footer */
 .app-footer {
   display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -473,6 +584,8 @@ body {
 /* responsive */
 @media (max-width: 720px) {
   .map-hero { flex-direction: column; align-items: flex-start; gap: 18px; }
+  .map-filters { flex-direction: column; align-items: stretch; }
+  .map-filters .link-btn { margin-left: 0; align-self: flex-start; }
   .deck-stats { grid-template-columns: 1fr; }
   .ds-gauge { justify-self: center; }
   .session-topbar { flex-wrap: wrap; }

@@ -26,21 +26,41 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=45";
-import { PitchDetector, midiToName } from "./pitchDetector.js?v=45";
-import { API } from "./api.js?v=45";
+import { AudioPlayer } from "./audioPlayer.js?v=56";
+import { PitchDetector, midiToName } from "./pitchDetector.js?v=56";
+import { API } from "./api.js?v=56";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt,
-} from "./practiceData.js?v=45";
+} from "./practiceData.js?v=56";
 import {
   scoreSungBar, scoreGuessBar, scoreGuessNote, scoreLabel,
-} from "./practiceScore.js?v=45";
+} from "./practiceScore.js?v=56";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 const SING_TAIL_MS = 600;  // extra recording tail so the user can finish
 const NOTE_MIN_MS = 130;   // min stable-pitch duration to count as a note
 const NOTE_GAP_MS = 90;   // silence gap that splits two sung notes
+// A singer holding a note rarely sits dead-still on it - natural vibrato and
+// small pitch wobble routinely cross a semitone's rounding boundary for a
+// few frames.  Without margin, `segmentNotes` below would read every such
+// wobble as a brand new note, fragmenting one sustained note into several
+// (each too short to count) or inserting spurious extra notes that throw off
+// the note-by-note scoring alignment.  These two constants give the segmenter
+// a "lock-in": once on a note, the pitch has to move meaningfully past the
+// boundary (NOTE_LOCK_HYSTERESIS_CENTS) *and* hold there for a bit
+// (NOTE_CONFIRM_MS) before it's accepted as an actual note change.  Both are
+// deliberately generous - the goal is a note the user has clearly, stably
+// landed on, not the first frame that happens to round differently.
+const NOTE_LOCK_HYSTERESIS_CENTS = 75; // deadband past the strict 50c boundary before a change is even considered
+const NOTE_CONFIRM_MS = 100;           // how long a new pitch must persist before the switch is committed
+
+// Same "lock in before moving on" idea, applied to the *live* target-note
+// preview marker during singing (see `_makeSungPreview`): the marker only
+// advances to the next reference note once the sung pitch has genuinely
+// settled on the current one, not merely brushed past it.
+const PREVIEW_LOCK_CENTS = 40; // how close to the target counts as "on it" (tighter than the segmenter's deadband - this gates progression, not note identity)
+const PREVIEW_LOCK_MS = 180;   // how long that match must hold before advancing to the next note
 
 // The 10 modes, keyed by chapter key.  Each carries enough metadata to render
 // the session deck.  The `key` must match the chapter keys in chapters.js.
@@ -1092,11 +1112,10 @@ export class PracticeController {
     const targets = refPitches.slice();
     // Throttle DOM updates + require a stable match before advancing.
     let lastDraw = 0;
-    let stableCount = 0;
+    let matchSince = null; // timestamp the sung pitch first landed on the target
     return (info) => {
       if (!this.running) return;
-      const midiRound = info.midiRound;
-      const midi = info.midi != null ? info.midi : midiRound;
+      const midi = info.midi != null ? info.midi : info.midiRound;
       const target = targets[step];
       if (target == null) return;
       const now = performance.now();
@@ -1104,13 +1123,17 @@ export class PracticeController {
         r.showSungNote(pitched[step].globalIndex, midi, target);
         lastDraw = now;
       }
-      // Advance only after the pitch holds within a semitone for a few frames.
-      // Octave-agnostic match: same pitch class (mod 12) counts as a hit.
-      const pcOff = Math.min((((midiRound - target) % 12) + 12) % 12, 12 - ((((midiRound - target) % 12) + 12) % 12));
-      if (pcOff <= 1) {
-        stableCount += 1;
-        if (stableCount >= 3) {
-          stableCount = 0;
+      // Advance only once the pitch has genuinely settled on the target for a
+      // sustained stretch - a brief brush past it on the way elsewhere
+      // shouldn't move the guide on.  Octave-agnostic: same pitch class (mod
+      // 12) counts, measured in cents so it's tighter than a loose
+      // "within a semitone" check.
+      const pcDiff = (((midi - target) % 12) + 12) % 12;
+      const centsOff = Math.min(pcDiff, 12 - pcDiff) * 100;
+      if (centsOff <= PREVIEW_LOCK_CENTS) {
+        if (matchSince == null) matchSince = now;
+        if (now - matchSince >= PREVIEW_LOCK_MS) {
+          matchSince = null;
           step += 1;
           if (step < pitched.length) {
             r.setSungTarget(pitched[step].globalIndex, pitched[step].midi);
@@ -1118,7 +1141,7 @@ export class PracticeController {
           }
         }
       } else {
-        stableCount = 0;
+        matchSince = null;
       }
     };
   }
@@ -1158,7 +1181,7 @@ export class PracticeController {
     this.detector.onPitch = (info) => {
       if (!this.running || token !== this._roundToken) return;
       if (info.midi != null) {
-        frames.push({ t: info.t, midi: info.midiRound, cents: info.cents });
+        frames.push({ t: info.t, midi: info.midi });
         if (onPitch) onPitch({ midiRound: info.midiRound, midi: info.midi, cents: info.cents });
       }
     };
@@ -1186,7 +1209,7 @@ export class PracticeController {
       this.detector.onPitch = (info) => {
         if (!this.running || token !== this._roundToken) return;
         if (info.midi != null) {
-          frames.push({ t: info.t, midi: info.midiRound, cents: info.cents });
+          frames.push({ t: info.t, midi: info.midi });
           if (onPitch) onPitch({ midiRound: info.midiRound, midi: info.midi, cents: info.cents });
         }
       };
@@ -1314,16 +1337,67 @@ function noteBadge(target, sung) {
 
 /**
  * Segment pitch frames into stable MIDI notes.
+ *
+ * `frames` are `{ t, midi }` with `midi` the *fractional* tracked pitch (not
+ * rounded) so this can apply cents-level hysteresis rather than reacting to
+ * every frame that rounds to a different semitone.  A note stays "locked" as
+ * long as incoming pitch sits within `NOTE_LOCK_HYSTERESIS_CENTS` of it; a
+ * pitch further away only becomes a candidate for a new note, and that
+ * candidate must hold for `NOTE_CONFIRM_MS` before the switch is committed.
+ * This is what gives the user "margin to lock into a note" - vibrato and
+ * momentary detector noise around a note's edges no longer read as separate
+ * (usually too-short-to-count) notes, which previously fragmented one
+ * sustained note into several and/or inserted spurious extra notes that threw
+ * off the note-by-note scoring alignment.
  */
 function segmentNotes(frames, startTime) {
   if (!frames.length) return [];
   const groups = [];
-  let cur = { midi: frames[0].midi, start: frames[0].t, end: frames[0].t };
+  let locked = Math.round(frames[0].midi);
+  let start = frames[0].t;
+  let end = frames[0].t;
+  let candidate = null; // { midi, since }
+
   for (let i = 1; i < frames.length; i++) {
     const f = frames[i];
-    if (f.midi === cur.midi && (f.t - cur.end) < NOTE_GAP_MS) cur.end = f.t;
-    else { groups.push(cur); cur = { midi: f.midi, start: f.t, end: f.t }; }
+
+    if (f.t - end >= NOTE_GAP_MS) {
+      // Silence gap: close out the current note regardless of pitch (this is
+      // also how a repeated note - same pitch sung twice with a pause - stays
+      // two separate notes instead of merging into one).
+      groups.push({ midi: locked, start, end });
+      locked = Math.round(f.midi);
+      start = f.t; end = f.t;
+      candidate = null;
+      continue;
+    }
+
+    const centsFromLocked = Math.abs(f.midi - locked) * 100;
+    if (centsFromLocked <= NOTE_LOCK_HYSTERESIS_CENTS) {
+      // Still within the locked note's deadband - extend it, and drop any
+      // pending candidate (the wobble didn't sustain).
+      end = f.t;
+      candidate = null;
+      continue;
+    }
+
+    // Outside the deadband: track how long *this* candidate pitch persists.
+    const candidateMidi = Math.round(f.midi);
+    if (!candidate || candidate.midi !== candidateMidi) candidate = { midi: candidateMidi, since: f.t };
+    if (f.t - candidate.since >= NOTE_CONFIRM_MS) {
+      // Sustained long enough - commit the switch to a genuinely new note.
+      groups.push({ midi: locked, start, end });
+      locked = candidate.midi;
+      start = candidate.since;
+      end = f.t;
+      candidate = null;
+    } else {
+      // Not yet confirmed - keep extending the locked note while we wait;
+      // if the candidate never sustains, this frame simply ends up folded
+      // into the note it interrupted.
+      end = f.t;
+    }
   }
-  groups.push(cur);
+  groups.push({ midi: locked, start, end });
   return groups.filter((g) => (g.end - g.start) >= NOTE_MIN_MS).map((g) => g.midi);
 }

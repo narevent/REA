@@ -1,22 +1,37 @@
 /**
  * pitchDetector.js
  *
- * Live microphone pitch tracking using WebAudio + autocorrelation.
+ * Real-time monophonic (voice) pitch tracking, built for solfège practice:
+ * the user sings back a note and we must report *which* note, in the right
+ * octave, stably enough to score - across bass, tenor, alto and soprano
+ * ranges.
  *
- * Exposes a single class `PitchDetector` that:
- *   - opens the microphone via getUserMedia,
- *   - runs an AnalyserNode at ~44.1k sample rate,
- *   - on every animation frame runs an autocorrelation (ACF) detector to
- *     estimate the fundamental frequency of the incoming audio,
- *   - converts that frequency to a MIDI note (float, so callers can see
- *     how flat/sharp the user is) and to a rounded MIDI integer + cents,
- *   - reports the result through a callback so the UI can show a
- *     note-by-note report and score the sung notes.
+ * Algorithm: the McLeod Pitch Method (MPM) - a normalised-square-difference
+ * (NSDF) autocorrelation method that is the de-facto standard for robust
+ * monophonic pitch and is specifically designed to avoid the octave errors
+ * that plague naive autocorrelation.  The NSDF is computed via FFT
+ * (O(N log N)) so we can afford a large analysis window (good low-voice
+ * reliability) without dropping frames.  Octave robustness comes from
+ * picking the *first* NSDF key-maximum that clears a threshold relative to
+ * the tallest key-maximum (not simply the tallest peak, which is what causes
+ * sub-harmonic / octave-down jumps).
  *
- * The detector is tuned for monophonic singing in roughly 80-1600 Hz,
- * which covers from low male singing to high female/child singing.
+ * Two things then turn a good per-frame estimate into a *stable* readout:
+ *   1. A voiced/unvoiced state machine with hysteresis + a short hold, so the
+ *      note doesn't flicker at onsets/sustains or during brief consonant-like
+ *      dropouts.
+ *   2. A median filter over recent frames (rejects the occasional single-frame
+ *      octave outlier that survives step 1) followed by a light one-pole
+ *      smoother (cents-level glide, no frame-to-frame jitter).
  *
- * All values are returned relative to A4 = 440 Hz, matching audioPlayer.js.
+ * The microphone is opened with echo-cancellation / noise-suppression /
+ * auto-gain *disabled*: those are tuned for speech intelligibility and
+ * actively distort pitch (AGC pumping, NS warble), which is the opposite of
+ * what a pitch tracker wants.
+ *
+ * All values are relative to A4 = 440 Hz, matching audioPlayer.js.  The
+ * per-frame callback shape is unchanged from earlier versions:
+ *   { freq, midi, midiRound, cents, clarity, t }  (freq/midi null when unvoiced)
  */
 
 const A4_HZ = 440;
@@ -33,105 +48,272 @@ export function midiToHz(midi) {
   return A4_HZ * Math.pow(2, (midi - A4_MIDI) / 12);
 }
 
-/**
- * Autocorrelation fundamental-frequency estimator.
- *
- * Returns the detected frequency in Hz, or 0 if no clear pitch was found.
- * Based on the well-known ACF-with-normalised-square-difference approach
- * (a.k.a. the McLeod / NSDF family) which is robust for monophonic voice.
- *
- * @param {Float32Array} buf  time-domain samples
- * @param {number} sampleRate  sample rate in Hz
- * @param {number} minHz  minimum expected fundamental
- * @param {number} maxHz  maximum expected fundamental
- */
-function detectPitchACF(buf, sampleRate, minHz, maxHz) {
-  const SIZE = buf.length;
-  const minLag = Math.max(2, Math.floor(sampleRate / maxHz));
-  const maxLag = Math.min(SIZE - 1, Math.floor(sampleRate / minHz));
-
-  // Compute the normalised square difference function (NSDF).
-  // nsdf[k] in [-1, 1]; 1 = perfect periodicity at lag k.
-  const nsdf = new Float32Array(maxLag + 1);
-  let rms = 0;
-  for (let i = 0; i < SIZE; i++) {
-    const s = buf[i];
-    rms += s * s;
-  }
-  rms = Math.sqrt(rms / SIZE);
-  // Silence guard - below this we just return "no pitch".
-  if (rms < 0.008) return 0;
-
-  for (let k = minLag; k <= maxLag; k++) {
-    let num = 0;
-    let den = 0;
-    for (let i = 0; i < SIZE - k; i++) {
-      num += buf[i] * buf[i + k];
-      den += buf[i] * buf[i] + buf[i + k] * buf[i + k];
-    }
-    nsdf[k] = den > 0 ? (2 * num) / den : 0;
-  }
-
-  // Find the first peak after the first zero crossing that reaches >= 0.8 of
-  // the global max - this skips sub-harmonic peaks near the true lag.
-  let maxVal = 0;
-  for (let k = minLag; k <= maxLag; k++) if (nsdf[k] > maxVal) maxVal = nsdf[k];
-  if (maxVal < 0.4) return 0; // not tonal enough
-
-  let bestLag = 0;
-  let bestVal = 0;
-  for (let k = minLag; k <= maxLag; k++) {
-    if (nsdf[k] > bestVal && nsdf[k] >= maxVal * 0.8) {
-      bestVal = nsdf[k];
-      bestLag = k;
-    }
-  }
-  if (bestLag <= 0) return 0;
-
-  // Parabolic interpolation around the peak for sub-sample accuracy.
-  if (bestLag > minLag && bestLag < maxLag) {
-    const a = nsdf[bestLag - 1];
-    const b = nsdf[bestLag];
-    const c = nsdf[bestLag + 1];
-    const denom = a + c - 2 * b;
-    if (denom !== 0) {
-      const shift = (a - c) / (2 * denom);
-      bestLag = bestLag + Math.max(-1, Math.min(1, shift));
-    }
-  }
-  return sampleRate / bestLag;
-}
-
-/**
- * Standard MIDI note name (Anglo-Saxon) for a MIDI number, e.g. 60 -> "C4".
- */
+/** Standard MIDI note name (Anglo-Saxon) for a MIDI number, e.g. 60 -> "C4". */
 export function midiToName(midi) {
   if (midi == null || midi < 0 || midi > 127) return "-";
   const NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
-  const pc = ((midi % 12) + 12) % 12;
-  const oct = Math.floor(midi / 12) - 1;
+  const pc = ((Math.round(midi) % 12) + 12) % 12;
+  const oct = Math.floor(Math.round(midi) / 12) - 1;
   return NAMES[pc] + oct;
 }
 
+// ---------------------------------------------------------------------------
+// Voice-profile octave compensation.
+//
+// A very common (and physically real) situation: a male singer matching a
+// piano/reference note sings the correct pitch class an octave lower than the
+// note is written — his comfortable chest-voice octave.  The detector then
+// *correctly* reports that lower octave, but it reads as "an octave off" from
+// the note the user intended.  This offset transposes the reported note by a
+// whole number of octaves so the notation and scoring line up with what the
+// singer means.  It is a single app-wide setting (every PitchDetector
+// instance honours it) and is persisted so a user calibrates once.  It only
+// shifts the *note* representation (midi / note name) — the reported `freq`
+// stays the true measured frequency.
+// ---------------------------------------------------------------------------
+const OCTAVE_OFFSET_KEY = "rea.voiceOctaveOffset";
+let _voiceOctaveOffset = 0;
+try {
+  const v = parseInt(localStorage.getItem(OCTAVE_OFFSET_KEY), 10);
+  if (!Number.isNaN(v)) _voiceOctaveOffset = Math.max(-3, Math.min(3, v));
+} catch (e) { /* localStorage unavailable */ }
+
+/** Current app-wide voice-profile octave offset (whole octaves). */
+export function getVoiceOctaveOffset() { return _voiceOctaveOffset; }
+
+/** Set the app-wide voice-profile octave offset (clamped to ±3 octaves).
+ *  Applies immediately to every running detector and persists across reloads. */
+export function setVoiceOctaveOffset(oct) {
+  _voiceOctaveOffset = Math.max(-3, Math.min(3, Math.round(oct) || 0));
+  try { localStorage.setItem(OCTAVE_OFFSET_KEY, String(_voiceOctaveOffset)); } catch (e) {}
+  return _voiceOctaveOffset;
+}
+
+// ---------------------------------------------------------------------------
+// FFT (iterative radix-2 Cooley-Tukey, in place).  Operates on parallel
+// real/imag Float64Arrays whose length is a power of two.  `inverse` scales
+// the result by 1/n so a forward-then-inverse round-trip is the identity.
+// ---------------------------------------------------------------------------
+function fft(re, im, inverse) {
+  const n = re.length;
+  // Bit-reversal permutation.
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      const tr = re[i]; re[i] = re[j]; re[j] = tr;
+      const ti = im[i]; im[i] = im[j]; im[j] = ti;
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = (inverse ? 2 : -2) * Math.PI / len;
+    const wRe = Math.cos(ang);
+    const wIm = Math.sin(ang);
+    const half = len >> 1;
+    for (let i = 0; i < n; i += len) {
+      let curRe = 1;
+      let curIm = 0;
+      for (let k = 0; k < half; k++) {
+        const aRe = re[i + k];
+        const aIm = im[i + k];
+        const bRe = re[i + k + half];
+        const bIm = im[i + k + half];
+        const tRe = bRe * curRe - bIm * curIm;
+        const tIm = bRe * curIm + bIm * curRe;
+        re[i + k] = aRe + tRe;
+        im[i + k] = aIm + tIm;
+        re[i + k + half] = aRe - tRe;
+        im[i + k + half] = aIm - tIm;
+        const nextRe = curRe * wRe - curIm * wIm;
+        curIm = curRe * wIm + curIm * wRe;
+        curRe = nextRe;
+      }
+    }
+  }
+  if (inverse) {
+    for (let i = 0; i < n; i++) { re[i] /= n; im[i] /= n; }
+  }
+}
+
+function nextPow2(n) { let p = 1; while (p < n) p <<= 1; return p; }
+
+// ---------------------------------------------------------------------------
+// MPM core (pure DSP, no audio).  Reused buffers keep the per-frame path
+// allocation-free.  `detect(buf)` returns { freq, clarity } or null.
+// ---------------------------------------------------------------------------
+class Mpm {
+  constructor(sampleRate, windowSize, minHz, maxHz, clarityThreshold, peakThreshold) {
+    this.sampleRate = sampleRate;
+    this.W = windowSize;
+    this.clarityThreshold = clarityThreshold;
+    this.peakThreshold = peakThreshold;
+    this.minLag = Math.max(2, Math.floor(sampleRate / maxHz));
+    this.maxLag = Math.min(windowSize - 2, Math.floor(sampleRate / minHz));
+    this.minHz = minHz;
+    this.maxHz = maxHz;
+    this.N = nextPow2(windowSize * 2);       // zero-pad for linear autocorrelation
+    this.re = new Float64Array(this.N);
+    this.im = new Float64Array(this.N);
+    this.nsdf = new Float64Array(windowSize);
+    this.prefix = new Float64Array(windowSize + 1); // prefix sums of squares
+  }
+
+  detect(buf) {
+    const W = this.W, N = this.N, re = this.re, im = this.im;
+
+    // Remove DC offset (mic bias skews autocorrelation) and measure level.
+    let mean = 0;
+    for (let i = 0; i < W; i++) mean += buf[i];
+    mean /= W;
+    let rms = 0;
+    for (let i = 0; i < W; i++) {
+      const s = buf[i] - mean;
+      re[i] = s;
+      im[i] = 0;
+      rms += s * s;
+    }
+    rms = Math.sqrt(rms / W);
+    if (rms < 0.004) return null;               // silence
+    for (let i = W; i < N; i++) { re[i] = 0; im[i] = 0; }
+
+    // Prefix sums of squares (for the NSDF normalisation term m(τ)).
+    const prefix = this.prefix;
+    prefix[0] = 0;
+    for (let i = 0; i < W; i++) prefix[i + 1] = prefix[i] + re[i] * re[i];
+    const energy = prefix[W];
+    if (energy <= 0) return null;
+
+    // Autocorrelation r(τ) via FFT: r = IFFT(|FFT(x)|²).
+    fft(re, im, false);
+    for (let i = 0; i < N; i++) { re[i] = re[i] * re[i] + im[i] * im[i]; im[i] = 0; }
+    fft(re, im, true);                          // re[τ] now holds r(τ)
+
+    // NSDF: n(τ) = 2·r(τ) / m(τ),  m(τ) = Σx[j]² + Σx[j+τ]² over the overlap.
+    const nsdf = this.nsdf, maxLag = this.maxLag;
+    for (let tau = 0; tau <= maxLag; tau++) {
+      const m = prefix[W - tau] + (energy - prefix[tau]);
+      nsdf[tau] = m > 0 ? (2 * re[tau]) / m : 0;
+    }
+
+    // Key-maximum peak picking (this is the octave-robust part).  We collect
+    // the local maxima that sit between a positive-going and the following
+    // negative-going zero crossing, then choose the *first* whose height
+    // clears peakThreshold × (tallest key max).  The first (shortest-lag)
+    // qualifying peak is the true fundamental; later peaks are its sub-octaves.
+    let pos = 0;
+    while (pos < maxLag && nsdf[pos] > 0) pos++;   // skip the τ≈0 lobe
+    while (pos < maxLag && nsdf[pos] <= 0) pos++;  // skip to first positive region
+
+    let chosen = -1;
+    let highest = 0;
+    let curMax = 0;
+    let curMaxPos = 0;
+    const positions = [];
+    while (pos < maxLag) {
+      if (nsdf[pos] > nsdf[pos - 1] && nsdf[pos] >= nsdf[pos + 1]) {
+        if (curMaxPos === 0 || nsdf[pos] > curMax) { curMax = nsdf[pos]; curMaxPos = pos; }
+      }
+      pos++;
+      if (pos < maxLag && nsdf[pos] <= 0) {
+        if (curMaxPos > 0) {
+          positions.push(curMaxPos);
+          if (nsdf[curMaxPos] > highest) highest = nsdf[curMaxPos];
+          curMaxPos = 0;
+          curMax = 0;
+        }
+        while (pos < maxLag && nsdf[pos] <= 0) pos++;
+      }
+    }
+    if (curMaxPos > 0) {
+      positions.push(curMaxPos);
+      if (nsdf[curMaxPos] > highest) highest = nsdf[curMaxPos];
+    }
+    if (!positions.length || highest <= 0) return null;
+
+    const threshold = this.peakThreshold * highest;
+    for (let i = 0; i < positions.length; i++) {
+      if (nsdf[positions[i]] >= threshold) { chosen = positions[i]; break; }
+    }
+    if (chosen < 0) return null;
+
+    // Parabolic interpolation around the chosen peak for sub-sample accuracy.
+    let tau = chosen;
+    let clarity = nsdf[chosen];
+    if (chosen > 0 && chosen < maxLag) {
+      const a = nsdf[chosen - 1];
+      const b = nsdf[chosen];
+      const c = nsdf[chosen + 1];
+      const denom = a - 2 * b + c;
+      if (denom !== 0) {
+        const shift = (0.5 * (a - c)) / denom;
+        if (shift > -1 && shift < 1) {
+          tau = chosen + shift;
+          clarity = b - 0.25 * (a - c) * shift;
+        }
+      }
+    }
+
+    if (clarity < this.clarityThreshold) return null;
+    if (tau < this.minLag || tau > this.maxLag) return null;
+    const freq = this.sampleRate / tau;
+    if (freq < this.minHz || freq > this.maxHz) return null;
+    return { freq, clarity: Math.max(0, Math.min(1, clarity)) };
+  }
+}
+
 export class PitchDetector {
-  constructor() {
+  /**
+   * @param {object} [opts]
+   *   windowSize        analysis window in samples (power of two). Larger =
+   *                     more reliable low-voice tracking, more latency.
+   *   minHz/maxHz       vocal range to search (defaults span low bass to
+   *                     high soprano so every voice type is covered).
+   *   clarityThreshold  min NSDF peak height to accept a frame's pitch.
+   *   peakThreshold     MPM key-max cutoff (fraction of the tallest key max).
+   *   onThreshold/offThreshold + onFrames/offFrames  voicing hysteresis.
+   *   medianWindow      frames of median filtering (octave-outlier rejection).
+   *   emaAlpha          one-pole smoothing factor for the reported pitch.
+   */
+  constructor(opts = {}) {
+    this.windowSize = opts.windowSize || 4096;
+    this.minHz = opts.minHz != null ? opts.minHz : 60;   // ~B1, below low bass
+    this.maxHz = opts.maxHz != null ? opts.maxHz : 1600;  // ~G6, above high soprano
+    this.clarityThreshold = opts.clarityThreshold != null ? opts.clarityThreshold : 0.5;
+    this.peakThreshold = opts.peakThreshold != null ? opts.peakThreshold : 0.85;
+    this.onThreshold = opts.onThreshold != null ? opts.onThreshold : 0.6;
+    this.offThreshold = opts.offThreshold != null ? opts.offThreshold : 0.4;
+    this.onFrames = opts.onFrames != null ? opts.onFrames : 2;
+    this.offFrames = opts.offFrames != null ? opts.offFrames : 4;
+    this.medianWindow = opts.medianWindow || 5;
+    this.emaAlpha = opts.emaAlpha != null ? opts.emaAlpha : 0.4;
+
     this.ctx = null;
     this.stream = null;
     this.analyser = null;
     this.source = null;
     this.buffer = null;
+    this.mpm = null;
     this.running = false;
     this.rafId = null;
-    this.onPitch = null; // (info) => void
-    this.minHz = 70;
-    this.maxHz = 1600;
+    this.onPitch = null; // (info) => void  — read every frame, may be swapped live
+    this._resetSmoothing();
+  }
+
+  _resetSmoothing() {
+    this._raw = [];       // recent raw (fractional) MIDI estimates, voiced only
+    this._voiced = false;
+    this._onCount = 0;
+    this._offCount = 0;
+    this._ema = null;     // smoothed MIDI
+    this._last = null;    // last emitted voiced info (held through short dropouts)
   }
 
   /**
    * Start the microphone and the detection loop.
    * @param {function} onPitch  called with { freq, midi, midiRound, cents,
-   *                            clarity, t } for every analysed frame (freq
-   *                            is null when no pitch was found).
+   *                            clarity, t } for every analysed frame (freq/midi
+   *                            null when no pitch is being sung).
    */
   async start(onPitch) {
     if (this.running) return true;
@@ -139,9 +321,11 @@ export class PitchDetector {
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
+          // Disable speech-oriented processing — it distorts pitch.
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
         },
       });
     } catch (e) {
@@ -150,36 +334,33 @@ export class PitchDetector {
 
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) throw new Error("WebAudio not supported in this browser.");
-    // Use the existing AudioContext if one was already unlocked by the
-    // AudioPlayer, so mic + synth share the same clock.
-    this.ctx = playerSharedCtx(Ctx);
+    // Share the AudioContext already unlocked by the AudioPlayer so mic + synth
+    // run on one clock and a single user gesture resumes both.
+    this.ctx = window.__reaAudioCtx || (window.__reaAudioCtx = new Ctx());
     if (this.ctx.state === "suspended") {
       const p = this.ctx.resume();
       if (p && p.catch) p.catch(() => {});
     }
     this.source = this.ctx.createMediaStreamSource(this.stream);
     this.analyser = this.ctx.createAnalyser();
-    this.analyser.fftSize = 2048;
+    this.analyser.fftSize = this.windowSize;      // time-domain window size
     this.analyser.smoothingTimeConstant = 0;
     this.buffer = new Float32Array(this.analyser.fftSize);
     this.source.connect(this.analyser);
-    // Note: analyser is NOT connected to destination - we never play the mic
-    // back through the speakers (would cause feedback).
+    // analyser is deliberately NOT connected to destination (no mic feedback).
+
+    this.mpm = new Mpm(
+      this.ctx.sampleRate, this.windowSize, this.minHz, this.maxHz,
+      this.clarityThreshold, this.peakThreshold,
+    );
+    this._resetSmoothing();
 
     this.running = true;
     const loop = () => {
       if (!this.running) return;
       this.analyser.getFloatTimeDomainData(this.buffer);
-      const freq = detectPitchACF(this.buffer, this.ctx.sampleRate, this.minHz, this.maxHz);
-      const now = performance.now();
-      if (!freq) {
-        this.onPitch({ freq: null, midi: null, midiRound: null, cents: 0, clarity: 0, t: now });
-      } else {
-        const midi = hzToMidi(freq);
-        const midiRound = Math.round(midi);
-        const cents = Math.round((midi - midiRound) * 100);
-        this.onPitch({ freq, midi, midiRound, cents, clarity: 1, t: now });
-      }
+      const res = this.mpm.detect(this.buffer);
+      this._process(res, performance.now());
       this.rafId = requestAnimationFrame(loop);
     };
     this.rafId = requestAnimationFrame(loop);
@@ -193,23 +374,69 @@ export class PitchDetector {
     if (this.source) { try { this.source.disconnect(); } catch (e) {} this.source = null; }
     if (this.analyser) { try { this.analyser.disconnect(); } catch (e) {} this.analyser = null; }
     if (this.stream) { this.stream.getTracks().forEach((t) => t.stop()); this.stream = null; }
-    // Do NOT close the shared ctx - the AudioPlayer may still use it.
+    this._resetSmoothing();
+    // Do NOT close the shared ctx — the AudioPlayer may still use it.
   }
 
-  get isRunning() {
-    return this.running;
-  }
-}
+  get isRunning() { return this.running; }
 
-/**
- * Return a shared AudioContext so the mic detector and the synth player use
- * the same context (avoids creating multiple contexts and lets a single
- * user gesture resume both).  We stash it on window so multiple modules
- * agree on one instance.
- */
-function playerSharedCtx(Ctx) {
-  if (!window.__reaAudioCtx) {
-    window.__reaAudioCtx = new Ctx();
+  _emit(info) { if (this.onPitch) this.onPitch(info); }
+
+  _emitUnvoiced(t) {
+    this._emit({ freq: null, midi: null, midiRound: null, cents: 0, clarity: 0, t });
   }
-  return window.__reaAudioCtx;
+
+  /** Turn a raw per-frame MPM result into a stable, de-jittered reading. */
+  _process(res, t) {
+    const clarity = res ? res.clarity : 0;
+
+    // Voicing state machine with hysteresis (separate on/off thresholds).
+    if (clarity >= this.onThreshold) { this._onCount++; this._offCount = 0; }
+    else if (clarity < this.offThreshold) { this._offCount++; this._onCount = 0; }
+    else { this._onCount = 0; }   // ambiguous middle band: don't confirm onset
+
+    if (!this._voiced && this._onCount >= this.onFrames) {
+      this._voiced = true;
+      this._offCount = 0;
+    }
+    if (this._voiced && this._offCount >= this.offFrames) {
+      this._voiced = false;
+      this._raw.length = 0;
+      this._ema = null;
+      this._last = null;
+      this._emitUnvoiced(t);
+      return;
+    }
+    if (!this._voiced) { this._emitUnvoiced(t); return; }
+
+    // Voiced.  Update the smoothed estimate on frames that carry a usable
+    // pitch; otherwise hold the last reading (bridges brief dropouts so the
+    // note name doesn't flicker mid-sustain).
+    if (res && res.freq && clarity >= this.offThreshold) {
+      const midi = hzToMidi(res.freq);
+      this._raw.push(midi);
+      if (this._raw.length > this.medianWindow) this._raw.shift();
+      // Median rejects a stray single-frame octave outlier without lagging
+      // the way a mean would.
+      const sorted = this._raw.slice().sort((a, b) => a - b);
+      const med = sorted[(sorted.length - 1) >> 1];
+      // One-pole smoother for cents-level glide.
+      this._ema = this._ema == null ? med : this._ema + (med - this._ema) * this.emaAlpha;
+      const out = this._ema;
+      // Voice-profile octave compensation applies to the *note* only; `freq`
+      // stays the true measured frequency.  `cents` is octave-invariant.
+      const shown = out + 12 * _voiceOctaveOffset;
+      const round = Math.round(shown);
+      this._last = {
+        freq: midiToHz(out),
+        midi: shown,
+        midiRound: round,
+        cents: Math.round((shown - round) * 100),
+        clarity,
+      };
+    }
+
+    if (this._last) this._emit(Object.assign({}, this._last, { t }));
+    else this._emitUnvoiced(t);
+  }
 }

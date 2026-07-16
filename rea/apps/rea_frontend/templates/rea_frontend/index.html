@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>REA — Relative Intonation</title>
+  <title>REA — Intonation</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=46" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=56" />
 </head>
 <body>
   <header class="app-header">
@@ -15,9 +15,10 @@
       <span class="brand-mark"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18" r="3"/><path d="M9 18V5l11-2v13"/><circle cx="17" cy="16" r="3"/></svg></span>
       <span class="brand-text">
         <span class="brand-name">REA</span>
-        <span class="brand-sub">Relative Intonation</span>
+        <span class="brand-sub">Intonation</span>
       </span>
     </button>
+    <nav class="app-nav" id="app-nav"></nav>
     <div class="header-stats" id="header-stats"></div>
   </header>
 
@@ -35,6 +36,9 @@
       </div>
       <div id="info" class="info"></div>
     </section>
+
+    <!-- Soundcheck (mic + pitch-tracker calibration) -->
+    <section id="view-soundcheck" class="view view-soundcheck" hidden></section>
   </main>
 
   <footer class="app-footer">
@@ -42,7 +46,7 @@
     <span class="footer-hint" id="footer-hint"></span>
   </footer>
 
-  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=46"></script>
-  <script type="module" src="{% static 'rea_frontend/js/app.js' %}?v=46"></script>
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=56"></script>
+  <script type="module" src="{% static 'rea_frontend/js/app.js' %}?v=56"></script>
 </body>
 </html>

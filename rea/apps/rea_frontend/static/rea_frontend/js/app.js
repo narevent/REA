@@ -11,23 +11,34 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=46";
-import { renderLessonNotation } from "./views/lessonView.js?v=46";
-import { renderScaleNotation } from "./views/scaleView.js?v=46";
-import { AudioPlayer } from "./audioPlayer.js?v=46";
-import { PracticeController } from "./practiceController.js?v=46";
+import { API } from "./api.js?v=56";
+import { renderLessonNotation } from "./views/lessonView.js?v=56";
+import { renderScaleNotation } from "./views/scaleView.js?v=56";
+import { SoundcheckView } from "./views/soundcheckView.js?v=56";
+import { AudioPlayer } from "./audioPlayer.js?v=56";
+import { PracticeController } from "./practiceController.js?v=56";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=46";
+} from "./chapters.js?v=56";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
 const viewMap = document.getElementById("view-map");
 const viewSession = document.getElementById("view-session");
+const viewSoundcheck = document.getElementById("view-soundcheck");
 const sessionTopbar = document.getElementById("session-topbar");
 const headerStats = document.getElementById("header-stats");
+const appNav = document.getElementById("app-nav");
 const brand = document.getElementById("brand");
+
+// Top-level product areas.  Today only Intonation (the chapter map + session
+// views) and Soundcheck (mic/pitch-tracker calibration) exist; Rhythm is
+// planned as a future sibling here.
+const APPS = [
+  { id: "intonation", label: "Intonation" },
+  { id: "soundcheck", label: "Soundcheck" },
+];
 
 const DEFAULT_KEY_NAME = "C-dur";
 const DEFAULT_FORMULA = "Octave";
@@ -543,6 +554,7 @@ function computeAbsParts(lessons) {
 const player = new AudioPlayer();
 
 let state = {
+  app: "intonation",      // "intonation" | "soundcheck" — top-level product area
   view: "map",
   progress: loadProgress(),
   texture: "mono",        // "mono" | "poly" — the top-level functional split
@@ -593,6 +605,8 @@ const practice = new PracticeController({
   setStatus: (m) => setStatus(m),
   onSessionComplete: (chapter, avg) => onSessionComplete(chapter, avg),
 });
+
+const soundcheck = new SoundcheckView(viewSoundcheck, { player });
 
 function setStatus(msg) { status.textContent = msg; }
 
@@ -1102,6 +1116,26 @@ async function setComboKey(keyId, checked) {
   await ensureRelPolyLesson();
 }
 
+/** Quick actions for the Inversions dropdown (All / None). */
+async function setAllComboInversions(on) {
+  for (const v of state.comboInversions) state.comboSelected[v] = on;
+  state.polyPart = null;
+  await ensureRelPolyLesson();
+}
+
+/** Quick actions for the Tonality dropdown (All major / All minor / None). */
+async function setComboKeysByMode(mode, on) {
+  for (const k of state.comboKeys) if (k.mode === mode) state.comboSelected[k.id] = on;
+  state.polyPart = null;
+  await ensureRelPolyLesson();
+}
+
+async function setAllComboKeys(on) {
+  for (const k of state.comboKeys) state.comboSelected[k.id] = on;
+  state.polyPart = null;
+  await ensureRelPolyLesson();
+}
+
 /** Clear all relative-combination selection state (category/texture/system change). */
 function resetComboSelection() {
   state.comboInversions = [];
@@ -1169,6 +1203,26 @@ async function setAbsComboQuality(value, checked) {
 
 async function setAbsComboPhase(value, checked) {
   state.absComboSelected["p|" + value] = !!checked;
+  state.polyPart = null;
+  await ensureAbsComboLesson(state.polyCategory ? state.polyCategory.value : "");
+}
+
+/** Quick actions (All / None) for the absolute-combo Subgroup / Qualities /
+ *  Phase dropdowns. */
+async function setAllAbsComboSubgroups(on) {
+  for (const v of state.absComboSubgroups) state.absComboSelected[v] = on;
+  state.polyPart = null;
+  await ensureAbsComboLesson(state.polyCategory ? state.polyCategory.value : "");
+}
+
+async function setAllAbsComboQualities(on) {
+  for (const v of state.absComboQualities) state.absComboSelected["q|" + v] = on;
+  state.polyPart = null;
+  await ensureAbsComboLesson(state.polyCategory ? state.polyCategory.value : "");
+}
+
+async function setAllAbsComboPhases(on) {
+  for (const v of state.absComboPhases) state.absComboSelected["p|" + v] = on;
   state.polyPart = null;
   await ensureAbsComboLesson(state.polyCategory ? state.polyCategory.value : "");
 }
@@ -1268,21 +1322,21 @@ function renderMap() {
           '<div class="hero-meta"><span>' + pct + '%</span><span>' + state.progress.xp + ' XP</span></div>' +
         '</div>' +
       '</div>' +
-      '<div class="chapter-grid">' + cards + '</div>' +
-      '<div class="map-foot">' +
-        '<label class="ctx-select"><span class="ctx-lbl">Texture</span>' +
-          '<select id="map-texture">' + TEXTURES.map((t) =>
-            '<option value="' + t.id + '"' + (state.texture === t.id ? " selected" : "") + ">" + t.label + "</option>"
-          ).join("") + '</select>' +
-        '</label>' +
-        '<label class="ctx-select"><span class="ctx-lbl">System</span>' +
-          '<select id="map-system">' + SYSTEMS.map((s) =>
-            '<option value="' + s.id + '"' + (state.system === s.id ? " selected" : "") + ">" + s.label + "</option>"
-          ).join("") + '</select>' +
-        '</label>' +
-        contextSelectorsHTML() +
+      '<div class="map-filters">' +
+        '<div class="filters-group filters-mode">' +
+          '<span class="filters-group-lbl">Mode</span>' +
+          '<div class="filters-row">' +
+            filterItemHTML("map-texture", "Texture", TEXTURES.map((t) => ({ value: t.id, label: t.label })), state.texture) +
+            filterItemHTML("map-system", "System", SYSTEMS.map((s) => ({ value: s.id, label: s.label })), state.system) +
+          '</div>' +
+        '</div>' +
+        '<div class="filters-group filters-practice">' +
+          '<span class="filters-group-lbl">Practice</span>' +
+          '<div class="filters-row">' + contextSelectorsHTML() + '</div>' +
+        '</div>' +
         '<button id="reset-progress" class="link-btn">reset progress</button>' +
       '</div>' +
+      '<div class="chapter-grid">' + cards + '</div>' +
     '</div>';
 
   viewMap.querySelectorAll(".chapter-card").forEach((card) => {
@@ -1354,49 +1408,64 @@ function renderMap() {
     renderHeader();
     renderMap();
   });
-  // Combinations: inversion + tonality checkboxes (relative poly).
+  // Combinations: inversion + tonality dropdowns (relative poly).
   viewMap.querySelectorAll('input[id^="map-combo-inv-"]').forEach((chk) => {
     chk.addEventListener("change", async () => {
+      const openId = openComboPanelId(viewMap);
       setComboInversion(chk.id.replace("map-combo-inv-", ""), chk.checked);
-      renderHeader();
-      renderMap();
-      reopenComboPanel("map");
+      renderAfterCombo(viewMap, openId);
     });
   });
   viewMap.querySelectorAll('input[id^="map-combo-key-"]').forEach((chk) => {
     chk.addEventListener("change", async () => {
+      const openId = openComboPanelId(viewMap);
       setComboKey(chk.id.replace("map-combo-key-", ""), chk.checked);
-      renderHeader();
-      renderMap();
-      reopenComboPanel("map");
+      renderAfterCombo(viewMap, openId);
     });
   });
-  // Absolute-poly combinations: subgroup + quality + phase checkboxes.
+  // Absolute-poly combinations: subgroup + quality + phase dropdowns.
   viewMap.querySelectorAll('input[id^="map-abscombo-sub-"]').forEach((chk) => {
     chk.addEventListener("change", async () => {
+      const openId = openComboPanelId(viewMap);
       await setAbsComboSubgroup(chk.id.replace("map-abscombo-sub-", ""), chk.checked);
-      renderHeader();
-      renderMap();
-      reopenComboPanel("map");
+      renderAfterCombo(viewMap, openId);
     });
   });
   viewMap.querySelectorAll('input[id^="map-abscombo-q-"]').forEach((chk) => {
     chk.addEventListener("change", async () => {
+      const openId = openComboPanelId(viewMap);
       await setAbsComboQuality(chk.id.replace("map-abscombo-q-", ""), chk.checked);
-      renderHeader();
-      renderMap();
-      reopenComboPanel("map");
+      renderAfterCombo(viewMap, openId);
     });
   });
   viewMap.querySelectorAll('input[id^="map-abscombo-p-"]').forEach((chk) => {
     chk.addEventListener("change", async () => {
+      const openId = openComboPanelId(viewMap);
       await setAbsComboPhase(chk.id.replace("map-abscombo-p-", ""), chk.checked);
-      renderHeader();
-      renderMap();
-      reopenComboPanel("map");
+      renderAfterCombo(viewMap, openId);
     });
   });
-  wireComboPopover("map", viewMap);
+  wireComboDropdown("map", "combo-inv", viewMap, {
+    all: async () => { setAllComboInversions(true); },
+    none: async () => { setAllComboInversions(false); },
+  });
+  wireComboDropdown("map", "combo-key", viewMap, {
+    "all-major": async () => { setComboKeysByMode("Major", true); },
+    "all-minor": async () => { setComboKeysByMode("Minor", true); },
+    none: async () => { setAllComboKeys(false); },
+  });
+  wireComboDropdown("map", "abscombo-sub", viewMap, {
+    all: async () => { await setAllAbsComboSubgroups(true); },
+    none: async () => { await setAllAbsComboSubgroups(false); },
+  });
+  wireComboDropdown("map", "abscombo-q", viewMap, {
+    all: async () => { await setAllAbsComboQualities(true); },
+    none: async () => { await setAllAbsComboQualities(false); },
+  });
+  wireComboDropdown("map", "abscombo-p", viewMap, {
+    all: async () => { await setAllAbsComboPhases(true); },
+    none: async () => { await setAllAbsComboPhases(false); },
+  });
   const reset = viewMap.querySelector("#reset-progress");
   if (reset) reset.addEventListener("click", () => {
     if (confirm("Reset all chapter progress?")) {
@@ -1415,36 +1484,81 @@ function renderMap() {
  *   poly + relative  → Key + Category + Part
  *   poly + absolute  → Category + Part
  */
-/** Build the multi-select inversion + tonality checkboxes for a combination
- *  category.  `prefix` is "map" (chapter map) or "ctx" (session topbar) so the
- *  checkbox ids are unique per location. */
-/** Build the combination controls for a combination category.
- *
- *  Inversions (3–4) render as compact inline pill checkboxes — they fit the
- *  existing context-selector row.  Tonalities (30 keys) are too many for an
- *  inline list, so they live behind a compact "Tonality" trigger button that
- *  opens a small popover panel (grouped Major/Minor + All/None quick actions,
- *  click-outside to close).  `prefix` is "map" (chapter map) or "ctx" (session
- *  topbar) so element ids stay unique per location.
- */
+/** Build one multi-select dropdown control: a compact pill trigger (label +
+ *  selection count) and a popover panel of checkboxes, optionally split into
+ *  labelled groups (used for Tonality's Major/Minor split).  `groups` is
+ *  `[{label: string|null, items: [{value, label, checked}]}]`.  Checkbox ids
+ *  are `prefix-dimId-value`, matching the wildcard change-listeners already
+ *  wired in renderMap/renderTopbar, so no wiring code needs to change.
+ *  `quickActions` is `[{key, label}]` rendered as pill buttons above the
+ *  list (e.g. All/None, or All major/All minor/None for Tonality) — wire
+ *  their behaviour separately via `wireComboDropdown`.  `prefix` is "map"
+ *  (chapter map) or "ctx" (session topbar) so ids stay unique per location. */
+function comboDropdownHTML(prefix, dimId, label, groups, quickActions) {
+  const allItems = groups.flatMap((g) => g.items);
+  const selectedCount = allItems.filter((i) => i.checked).length;
+  const triggerLabel = !allItems.length ? label
+    : selectedCount === allItems.length ? label + " · all"
+    : selectedCount ? label + " · " + selectedCount
+    : label;
+  const key = prefix + "-" + dimId;
+  const chk = (i) => '<label class="combo-pop-chk"><input type="checkbox" id="' + key +
+    "-" + i.value + '"' + (i.checked ? " checked" : "") + '><span>' + i.label + "</span></label>";
+  const groupsHtml = groups.map((g) =>
+    '<div class="combo-pop-group">' +
+      (g.label ? '<div class="combo-pop-group-lbl">' + g.label + "</div>" : "") +
+      g.items.map(chk).join("") +
+    "</div>"
+  ).join("");
+  const actionsHtml = (quickActions || []).map((a) =>
+    '<button type="button" id="' + key + "-" + a.key + '" class="combo-pop-act">' + a.label + "</button>"
+  ).join("");
 
-/** Build the combination controls for an absolute-poly combination category.
- *
- *  Absolute combinations expose three multi-select dimensions: subgroup
- *  (inversion / interval size), quality (interval/chord quality), and phase
- *  (I/II).  Each renders as compact inline pill checkboxes reusing the same
- *  combo styles as the relative combinations.  `prefix` is "map" or "ctx".
- */
+  return '<div class="combo-col"><span class="ctx-lbl">' + label + "</span>" +
+    '<div class="combo-pop">' +
+      '<button type="button" id="' + key + '-trigger" class="combo-trigger">' + triggerLabel + "</button>" +
+      '<div class="combo-pop-panel" id="' + key + '-panel" hidden>' +
+        (actionsHtml ? '<div class="combo-pop-actions">' + actionsHtml + "</div>" : "") +
+        '<div class="combo-pop-scroll">' + groupsHtml + "</div>" +
+      "</div>" +
+    "</div>" +
+  "</div>";
+}
+
+/** Build the combination controls for a relative-poly combination category:
+ *  Inversions and Tonality, each a dropdown (see `comboDropdownHTML`).
+ *  `prefix` is "map" or "ctx". */
+function comboSelectorsHTML(prefix) {
+  const cat = state.polyCategory ? state.polyCategory.value : "";
+  const invOpts = COMBO_INVERSIONS[cat] || [];
+  const invItems = invOpts.map((o) => ({ value: o.value, label: o.label, checked: !!state.comboSelected[o.value] }));
+  const invHtml = comboDropdownHTML(prefix, "combo-inv", "Inversions",
+    [{ label: null, items: invItems }],
+    [{ key: "all", label: "All" }, { key: "none", label: "None" }]);
+
+  const majors = state.comboKeys.filter((k) => k.mode === "Major")
+    .map((k) => ({ value: k.id, label: k.name, checked: !!state.comboSelected[k.id] }));
+  const minors = state.comboKeys.filter((k) => k.mode === "Minor")
+    .map((k) => ({ value: k.id, label: k.name, checked: !!state.comboSelected[k.id] }));
+  const keyHtml = comboDropdownHTML(prefix, "combo-key", "Tonality",
+    [{ label: "Major", items: majors }, { label: "Minor", items: minors }],
+    [{ key: "all-major", label: "All major" }, { key: "all-minor", label: "All minor" }, { key: "none", label: "None" }]);
+
+  return '<div class="combo-selectors">' + invHtml + keyHtml + "</div>";
+}
+
+/** Build the combination controls for an absolute-poly combination category:
+ *  Subgroup (inversion / interval size), Qualities, and Phase, each a
+ *  dropdown (see `comboDropdownHTML`).  `prefix` is "map" or "ctx". */
 function absComboSelectorsHTML(prefix) {
   const cat = state.polyCategory ? state.polyCategory.value : "";
   const cfg = absComboSubgroupCfg(cat);
   if (!cfg) return "";
   const subOpts = computeAbsComboSubgroups(cat, state.polyCategoryLessons);
-  const subHtml = subOpts.map((o) => {
-    const checked = state.absComboSelected[o.value] ? " checked" : "";
-    return '<label class="combo-chk"><input type="checkbox" id="' + prefix +
-      '-abscombo-sub-' + o.value + '"' + checked + '><span>' + o.label + "</span></label>";
-  }).join("");
+  const subItems = subOpts.map((o) => ({ value: o.value, label: o.label, checked: !!state.absComboSelected[o.value] }));
+  const subHtml = comboDropdownHTML(prefix, "abscombo-sub", cfg.label || "Subgroup",
+    [{ label: null, items: subItems }],
+    [{ key: "all", label: "All" }, { key: "none", label: "None" }]);
 
   // Qualities — the union of every subgroup option's qualities, labelled.
   const qualCfg = ABS_POLY_QUALITIES[comboBaseCategory(cat)];
@@ -1453,132 +1567,106 @@ function absComboSelectorsHTML(prefix) {
     if (qualCfg.options) for (const q of qualCfg.options) qualLabelMap[q.value] = q.label;
     else for (const k in qualCfg.bySubgroup) for (const q of qualCfg.bySubgroup[k]) qualLabelMap[q.value] = q.label;
   }
-  const qualHtml = state.absComboQualities.map((v) => {
-    if (v === "") return "";  // single-quality leaves (Fifths/Octaves) have no checkbox
-    const checked = state.absComboSelected["q|" + v] ? " checked" : "";
-    return '<label class="combo-chk"><input type="checkbox" id="' + prefix +
-      '-abscombo-q-' + v + '"' + checked + '><span>' + (qualLabelMap[v] || v) + "</span></label>";
-  }).join("");
+  const qualItems = state.absComboQualities
+    .filter((v) => v !== "")  // single-quality leaves (Fifths/Octaves) have no checkbox
+    .map((v) => ({ value: v, label: qualLabelMap[v] || v, checked: !!state.absComboSelected["q|" + v] }));
+  const qualHtml = qualItems.length ? comboDropdownHTML(prefix, "abscombo-q", "Qualities",
+    [{ label: null, items: qualItems }],
+    [{ key: "all", label: "All" }, { key: "none", label: "None" }]) : "";
 
-  const phaseHtml = state.absComboPhases.map((v) => {
-    const checked = state.absComboSelected["p|" + v] ? " checked" : "";
-    const lbl = v === 1 ? "I (melodic)" : "II (harmonic)";
-    return '<label class="combo-chk"><input type="checkbox" id="' + prefix +
-      '-abscombo-p-' + v + '"' + checked + '><span>' + lbl + "</span></label>";
-  }).join("");
+  const phaseItems = state.absComboPhases.map((v) => ({
+    value: v, label: v === 1 ? "I (melodic)" : "II (harmonic)", checked: !!state.absComboSelected["p|" + v],
+  }));
+  const phaseHtml = phaseItems.length ? comboDropdownHTML(prefix, "abscombo-p", "Phase",
+    [{ label: null, items: phaseItems }],
+    [{ key: "all", label: "All" }, { key: "none", label: "None" }]) : "";
 
-  return '<div class="combo-selectors">' +
-    '<div class="combo-col"><span class="ctx-lbl">' + (cfg.label || "Subgroup") + '</span><div class="combo-chks">' + subHtml + "</div></div>" +
-    (qualHtml ? '<div class="combo-col"><span class="ctx-lbl">Qualities</span><div class="combo-chks">' + qualHtml + "</div></div>" : "") +
-    (phaseHtml ? '<div class="combo-col"><span class="ctx-lbl">Phase</span><div class="combo-chks">' + phaseHtml + "</div></div>" : "") +
-    "</div>";
+  return '<div class="combo-selectors">' + subHtml + qualHtml + phaseHtml + "</div>";
 }
 
-function comboSelectorsHTML(prefix) {
-  const cat = state.polyCategory ? state.polyCategory.value : "";
-  const invOpts = COMBO_INVERSIONS[cat] || [];
-  const invHtml = invOpts.map((o) => {
-    const checked = state.comboSelected[o.value] ? " checked" : "";
-    return '<label class="combo-chk"><input type="checkbox" id="' + prefix +
-      '-combo-inv-' + o.value + '"' + checked + '><span>' + o.label + "</span></label>";
-  }).join("");
-
-  const selectedKeys = state.comboKeys.filter((k) => state.comboSelected[k.id]);
-  const majors = state.comboKeys.filter((k) => k.mode === "Major");
-  const minors = state.comboKeys.filter((k) => k.mode === "Minor");
-  const keyChk = (k) => {
-    const checked = state.comboSelected[k.id] ? " checked" : "";
-    return '<label class="combo-pop-chk"><input type="checkbox" id="' + prefix +
-      '-combo-key-' + k.id + '"' + checked + '><span>' + k.name + "</span></label>";
-  };
-  const triggerLabel = selectedKeys.length
-    ? "Tonality · " + selectedKeys.length + " selected"
-    : "Tonality";
-
-  return '<div class="combo-selectors">' +
-    '<div class="combo-col"><span class="ctx-lbl">Inversions</span><div class="combo-chks">' + invHtml + "</div></div>" +
-    '<div class="combo-col"><span class="ctx-lbl">Tonality</span>' +
-      '<div class="combo-pop">' +
-        '<button type="button" id="' + prefix + '-combo-trigger" class="combo-trigger">' + triggerLabel + "</button>" +
-        '<div class="combo-pop-panel" id="' + prefix + '-combo-panel" hidden>' +
-          '<div class="combo-pop-actions">' +
-            '<button type="button" id="' + prefix + '-combo-all-major" class="combo-pop-act">All major</button>' +
-            '<button type="button" id="' + prefix + '-combo-all-minor" class="combo-pop-act">All minor</button>' +
-            '<button type="button" id="' + prefix + '-combo-none" class="combo-pop-act">None</button>' +
-          "</div>" +
-          '<div class="combo-pop-scroll">' +
-            '<div class="combo-pop-group"><div class="combo-pop-group-lbl">Major</div>' + majors.map(keyChk).join("") + "</div>" +
-            '<div class="combo-pop-group"><div class="combo-pop-group-lbl">Minor</div>' + minors.map(keyChk).join("") + "</div>" +
-          "</div>" +
-        "</div>" +
-      "</div>" +
-    "</div>" +
-    "</div>";
-}
-
-/** Wire the tonality popover: trigger toggle, click-outside-to-close, and
- *  All-major / All-minor / None quick actions.  `prefix` is "map" or "ctx";
- *  `root` is the element the controls were rendered into (viewMap /
- *  sessionTopbar) so the outside-click handler scopes correctly. */
-function wireComboPopover(prefix, root) {
-  const trigger = root.querySelector("#" + prefix + "-combo-trigger");
-  const panel = root.querySelector("#" + prefix + "-combo-panel");
+/** Wire one dropdown's trigger toggle (closing any other open dropdown in
+ *  `root` first) and its quick-action buttons.  `actions` maps each quick
+ *  action's `key` (as passed to `comboDropdownHTML`) to an async callback
+ *  that updates state and reloads the lesson; the view is re-rendered and
+ *  this panel re-opened afterwards so the user sees the change take
+ *  effect.  `prefix`/`dimId` identify the panel (see `comboDropdownHTML`);
+ *  `root` is viewMap or sessionTopbar. */
+function wireComboDropdown(prefix, dimId, root, actions) {
+  const key = prefix + "-" + dimId;
+  const trigger = root.querySelector("#" + key + "-trigger");
+  const panel = root.querySelector("#" + key + "-panel");
   if (!trigger || !panel) return;
   trigger.addEventListener("click", (e) => {
     e.stopPropagation();
-    panel.hidden = !panel.hidden;
+    const opening = panel.hidden;
+    root.querySelectorAll(".combo-pop-panel").forEach((p) => { if (p !== panel) p.hidden = true; });
+    panel.hidden = !opening;
   });
-  const onAway = (e) => {
-    if (panel.hidden) return;
-    if (panel.contains(e.target) || trigger.contains(e.target)) return;
-    panel.hidden = true;
-    document.removeEventListener("click", onAway, true);
-  };
-  const obs = new MutationObserver(() => {
-    if (!panel.hidden) document.addEventListener("click", onAway, true);
-    else document.removeEventListener("click", onAway, true);
-  });
-  obs.observe(panel, { attributes: true, attributeFilter: ["hidden"] });
-
-  const setMode = (mode, on) => {
-    for (const k of state.comboKeys) if (k.mode === mode) state.comboSelected[k.id] = on;
-    state.polyPart = null;
-    ensureRelPolyLesson();
-  };
-  const allMajor = root.querySelector("#" + prefix + "-combo-all-major");
-  if (allMajor) allMajor.addEventListener("click", () => { setMode("Major", true); renderAfterCombo(root, prefix); });
-  const allMinor = root.querySelector("#" + prefix + "-combo-all-minor");
-  if (allMinor) allMinor.addEventListener("click", () => { setMode("Minor", true); renderAfterCombo(root, prefix); });
-  const noneBtn = root.querySelector("#" + prefix + "-combo-none");
-  if (noneBtn) noneBtn.addEventListener("click", () => {
-    for (const k of state.comboKeys) state.comboSelected[k.id] = false;
-    state.polyPart = null;
-    ensureRelPolyLesson();
-    renderAfterCombo(root, prefix);
-  });
+  for (const actKey in actions) {
+    const btn = root.querySelector("#" + key + "-" + actKey);
+    if (!btn) continue;
+    btn.addEventListener("click", async () => {
+      await actions[actKey]();
+      renderAfterCombo(root, key + "-panel");
+    });
+  }
 }
 
-/** Re-open the tonality popover after a re-render, by id prefix. */
-function reopenComboPanel(prefix) {
-  const p = document.getElementById(prefix + "-combo-panel");
+/** Currently-open combo dropdown panel id within `root`, if any — captured
+ *  before a re-render so the same panel can be reopened afterwards (a
+ *  checkbox toggle inside one dropdown shouldn't close it, or pop open a
+ *  different one, when the view re-renders from scratch). */
+function openComboPanelId(root) {
+  const p = root.querySelector(".combo-pop-panel:not([hidden])");
+  return p ? p.id : null;
+}
+
+/** Re-open `panelId` (captured via `openComboPanelId` before a re-render), if
+ *  any, so a combo dropdown stays open across the innerHTML rebuild. */
+function keepPanelOpen(panelId) {
+  if (!panelId) return;
+  const p = document.getElementById(panelId);
   if (p) p.hidden = false;
 }
 
-/** Re-render after a quick-action: keep the popover open so the user sees the
- *  selection change, and refresh the parent view. */
-function renderAfterCombo(root, prefix) {
+/** Re-render after a combo change (checkbox toggle or quick action): refresh
+ *  the parent view (map or session topbar) and keep `panelId` open, if any,
+ *  so the user sees the selection change without the dropdown closing. */
+function renderAfterCombo(root, panelId) {
   if (root === viewMap) { renderHeader(); renderMap(); }
   else { renderTopbar(); }
-  reopenComboPanel(prefix);
+  keepPanelOpen(panelId);
+}
+
+/** Close any open combo dropdown panel when the user clicks outside it and
+ *  its trigger.  Registered once at module load (not inside a render
+ *  function) since the app re-renders by replacing innerHTML wholesale —
+ *  a listener added per-render would leak one stale entry on `document`
+ *  every time. */
+document.addEventListener("click", (e) => {
+  document.querySelectorAll(".combo-pop-panel:not([hidden])").forEach((panel) => {
+    if (panel.contains(e.target)) return;
+    const trigger = panel.previousElementSibling;
+    if (trigger && trigger.contains(e.target)) return;
+    panel.hidden = true;
+  });
+}, true);
+
+/** One filter control: a small uppercase label above a pill-styled <select>,
+ *  matching the combo dropdowns' label-above-control shape (see
+ *  `comboDropdownHTML`) so every control in the filters panel lines up the
+ *  same way regardless of whether it's a plain select or a multi-select
+ *  dropdown. */
+function filterItemHTML(id, label, options, current) {
+  return '<label class="filter-item"><span class="ctx-lbl">' + label + '</span>' +
+    '<select id="' + id + '">' + options.map((o) =>
+      '<option value="' + o.value + '"' + (o.value === current ? " selected" : "") + ">" + o.label + "</option>"
+    ).join("") + '</select>' +
+  '</label>';
 }
 
 function contextSelectorsHTML() {
-  const sel = (id, label, options, current) =>
-    '<label class="ctx-select"><span class="ctx-lbl">' + label + '</span>' +
-      '<select id="' + id + '">' + options.map((o) =>
-        '<option value="' + o.value + '"' + (o.value === current ? " selected" : "") + ">" + o.label + "</option>"
-      ).join("") + '</select>' +
-    '</label>';
+  const sel = filterItemHTML;
 
   if (state.texture === "poly") {
     const cats = state.system === "absolute" ? ABS_POLY_CATEGORIES : REL_POLY_CATEGORIES;
@@ -1715,6 +1803,7 @@ async function openChapter(chapterId) {
 function showSession() {
   state.view = "session";
   viewMap.hidden = true;
+  viewSoundcheck.hidden = true;
   viewSession.hidden = false;
 }
 
@@ -1722,10 +1811,46 @@ function showMap() {
   state.view = "map";
   practice.stop();
   viewSession.hidden = true;
+  viewSoundcheck.hidden = true;
   viewMap.hidden = false;
+  headerStats.hidden = false;
   renderHeader();
   renderMap();
   setStatus("Ready");
+}
+
+/** Render the top-level app nav (Intonation / Soundcheck / ...), highlighting
+ *  the active one.  Called on boot and whenever `state.app` changes. */
+function renderNav() {
+  appNav.innerHTML = APPS.map((a) =>
+    '<button type="button" class="app-nav-btn' + (state.app === a.id ? " active" : "") +
+    '" data-app="' + a.id + '">' + a.label + "</button>"
+  ).join("");
+  appNav.querySelectorAll(".app-nav-btn").forEach((btn) => {
+    btn.addEventListener("click", () => showApp(btn.dataset.app));
+  });
+}
+
+/** Switch the top-level product area.  Soundcheck is a standalone calibration
+ *  screen (not chapter/lesson-based), so entering it stops any Intonation
+ *  session and hides the chapter-stats header; leaving it releases the mic. */
+function showApp(appId) {
+  if (!APPS.find((a) => a.id === appId) || state.app === appId) return;
+  state.app = appId;
+  renderNav();
+  if (appId === "soundcheck") {
+    practice.stop();
+    viewMap.hidden = true;
+    viewSession.hidden = true;
+    viewSoundcheck.hidden = false;
+    headerStats.hidden = true;
+    soundcheck.enter();
+    setStatus("Soundcheck");
+  } else {
+    soundcheck.leave();
+    viewSoundcheck.hidden = true;
+    showMap();
+  }
 }
 
 function topbarContextHTML() {
@@ -1917,49 +2042,74 @@ function renderTopbar() {
     renderTopbar();
     reopen();
   });
-  // Combinations: inversion + tonality checkboxes (relative poly).
+  // Combinations: inversion + tonality dropdowns (relative poly).
   sessionTopbar.querySelectorAll('input[id^="ctx-combo-inv-"]').forEach((chk) => {
     chk.addEventListener("change", async () => {
+      const openId = openComboPanelId(sessionTopbar);
       setComboInversion(chk.id.replace("ctx-combo-inv-", ""), chk.checked);
       renderTopbar();
       reopen();
-      reopenComboPanel("ctx");
+      keepPanelOpen(openId);
     });
   });
   sessionTopbar.querySelectorAll('input[id^="ctx-combo-key-"]').forEach((chk) => {
     chk.addEventListener("change", async () => {
+      const openId = openComboPanelId(sessionTopbar);
       setComboKey(chk.id.replace("ctx-combo-key-", ""), chk.checked);
       renderTopbar();
       reopen();
-      reopenComboPanel("ctx");
+      keepPanelOpen(openId);
     });
   });
-  // Absolute-poly combinations: subgroup + quality + phase checkboxes.
+  // Absolute-poly combinations: subgroup + quality + phase dropdowns.
   sessionTopbar.querySelectorAll('input[id^="ctx-abscombo-sub-"]').forEach((chk) => {
     chk.addEventListener("change", async () => {
+      const openId = openComboPanelId(sessionTopbar);
       await setAbsComboSubgroup(chk.id.replace("ctx-abscombo-sub-", ""), chk.checked);
       renderTopbar();
       reopen();
-      reopenComboPanel("ctx");
+      keepPanelOpen(openId);
     });
   });
   sessionTopbar.querySelectorAll('input[id^="ctx-abscombo-q-"]').forEach((chk) => {
     chk.addEventListener("change", async () => {
+      const openId = openComboPanelId(sessionTopbar);
       await setAbsComboQuality(chk.id.replace("ctx-abscombo-q-", ""), chk.checked);
       renderTopbar();
       reopen();
-      reopenComboPanel("ctx");
+      keepPanelOpen(openId);
     });
   });
   sessionTopbar.querySelectorAll('input[id^="ctx-abscombo-p-"]').forEach((chk) => {
     chk.addEventListener("change", async () => {
+      const openId = openComboPanelId(sessionTopbar);
       await setAbsComboPhase(chk.id.replace("ctx-abscombo-p-", ""), chk.checked);
       renderTopbar();
       reopen();
-      reopenComboPanel("ctx");
+      keepPanelOpen(openId);
     });
   });
-  wireComboPopover("ctx", sessionTopbar);
+  wireComboDropdown("ctx", "combo-inv", sessionTopbar, {
+    all: async () => { setAllComboInversions(true); },
+    none: async () => { setAllComboInversions(false); },
+  });
+  wireComboDropdown("ctx", "combo-key", sessionTopbar, {
+    "all-major": async () => { setComboKeysByMode("Major", true); },
+    "all-minor": async () => { setComboKeysByMode("Minor", true); },
+    none: async () => { setAllComboKeys(false); },
+  });
+  wireComboDropdown("ctx", "abscombo-sub", sessionTopbar, {
+    all: async () => { await setAllAbsComboSubgroups(true); },
+    none: async () => { await setAllAbsComboSubgroups(false); },
+  });
+  wireComboDropdown("ctx", "abscombo-q", sessionTopbar, {
+    all: async () => { await setAllAbsComboQualities(true); },
+    none: async () => { await setAllAbsComboQualities(false); },
+  });
+  wireComboDropdown("ctx", "abscombo-p", sessionTopbar, {
+    all: async () => { await setAllAbsComboPhases(true); },
+    none: async () => { await setAllAbsComboPhases(false); },
+  });
 }
 
 function onSessionComplete(chapter, avg) {
@@ -1979,7 +2129,10 @@ const _unlockAudio = () => {
 window.addEventListener("pointerdown", _unlockAudio);
 window.addEventListener("keydown", _unlockAudio);
 
-brand.addEventListener("click", () => { if (state.view !== "map") showMap(); });
+brand.addEventListener("click", () => {
+  if (state.app !== "intonation") { showApp("intonation"); return; }
+  if (state.view !== "map") showMap();
+});
 
 viewSession.addEventListener("rea:next-chapter", (e) => {
   const fromId = e.detail && e.detail.from;
@@ -1994,6 +2147,7 @@ viewSession.addEventListener("rea:next-chapter", (e) => {
 // ---------------------------------------------------------------------------
 
 (async () => {
+  renderNav();
   renderHeader();
   renderMap();
   setStatus("Loading…");

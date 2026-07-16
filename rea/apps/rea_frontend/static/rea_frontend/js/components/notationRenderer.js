@@ -12,7 +12,7 @@
  *  - per-note SVG references so the UI can highlight notes during playback.
  */
 
-import { modeChordToVexKey, noteNameToVexflow, parseNoteToken } from "../notation.js?v=45";
+import { modeChordToVexKey, noteNameToVexflow, parseNoteToken } from "../notation.js?v=56";
 
 const PX_PER_WHOLE = 260;
 const STAVE_PADDING = 26;
@@ -46,7 +46,6 @@ export class NotationRenderer {
     this._sungEl = null;
     this._sungGlobal = null;
     this._currentTargetMidi = null;
-    this._sungY = null;
   }
 
   _resolveVF() {
@@ -484,17 +483,30 @@ export class NotationRenderer {
   // note the controller calls advanceSungNote() to move the marker to the
   // next reference note in the bar.
 
-  /** Diatonic VexFlow staff-line index for a MIDI note on a treble clef.
-   *  VexFlow counts lines from the TOP: line 0 = F5 (top line), line 4 = E4
-   *  (bottom line).  Accidentals stay on their natural letter's line/space. */
+  /** Continuous VexFlow staff-line index for a (possibly fractional) MIDI
+   *  pitch on a treble clef.  VexFlow counts lines from the TOP: line 0 = F5
+   *  (top line), line 4 = E4 (bottom line).
+   *
+   *  A natural note lands exactly on its own line/space (so singing the exact
+   *  target pitch parks the marker right on the notehead), and the position
+   *  moves *continuously* with pitch: each semitone advances the marker, with
+   *  accidentals sitting half a diatonic step between their neighbours.  This
+   *  matters for a live pitch marker — mapping accidentals onto the natural
+   *  letter's line (as ordinary notation does) would freeze the marker for a
+   *  whole tone at a time and read as stepped, glitchy motion during a glide. */
   _midiToLineIndex(midi) {
-    // Natural letter for the staff slot (accidentals don't move the line).
-    const PC_LETTER = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6]; // C,D,E,F,G,A,B
-    const pc = ((midi % 12) + 12) % 12;
-    const octave = Math.floor(midi / 12) - 1;
-    const di = PC_LETTER[pc] + 7 * octave;     // absolute diatonic index
-    const f5 = 3 + 7 * 5;                       // F5 diatonic index (top line)
-    return (f5 - di) * 0.5;                     // 0.5 line per diatonic step
+    // Diatonic sub-position of each pitch class within its octave: naturals on
+    // whole steps (C=0, D=1, ... B=6), accidentals halfway between.
+    const CHROMA_TO_DIATONIC = [0, 0.5, 1, 1.5, 2, 3, 3.5, 4, 4.5, 5, 5.5, 6];
+    const f5 = 3 + 7 * 5;                        // F5 diatonic index (top line)
+    const octave = Math.floor(midi / 12) - 1;    // MIDI octave (C4 -> 4)
+    const pc = midi - Math.floor(midi / 12) * 12; // fractional pitch class [0,12)
+    const lo = Math.floor(pc);
+    const frac = pc - lo;
+    const a = CHROMA_TO_DIATONIC[lo];
+    const b = lo === 11 ? 7 : CHROMA_TO_DIATONIC[lo + 1]; // B -> next-octave C
+    const di = (a + (b - a) * frac) + 7 * octave; // absolute diatonic index
+    return (f5 - di) * 0.5;                       // 0.5 line per diatonic step
   }
 
   /** Screen-x centre (in SVG user units) of the note at a global index. */
@@ -508,10 +520,13 @@ export class NotationRenderer {
   }
 
   /** Draw or update the sung-pitch notehead over the given global note slot.
-   *  The sung `midi` is folded into the current target note's octave so the
-   *  marker tracks the pitch class relative to the target (octave-agnostic)
-   *  and always stays near the staff instead of clipping when the user sings
-   *  in a different octave.  `midi` may be fractional for sub-semitone smoothing. */
+   *  The marker is placed at the *actual* tracked pitch — no octave folding,
+   *  no extra position smoothing.  The pitch detector already delivers a
+   *  stable, correctly-octaved, fractional MIDI value, so the marker's only
+   *  job is to render it faithfully: apply the renderer's own logic and it
+   *  ends up lagging and octave-shifted relative to what was actually sung.
+   *  `_midiToLineIndex` interpolates the staff position fractionally, so a
+   *  smooth incoming pitch already yields smooth vertical motion. */
   showSungNote(globalIndex, midi, targetMidi) {
     const svg = this.svgEl || this.container.querySelector("svg");
     if (!svg) return;
@@ -521,16 +536,9 @@ export class NotationRenderer {
     if (!b || !b.stave) return;
     const x = this._noteCentreXByGlobal(globalIndex);
     if (x == null) return;
-    // Fold the sung pitch class into the target's octave.
-    const tgt = targetMidi != null ? targetMidi : this._currentTargetMidi;
-    let displayMidi = midi;
-    if (tgt != null) {
-      const sungPC = ((Math.round(midi) % 12) + 12) % 12;
-      displayMidi = 12 * Math.floor(tgt / 12) + sungPC;
-    }
-    const lineIndex = this._midiToLineIndex(displayMidi);
-    let y;
-    try { y = b.stave.getYForLine(lineIndex); } catch (e) { return; }
+
+    const y = b.stave.getYForLine(this._midiToLineIndex(midi));
+    if (!isFinite(y)) return;
 
     if (!this._sungEl) {
       this._sungEl = document.createElementNS("http://www.w3.org/2000/svg", "ellipse");
@@ -538,24 +546,27 @@ export class NotationRenderer {
       this._sungEl.setAttribute("ry", 5.5);
       svg.appendChild(this._sungEl);
     }
-    // Smooth the vertical position with a one-pole low-pass so the marker
-    // glides instead of jittering frame-to-frame.
-    if (this._sungY == null) this._sungY = y;
-    this._sungY = this._sungY + (y - this._sungY) * 0.35;
     this._sungEl.setAttribute("cx", x);
-    this._sungEl.setAttribute("cy", this._sungY);
-    // Colour by closeness to the target pitch class (octave-agnostic).
-    const off = tgt != null ? Math.min((((Math.round(midi) - tgt) % 12) + 12) % 12, 12 - ((((Math.round(midi) - tgt) % 12) + 12) % 12)) : 99;
-    const cls = off <= 0 ? "vf-sung-good" : off <= 1 || off >= 11 ? "vf-sung-ok" : "vf-sung-off";
+    this._sungEl.setAttribute("cy", y);
+    // Colour by how close the sung pitch is to the target — octave-aware, so
+    // the colour matches the marker's true position on the staff (an octave
+    // off reads as off, not in tune).  Uses the fractional pitch so it's
+    // cents-sensitive.
+    const tgt = targetMidi != null ? targetMidi : this._currentTargetMidi;
+    let cls = "vf-sung-off";
+    if (tgt != null) {
+      const semis = Math.abs(midi - tgt);
+      cls = semis <= 0.3 ? "vf-sung-good" : semis <= 1 ? "vf-sung-ok" : "vf-sung-off";
+    }
     this._sungEl.setAttribute("class", "vf-sung-note " + cls);
   }
 
   /** Remember the current target note slot + pitch so the controller can ask
-   *  to advance to the next pitched note in the bar. */
+   *  to advance to the next pitched note in the bar (and so the marker colour
+   *  has a reference when `showSungNote` is called without an explicit one). */
   setSungTarget(globalIndex, targetMidi) {
     this._sungGlobal = globalIndex;
     this._currentTargetMidi = targetMidi;
-    this._sungY = null;            // snap to the new target's position
   }
 
   /** Advance the sung marker to the next pitched note after the current one.
@@ -617,7 +628,6 @@ export class NotationRenderer {
     if (this._sungEl) { this._sungEl.remove(); this._sungEl = null; }
     this._sungGlobal = null;
     this._currentTargetMidi = null;
-    this._sungY = null;
   }
 
   _durToType(d) {
