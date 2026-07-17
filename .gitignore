@@ -10,9 +10,6 @@ __pycache__/
 venv/
 env/
 
-# Claude AI
-/.claude/launch.json
-
 # Django
 rea/db.sqlite3
 rea/db.sqlite3-journal
