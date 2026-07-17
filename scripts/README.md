@@ -21,9 +21,10 @@ libraries. They are ignored by `.gitignore` and never committed.
 
 ## Scripts
 
-| Script         | When to run            | What it does |
-|----------------|------------------------|--------------|
-| `init_vps.sh`  | **once**, as root      | Installs deps, creates service user, clones repo, builds venv, writes `.env`, sets up Gunicorn + Nginx, opens the firewall |
+| Script              | When to run            | What it does |
+|---------------------|------------------------|--------------|
+| `bootstrap_local.sh`| **once**, from *your* machine | Orchestrates the entire first-time setup over SSH: local pre-flight, runs `init_vps.sh` on the VPS, rsyncs the JSON data + optional DB, runs `deploy.sh`, optional Let's Encrypt HTTPS |
+| `init_vps.sh`       | (called by bootstrap)  | Installs deps, creates service user, clones repo, builds venv, writes `.env`, sets up Gunicorn + Nginx, opens the firewall |
 | `deploy.sh`    | after init / big changes | Pulls code, installs deps, migrates, collects static, **imports all JSON data**, restarts services |
 | `update.sh`    | after each `git push`  | Pulls code, reinstalls deps only if `requirements.txt` changed, migrates, collects static, restarts (no re-import) |
 | `backup.sh`    | cron / manually        | Tarballs the DB + both JSON data dirs + `.env` into `/opt/rea-backups`, rotates old copies |
@@ -31,6 +32,22 @@ libraries. They are ignored by `.gitignore` and never committed.
 | `config.sh`    | sourced by all of the above | Centralised, overridable settings |
 
 ## First-time setup
+
+The easiest path is the local orchestrator — run it from your machine and it
+does everything over SSH (steps 1–5 below):
+
+```bash
+bash scripts/bootstrap_local.sh \
+    --host root@203.0.113.10 \
+    --domain rea.example.com \
+    --repo https://github.com/narevent/REA.git
+```
+
+Add `--with-db` to also ship your local `rea/db.sqlite3`, and `--ssl` to
+provision HTTPS with certbot. Run `bash scripts/bootstrap_local.sh --help` for
+all flags (non-root sudoer SSH user, custom data dir, branch, ssh key, etc.).
+
+If you prefer to run the steps manually, here they are:
 
 1. Push your code to GitHub (make sure `relative/`, `absolute/`, `rea/db.sqlite3`
    and `rea/static/` are **not** committed — `.gitignore` already excludes them).
