@@ -48,12 +48,18 @@ if [[ ! -d "$APP_ROOT/.git" ]]; then
   if [[ "$REA_REPO_URL" == git@github.com:* ]]; then
     die "SSH repo URL requires deploy keys. Use an HTTPS URL for init_vps.sh, e.g. https://github.com/you/rea5.git"
   fi
-  git clone --branch "$REA_BRANCH" "$REA_REPO_URL" "$APP_ROOT"
+  # Clone as the SERVICE USER so the working tree is owned by them from the
+  # start (avoids git's "dubious ownership" error on re-runs, and avoids a
+  # later chown -R over many files).
+  as_user "git clone --branch $REA_BRANCH $REA_REPO_URL $APP_ROOT"
 else
   log "Repo already present at $APP_ROOT; fetching latest..."
-  git -C "$APP_ROOT" fetch --prune
-  git -C "$APP_ROOT" checkout "$REA_BRANCH"
-  git -C "$APP_ROOT" reset --hard "origin/$REA_BRANCH"
+  # Run git as the SERVICE USER: the repo is owned by them (we chowned it on
+  # the first run), and root operating on another user's repo triggers git's
+  # "dubious ownership" safe.directory refusal.
+  as_user "git -C $APP_ROOT fetch --prune origin"
+  as_user "git -C $APP_ROOT checkout $REA_BRANCH"
+  as_user "git -C $APP_ROOT reset --hard origin/$REA_BRANCH"
 fi
 chown -R "$ACCT" "$APP_ROOT"
 
