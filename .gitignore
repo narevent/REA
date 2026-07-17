@@ -10,6 +10,9 @@ __pycache__/
 venv/
 env/
 
+# Claude AI
+.claude/
+
 # Django
 rea/db.sqlite3
 rea/db.sqlite3-journal
