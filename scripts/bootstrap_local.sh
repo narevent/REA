@@ -73,6 +73,15 @@ REMOTE_APP_ROOT="/opt/rea5"
 REMOTE_DATA_ROOT="/opt/rea-data"
 REMOTE_REPO_TMP="/tmp/rea5-init"
 
+# --- SSH connection multiplexing -------------------------------------------
+# We open ONE master SSH connection and reuse it for every ssh/scp/rsync call,
+# so you enter the SSH password (if any) only ONCE for the whole run instead of
+# being prompted for every remote command.  The socket lives in a private temp
+# dir; %C is expanded by ssh to a hash of user/host/port (keeps the path short,
+# avoiding the macOS 104-char socket-path limit).  Set up after HOST is known.
+SSH_CONTROL_DIR=""
+SSH_CONTROL_SOCK=""
+
 # ===========================================================================
 # Helpers
 # ===========================================================================
@@ -83,16 +92,57 @@ ok()   { printf '%s[ok]%s  %s\n' "$c_grn"  "$c_rst" "$*"; }
 warn() { printf '%s[!]%s %s\n'  "$c_ylw"   "$c_rst" "$*" >&2; }
 die()  { printf '%s[x]%s %s\n'  "$c_red"   "$c_rst" "$*" >&2; exit 1; }
 
-# Build a string of common SSH args (space-separated), + optional identity.
+# Build a string of common SSH options (space-separated), + optional identity.
 # We return a *string* (not an array) so this works on bash 3.2 (macOS default),
-# which lacks `mapfile -d ''`.  Callers split it read-only via read -a/-r.
+# which lacks `mapfile -d ''`.  Callers split it read-only.
+#
+# IMPORTANT: we deliberately do NOT use BatchMode=yes.  BatchMode disables all
+# password/keyboard-interactive prompts, which makes SSH fail instantly with
+# "Permission denied (publickey,password)" when no SSH key is authorized — i.e.
+# it breaks the common case of password-based VPS login.  Instead we rely on
+# connection multiplexing (ssh_control_setup) so a password, when needed, is
+# entered only once for the whole run.
 ssh_args_str() {
-  local s="-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
+  local s="-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15"
   [[ -n "$SSH_KEY" ]] && s+=" -i $SSH_KEY"
+  if [[ -n "$SSH_CONTROL_SOCK" ]]; then
+    s+=" -o ControlPath=$SSH_CONTROL_SOCK -o ControlMaster=no -o ControlPersist=no"
+  fi
   printf '%s' "$s"
 }
 
-# Run a remote command over ssh.
+# Open the SSH master control connection (once).  Prompts for the login
+# password here if key auth is not set up.  Idempotent: re-uses an existing
+# master if already present.  Must be called AFTER $HOST is known.
+ssh_control_setup() {
+  SSH_CONTROL_DIR="$(mktemp -d -t rea-ssh-ctrl)"
+  SSH_CONTROL_SOCK="$SSH_CONTROL_DIR/ssh-%C"
+  local master_opts=( -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15
+                      -o ControlMaster=yes -o ControlPath="$SSH_CONTROL_SOCK"
+                      -o ControlPersist=300 )
+  [[ -n "$SSH_KEY" ]] && master_opts+=( -i "$SSH_KEY" )
+  log "  opening SSH master connection to $HOST (enter password if prompted)..."
+  # A backgrounded master (-MfN) stays up with no remote command; -o exits 0
+  # once the master is established.  We foreground with a trivial command so a
+  # failure surfaces immediately.
+  if ! ssh "${master_opts[@]}" -o ServerAliveInterval=30 "$HOST" 'true'; then
+    rm -rf "$SSH_CONTROL_DIR"
+    SSH_CONTROL_SOCK=""
+    die "Could not establish SSH connection to $HOST (check host/credentials/network)."
+  fi
+  ok "  SSH master connection up (reused for the rest of the run)."
+}
+
+# Tear down the master connection and its socket dir.  Safe to call if never set up.
+ssh_control_teardown() {
+  if [[ -n "$SSH_CONTROL_SOCK" && -n "$SSH_CONTROL_DIR" ]]; then
+    local opts=( -o ControlPath="$SSH_CONTROL_SOCK" -O exit "$HOST" )
+    ssh "${opts[@]}" 2>/dev/null || true
+    rm -rf "$SSH_CONTROL_DIR"
+  fi
+}
+
+# Run a remote command over ssh (reuses the master connection).
 remote_run() {
   local -a base
   # shellcheck disable=SC2206
@@ -109,7 +159,7 @@ remote_run_tty() {
   ssh "${base[@]}" -t "$HOST" "$@"
 }
 
-# rsync over ssh with the same options as ssh.
+# rsync over ssh, reusing the master connection.
 rsync_run() {
   local -a base
   # shellcheck disable=SC2206
@@ -137,9 +187,12 @@ _stage_and_move() {
 }
 
 # Ship the local SQLite DB to /opt/rea-data/db.sqlite3 via scp + sudo-move.
+# scp supports -o ControlPath so it reuses the master connection (no re-prompt).
 _ship_db() {
-  local scp_opts=( -o "BatchMode=yes" -o "StrictHostKeyChecking=accept-new"
-                   -o "ConnectTimeout=15" )
+  local scp_opts=( -o "StrictHostKeyChecking=accept-new" -o "ConnectTimeout=15" )
+  if [[ -n "$SSH_CONTROL_SOCK" ]]; then
+    scp_opts+=( -o "ControlPath=$SSH_CONTROL_SOCK" -o "ControlMaster=no" -o "ControlPersist=no" )
+  fi
   [[ -n "$SSH_KEY" ]] && scp_opts+=( -i "$SSH_KEY" )
   scp "${scp_opts[@]}" "$LOCAL_DATA_DIR/rea/db.sqlite3" "$HOST:/tmp/rea-db.sqlite3" \
     || die "scp of db.sqlite3 failed."
@@ -184,6 +237,10 @@ done
 [[ -n "$HOST" ]]         || die "--host is required (e.g. root@203.0.113.10)"
 [[ -n "$REA_DOMAIN" ]]   || die "--domain is required (e.g. rea.example.com)"
 [[ -n "$REA_REPO_URL" ]] || die "--repo is required (e.g. https://github.com/you/REA.git)"
+
+# Always clean up the SSH master connection + temp socket dir on exit/error,
+# so we never leave a lingering control socket or temp files behind.
+trap 'ssh_control_teardown' EXIT INT TERM
 
 # Resolve the local data dir.  This script lives in <repo>/scripts/.  In this
 # project's layout, `relative/` and `absolute/` live at the REPO ROOT as
@@ -245,10 +302,11 @@ fi
 # ===========================================================================
 log "Step 2/5: SSH connectivity + server bootstrap"
 
-log "  testing SSH to $HOST ..."
-remote_run 'echo "ssh ok as $(id -un) on $(hostname)"' \
-  || die "Could not SSH to $HOST. Check host/key/network."
-ok "  SSH connected."
+# Open ONE persistent SSH master connection and reuse it for every subsequent
+# ssh/scp/rsync call.  This is where you'll be prompted for the SSH *login*
+# password (if key auth isn't set up) — but only this once for the whole run.
+ssh_control_setup
+ok "  SSH connected to $HOST."
 
 # We need root privileges on the server.  If the SSH user is root, use it
 # directly; otherwise we need sudo.  We accept both passwordless sudo AND a
