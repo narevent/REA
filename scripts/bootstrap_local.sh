@@ -472,7 +472,7 @@ fi
 # 4. Deploy
 # ===========================================================================
 log "Step 4/5: deploy (migrate, collectstatic, import data, restart services)"
-remote_run "$SUDO bash $REMOTE_APP_ROOT/scripts/deploy.sh" \
+remote_run "$SUDO env $ENV_EXPORT bash $REMOTE_APP_ROOT/scripts/deploy.sh" \
   || die "deploy.sh failed on the server. See output above."
 ok "  deploy.sh completed."
 
