@@ -29,6 +29,10 @@ Thumbs.db
 # Editor / IDE
 .vscode/
 .idea/
+.claude/
+
+# Local notes / scratch
+complaints.md
 
 # Collected static (regenerated on deploy)
 /rea/static/
