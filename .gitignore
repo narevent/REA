@@ -11,7 +11,7 @@ venv/
 env/
 
 # Claude AI
-/.claude/
+.claude/settings.local.json
 
 # Django
 rea/db.sqlite3
