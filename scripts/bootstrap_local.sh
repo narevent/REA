@@ -353,14 +353,29 @@ else
                     visudo -cf /etc/sudoers.d/rea-bootstrap >/dev/null'" \
         || die "Could not set up passwordless sudo. Check the password / sudoers config."
     else
-      # Interactive: open a tty so sudo can prompt on the *local* terminal via ssh -t.
-      remote_run_tty "sudo bash -c ' \
+      # Interactive: ask for the sudo password on the LOCAL terminal, then feed
+      # it to `sudo -S` over ssh stdin.  We deliberately do NOT use `ssh -t`
+      # (remote_run_tty) here: requesting a pty for sudo's /dev/tty-based
+      # password prompt over the multiplexed ControlMaster socket (which was
+      # opened without a tty) is unreliable — the prompt can appear and the
+      # typed password still not reach sudo, causing a silent auth failure.
+      # Reading the password locally and piping it to `sudo -S` uses the same
+      # proven path as the --sudo-password branch above.
+      if [[ ! -t 0 ]]; then
+        die "Need the sudo password for '$REMOTE_USER' but stdin is not a terminal. Re-run with --sudo-password '...'."
+      fi
+      pw=""
+      printf '%s[rea]%s Enter sudo password for %s on %s: ' "$c_blue" "$c_rst" "$REMOTE_USER" "$HOST" >&2
+      read -rs pw </dev/tty || read -rs pw
+      printf '\n' >&2
+      [[ -n "$pw" ]] || die "Empty sudo password — aborting."
+      printf '%s\n' "$pw" | remote_run "sudo -S -p '' bash -c ' \
         install -d -m 700 /etc/sudoers.d && \
         echo \"$REMOTE_USER ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/rea-bootstrap && \
         chmod 440 /etc/sudoers.d/rea-bootstrap && \
         visudo -cf /etc/sudoers.d/rea-bootstrap >/dev/null && \
         echo SUDOERS_OK'" \
-        || die "Could not set up passwordless sudo. Enter the password when prompted, re-run if it failed."
+        || die "Could not set up passwordless sudo (wrong password / sudoers config). Re-run, or pass --sudo-password '...'."
     fi
     # Verify it took effect.
     remote_run 'sudo -n true' \
