@@ -131,17 +131,18 @@ Description=REA Django app (Gunicorn)
 After=network.target
 
 [Service]
-Type=notify
+Type=exec
 User=$SERVICE_USER
 Group=$SERVICE_GROUP
-WorkingDirectory=$APP_ROOT/rea
+WorkingDirectory=$APP_ROOT
 EnvironmentFile=$APP_ROOT/.env
 ExecStart=$VENV/bin/gunicorn \\
     --workers $GUNICORN_WORKERS \\
     --bind 127.0.0.1:$REA_PORT \\
     --access-logfile $APP_ROOT/rea/logs/access.log \\
     --error-logfile  $APP_ROOT/rea/logs/error.log \\
-    config.wsgi:application
+    --chdir $APP_ROOT \\
+    rea.config.wsgi:application
 Restart=on-failure
 RestartSec=5s
 

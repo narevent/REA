@@ -508,7 +508,11 @@ else
   warn "  when ready: bash scripts/bootstrap_local.sh ... --ssl   (or run certbot on the server)."
 fi
 
-ok "All done. Site: http://$REA_DOMAIN/"
+if [[ "$DO_SSL" == "yes" ]]; then
+  ok "All done. Site: https://$REA_DOMAIN/"
+else
+  ok "All done. Site: http://$REA_DOMAIN/"
+fi
 warn "Routine updates after pushing to GitHub:"
 warn "  ssh $HOST 'sudo bash $REMOTE_APP_ROOT/scripts/update.sh'"
 warn "Backups:"
