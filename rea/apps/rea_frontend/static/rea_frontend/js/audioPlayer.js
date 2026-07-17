@@ -13,6 +13,8 @@
  * highlight the sounding note.  Pass -1 to clear (on stop).
  */
 
+import { buildVoice, getCurrentSoundPreset } from "./soundPresets.js?v=63";
+
 const A4_HZ = 440;
 const A4_MIDI = 69;
 
@@ -74,23 +76,13 @@ export class AudioPlayer {
 
       if (!step.isRest && step.midi != null) {
         const freq = midiToFreq(step.midi);
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "triangle";
-        osc.frequency.setValueAtTime(freq, t);
-
         const vol = (step.volume || 80) / 127;
-        const attack = 0.008;
-        const release = Math.min(0.1, durSec * 0.4);
-        gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.exponentialRampToValueAtTime(vol, t + attack);
-        gain.gain.setValueAtTime(vol, Math.max(t + attack + 0.001, t + durSec - release));
-        gain.gain.exponentialRampToValueAtTime(0.0001, t + durSec);
-
-        osc.connect(gain).connect(ctx.destination);
-        osc.start(t);
-        osc.stop(t + durSec + 0.02);
-        this.scheduled.push({ osc, gain, stepIndex: i });
+        const preset = getCurrentSoundPreset();
+        const voice = buildVoice(ctx, freq, t, durSec, vol, preset);
+        voice.input.connect(ctx.destination);
+        // Start scheduling is done inside buildVoice; track for stop().
+        const oscs = voice.nodes.map((n) => n.osc);
+        this.scheduled.push({ oscs, gain: voice.input, voice, stepIndex: i });
       }
 
       // Schedule the visual cursor callback for this step.
@@ -110,11 +102,12 @@ export class AudioPlayer {
     this.stepTimers.forEach((id) => clearTimeout(id));
     this.stepTimers = [];
     const now = this.ctx ? this.ctx.currentTime : 0;
-    this.scheduled.forEach(({ osc, gain }) => {
+    this.scheduled.forEach(({ oscs, gain, voice }) => {
       try {
+        if (voice && voice.stop) { voice.stop(now); return; }
         gain.gain.cancelScheduledValues(now);
         gain.gain.setValueAtTime(0.0001, now);
-        osc.stop(now + 0.02);
+        (oscs || []).forEach((osc) => { try { osc.stop(now + 0.02); } catch (e) {} });
       } catch (e) { /* already stopped */ }
     });
     this.scheduled = [];

@@ -1,5 +1,52 @@
+# Python
 __pycache__/
 *.pyc
-.DS_Store
+*.pyo
+*.pyd
+.Python
 
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Django
+rea/db.sqlite3
+rea/db.sqlite3-journal
+*.sqlite3
+*.sqlite3-journal
+local_settings.py
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# Collected static (regenerated on deploy)
 /rea/static/
+
+# Local-only test artifacts
+htmlcov/
+.coverage
+.pytest_cache/
+
+# ---------------------------------------------------------------------------
+# App data — NOT in version control.
+# These are large generated/imported JSON exercise libraries + the database.
+# They live on the server in a persistent data directory (see scripts/README.md)
+# and are symlinked into the checkout at deploy time.
+# ---------------------------------------------------------------------------
+/relative/
+/absolute/
+
+# Backups produced by scripts/backup.sh
+backups/
+*.bak

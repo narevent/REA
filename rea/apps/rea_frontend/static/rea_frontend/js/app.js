@@ -11,16 +11,16 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=56";
-import { renderLessonNotation } from "./views/lessonView.js?v=56";
-import { renderScaleNotation } from "./views/scaleView.js?v=56";
-import { SoundcheckView } from "./views/soundcheckView.js?v=56";
-import { AudioPlayer } from "./audioPlayer.js?v=56";
-import { PracticeController } from "./practiceController.js?v=56";
+import { API } from "./api.js?v=63";
+import { renderLessonNotation } from "./views/lessonView.js?v=63";
+import { renderScaleNotation } from "./views/scaleView.js?v=63";
+import { SoundcheckView } from "./views/soundcheckView.js?v=63";
+import { AudioPlayer } from "./audioPlayer.js?v=63";
+import { PracticeController } from "./practiceController.js?v=63";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=56";
+} from "./chapters.js?v=63";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");

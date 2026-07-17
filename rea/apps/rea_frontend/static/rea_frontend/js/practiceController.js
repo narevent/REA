@@ -26,21 +26,33 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=56";
-import { PitchDetector, midiToName } from "./pitchDetector.js?v=56";
-import { API } from "./api.js?v=56";
+import { AudioPlayer } from "./audioPlayer.js?v=63";
+import { PitchDetector, midiToName } from "./pitchDetector.js?v=63";
+import { API } from "./api.js?v=63";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt,
-} from "./practiceData.js?v=56";
+} from "./practiceData.js?v=63";
 import {
   scoreSungBar, scoreGuessBar, scoreGuessNote, scoreLabel,
-} from "./practiceScore.js?v=56";
+} from "./practiceScore.js?v=63";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 const SING_TAIL_MS = 600;  // extra recording tail so the user can finish
-const NOTE_MIN_MS = 130;   // min stable-pitch duration to count as a note
+// A sung note has to be *held*, not merely touched.  The old 130 ms minimum
+// let brief "seeking" stabs — the few frames a singer lingers on a
+// neighbouring semitone while sliding toward the right pitch — register as
+// real notes, which then poisoned the note-by-note scoring alignment.
+// 220 ms is short enough that a genuinely intended short note still counts,
+// but long enough that a passing glide almost never does.
+const NOTE_MIN_MS = 220;   // min stable-pitch duration to count as a note
 const NOTE_GAP_MS = 90;   // silence gap that splits two sung notes
+// Dominance gate: within a segmented note, the locked pitch must account for
+// at least this fraction of the note's frames.  A "seeking" segment that
+// only briefly settles on a pitch (the rest of it being a glide) fails this
+// and is dropped, instead of being scored as a wrong note.  0.55 is lenient
+// enough for natural vibrato yet strict enough to reject slides.
+const NOTE_DOMINANCE = 0.55;
 // A singer holding a note rarely sits dead-still on it - natural vibrato and
 // small pitch wobble routinely cross a semitone's rounding boundary for a
 // few frames.  Without margin, `segmentNotes` below would read every such
@@ -55,12 +67,23 @@ const NOTE_GAP_MS = 90;   // silence gap that splits two sung notes
 const NOTE_LOCK_HYSTERESIS_CENTS = 75; // deadband past the strict 50c boundary before a change is even considered
 const NOTE_CONFIRM_MS = 100;           // how long a new pitch must persist before the switch is committed
 
-// Same "lock in before moving on" idea, applied to the *live* target-note
-// preview marker during singing (see `_makeSungPreview`): the marker only
-// advances to the next reference note once the sung pitch has genuinely
-// settled on the current one, not merely brushed past it.
-const PREVIEW_LOCK_CENTS = 40; // how close to the target counts as "on it" (tighter than the segmenter's deadband - this gates progression, not note identity)
-const PREVIEW_LOCK_MS = 180;   // how long that match must hold before advancing to the next note
+// Live target-note preview advancement (see `_makeSungPreview`): the marker
+// advances to the next reference note once the singer has been "okay enough"
+// on the current one for long enough.  The earlier rule — stay within 40c
+// (dead-center "green") for 180 ms straight — was too harsh: natural vibrato
+// routinely swings ±50c, so the hold timer kept resetting and the marker felt
+// stuck on a note the user was clearly singing well.  The replacement is a
+// forgiving *on-pitch credit accumulator*: every frame within
+// PREVIEW_OK_CENTS of the target (octave-agnostic) banks credit; every frame
+// outside erodes it at the same rate.  Symmetric rates mean a sustained note
+// — even with vibrato peaks that briefly cross the band — banks credit
+// steadily and advances, while a sweep that merely brushes the note never
+// accumulates enough to advance.  PREVIEW_OK_CENTS is wider than the strict
+// "green" band on purpose: "okay" (amber, ~in-tune-with-vibrato) is good
+// enough to move on; only a genuinely wrong/seeking pitch is not.
+const PREVIEW_OK_CENTS = 80;    // "okay enough" band that counts as on the note (covers natural vibrato; wider than the ~30c "green" band)
+const PREVIEW_ADVANCE_MS = 170; // banked on-pitch time required before advancing to the next reference note
+const PREVIEW_DECAY = 1.0;      // off-pitch frames erode credit at the same rate on-pitch frames add it (symmetric): vibrato peaks cost little, a passing sweep banks nothing
 
 // The 10 modes, keyed by chapter key.  Each carries enough metadata to render
 // the session deck.  The `key` must match the chapter keys in chapters.js.
@@ -828,7 +851,7 @@ export class PracticeController {
   _finishSingNotes(barIndex, targetMidi, targetDegree, noteIdx, timedOut, sung) {
     if (!this.running) return;
     sung = sung || [];
-    const sungMidi = sung.length ? sung[0] : null;
+    const sungMidi = sung.length ? (typeof sung[0] === "number" ? sung[0] : sung[0].midi) : null;
     let score = 0, cents = null;
     if (sungMidi != null) {
       cents = (sungMidi - targetMidi) * 100;
@@ -1094,9 +1117,21 @@ export class PracticeController {
 
   /**
    * Build a live sung-pitch preview callback for a bar.  The marker starts at
-   * the bar's first reference note; when the sung pitch stably matches the
-   * current target it advances to the next reference note.  The marker is
-   * throttled and low-pass smoothed (in the renderer) to avoid jitter.
+   * the bar's first reference note and advances to the next one once the
+   * singer has been "okay enough" on the current one for long enough.
+   *
+   * Advancement is driven by a forgiving *on-pitch credit accumulator*
+   * instead of a strict "must stay green" hold timer (see the
+   * PREVIEW_* constants above): every frame within PREVIEW_OK_CENTS of the
+   * target banks credit, off-pitch frames erode it at the same rate, and the
+   * marker advances when credit reaches PREVIEW_ADVANCE_MS.  This lets a
+   * sustained note with natural vibratio peaks through the band bank enough
+   * to advance, while a passing sweep that merely brushes the note never
+   * accumulates enough credit.  Octave-agnostic (pitch class, mod 12).
+   *
+   * The marker's own vertical position is a light one-pole smoothing of the
+   * incoming fractional pitch so vibrato reads as a gentle wobble, not
+   * frame-to-frame jitter.
    * @param {number} barIndex
    * @param {number[]} refPitches  ordered reference MIDI pitches (pitched notes)
    * @returns {(info)=>void}  pass to the recorder as onPitch
@@ -1110,38 +1145,55 @@ export class PracticeController {
     r.setSungTarget(pitched[0].globalIndex, pitched[0].midi);
     r.showSungNote(pitched[0].globalIndex, pitched[0].midi);
     const targets = refPitches.slice();
-    // Throttle DOM updates + require a stable match before advancing.
+    // Throttle DOM updates; one-pole smoothing of the displayed pitch.
     let lastDraw = 0;
-    let matchSince = null; // timestamp the sung pitch first landed on the target
+    let smoothMidi = pitched[0].midi; // seed at the target so the marker starts on it
+    let lastT = null;
+    // On-pitch credit (ms).  Frames within the okay band add dt; off-pitch
+    // frames subtract PREVIEW_DECAY·dt.  Capped so an overshoot doesn't
+    // carry a huge surplus into the next note (each note starts fresh-ish).
+    let credit = 0;
+    const CREDIT_CAP = PREVIEW_ADVANCE_MS * 1.5;
     return (info) => {
       if (!this.running) return;
       const midi = info.midi != null ? info.midi : info.midiRound;
       const target = targets[step];
       if (target == null) return;
       const now = performance.now();
+
+      // Smooth the displayed pitch (time-constant ~90 ms) for a calm marker.
+      const dt = lastT == null ? 0 : now - lastT;
+      lastT = now;
+      if (dt > 0 && dt < 500) {
+        const a = Math.min(1, dt / 90);
+        smoothMidi = smoothMidi + (midi - smoothMidi) * a;
+      } else {
+        smoothMidi = midi;
+      }
+
       if (now - lastDraw > 60) {            // ~16fps DOM update cap
-        r.showSungNote(pitched[step].globalIndex, midi, target);
+        r.showSungNote(pitched[step].globalIndex, smoothMidi, target);
         lastDraw = now;
       }
-      // Advance only once the pitch has genuinely settled on the target for a
-      // sustained stretch - a brief brush past it on the way elsewhere
-      // shouldn't move the guide on.  Octave-agnostic: same pitch class (mod
-      // 12) counts, measured in cents so it's tighter than a loose
-      // "within a semitone" check.
+
+      // Credit accumulator: bank time spent "okay enough" on the target.
+      // Octave-agnostic — same pitch class (mod 12) counts — measured in cents
+      // so it's tighter than a loose "within a semitone" check.
       const pcDiff = (((midi - target) % 12) + 12) % 12;
       const centsOff = Math.min(pcDiff, 12 - pcDiff) * 100;
-      if (centsOff <= PREVIEW_LOCK_CENTS) {
-        if (matchSince == null) matchSince = now;
-        if (now - matchSince >= PREVIEW_LOCK_MS) {
-          matchSince = null;
-          step += 1;
-          if (step < pitched.length) {
-            r.setSungTarget(pitched[step].globalIndex, pitched[step].midi);
-            r.showSungNote(pitched[step].globalIndex, midi, pitched[step].midi);
-          }
+      if (dt > 0 && dt < 500) {
+        if (centsOff <= PREVIEW_OK_CENTS) credit += dt;
+        else credit -= dt * PREVIEW_DECAY;
+        if (credit < 0) credit = 0;
+        if (credit > CREDIT_CAP) credit = CREDIT_CAP;
+      }
+      if (credit >= PREVIEW_ADVANCE_MS) {
+        credit = 0;
+        step += 1;
+        if (step < pitched.length) {
+          r.setSungTarget(pitched[step].globalIndex, pitched[step].midi);
+          r.showSungNote(pitched[step].globalIndex, smoothMidi, pitched[step].midi);
         }
-      } else {
-        matchSince = null;
       }
     };
   }
@@ -1149,7 +1201,15 @@ export class PracticeController {
   _scoreSungBar(barIndex, ref, sung) {
     if (!this.running) return;
     sung = sung || [];
-    const { score, perNote } = scoreSungBar(sung, ref);
+    // The tracker reliably captures *pitches*, but a singer "seeking" the
+    // right note often holds an intermediate semitone just long enough to
+    // pass the length/dominance gates, so the sung list frequently contains
+    // more notes than the exercise has.  Those extras bias the alignment and
+    // the score.  Before scoring, prune the sung notes down to the reference
+    // count, keeping the most salient ones (longest + most dominant) so the
+    // real intended notes survive and the seeking stabs drop out.
+    const pruned = pruneSungToReferenceCount(sung, ref.length, ref);
+    const { score, perNote } = scoreSungBar(pruned, ref);
     this.scores.push(score);
     this._renderScore(); this._renderProgress();
     const noteCells = perNote.map((p) => {
@@ -1349,6 +1409,17 @@ function noteBadge(target, sung) {
  * (usually too-short-to-count) notes, which previously fragmented one
  * sustained note into several and/or inserted spurious extra notes that threw
  * off the note-by-note scoring alignment.
+ *
+ * In addition to the lock-in, each candidate note is checked for *dominance*:
+ * the locked pitch must account for at least `NOTE_DOMINANCE` of the note's
+ * frames.  A "seeking" segment that mostly glides and only briefly settles on
+ * a semitone fails this and is dropped rather than scored as a wrong note —
+ * this is the key defence against the "tracks too many reference notes in
+ * the wrong order" failure mode, where brief seeking stabs used to register
+ * as real notes and derail the alignment.
+ *
+ * Returns detailed note objects `{ midi, start, end, durMs }` so the scorer
+ * can weight each note by how long it was actually held.
  */
 function segmentNotes(frames, startTime) {
   if (!frames.length) return [];
@@ -1357,6 +1428,18 @@ function segmentNotes(frames, startTime) {
   let start = frames[0].t;
   let end = frames[0].t;
   let candidate = null; // { midi, since }
+  // Per-note frame bookkeeping for the dominance check: how many frames
+  // inside the current note sit within the locked pitch's deadband.
+  let onPitchFrames = 1;
+  let totalFrames = 1;
+
+  const close = () => {
+    const durMs = end - start;
+    const dominant = totalFrames > 0 && (onPitchFrames / totalFrames) >= NOTE_DOMINANCE;
+    if (durMs >= NOTE_MIN_MS && dominant) {
+      groups.push({ midi: locked, start, end, durMs });
+    }
+  };
 
   for (let i = 1; i < frames.length; i++) {
     const f = frames[i];
@@ -1365,18 +1448,21 @@ function segmentNotes(frames, startTime) {
       // Silence gap: close out the current note regardless of pitch (this is
       // also how a repeated note - same pitch sung twice with a pause - stays
       // two separate notes instead of merging into one).
-      groups.push({ midi: locked, start, end });
+      close();
       locked = Math.round(f.midi);
       start = f.t; end = f.t;
       candidate = null;
+      onPitchFrames = 1; totalFrames = 1;
       continue;
     }
 
+    totalFrames += 1;
     const centsFromLocked = Math.abs(f.midi - locked) * 100;
     if (centsFromLocked <= NOTE_LOCK_HYSTERESIS_CENTS) {
       // Still within the locked note's deadband - extend it, and drop any
       // pending candidate (the wobble didn't sustain).
       end = f.t;
+      onPitchFrames += 1;
       candidate = null;
       continue;
     }
@@ -1386,11 +1472,12 @@ function segmentNotes(frames, startTime) {
     if (!candidate || candidate.midi !== candidateMidi) candidate = { midi: candidateMidi, since: f.t };
     if (f.t - candidate.since >= NOTE_CONFIRM_MS) {
       // Sustained long enough - commit the switch to a genuinely new note.
-      groups.push({ midi: locked, start, end });
+      close();
       locked = candidate.midi;
       start = candidate.since;
       end = f.t;
       candidate = null;
+      onPitchFrames = 1; totalFrames = 1;
     } else {
       // Not yet confirmed - keep extending the locked note while we wait;
       // if the candidate never sustains, this frame simply ends up folded
@@ -1398,6 +1485,75 @@ function segmentNotes(frames, startTime) {
       end = f.t;
     }
   }
-  groups.push({ midi: locked, start, end });
-  return groups.filter((g) => (g.end - g.start) >= NOTE_MIN_MS).map((g) => g.midi);
+  close();
+  return groups;
+}
+
+/** Plain-MIDI view of `segmentNotes`, for callers that only need the pitch
+ *  numbers (the single-note singing modes). */
+function segmentNotesMidi(frames, startTime) {
+  return segmentNotes(frames, startTime).map((g) => g.midi);
+}
+
+/**
+ * Prune a sung-note list down to (at most) the reference note count, keeping
+ * the most salient notes so the tracked count aligns with the exercise.
+ *
+ * A singer "seeking" the right pitch routinely holds an intermediate
+ * semitone just long enough to pass the segmenter's length/dominance gates,
+ * so the sung list has more notes than the exercise — those extras are
+ * almost always shorter and less stably held than the intended notes.
+ * Salience here is the held duration (durMs): a genuinely intended note is
+ * held; a seeking stab is touched.  We pick the top-N most salient notes and
+ * return them in their original time order (the scorer expects a temporal
+ * sequence, not a salience-sorted one).
+ *
+ * When two candidates are similarly held (an intended note and a seeking
+ * stab of comparable length), the tie-breaker prefers the note whose pitch
+ * is closest to a reference pitch (octave-agnostic) — so the intended note
+ * survives and the spurious seeking stab is the one dropped.  `refPitches`
+ * (the bar's reference MIDIs) is optional; without it the tie-breaker is
+ * skipped.
+ *
+ * Accepts both the detailed note objects ({ midi, durMs }) produced by
+ * `segmentNotes` and plain MIDI numbers (treated as equal weight).  When the
+ * sung count is already ≤ the reference count, nothing is removed.
+ */
+function pruneSungToReferenceCount(sung, refCount, refPitches) {
+  if (!sung || !sung.length) return sung || [];
+  const n = refCount != null && refCount > 0 ? refCount : 0;
+  if (n <= 0 || sung.length <= n) return sung;
+  // Reference pitches (for the pitch-aware tie-breaker).  Octave-folded so a
+  // note sung an octave off still counts as "near" the exercise.
+  const refs = (refPitches || []).filter((m) => m != null);
+  const pcDist = (midi, r) => {
+    const d = Math.abs((((midi - r) % 12) + 12) % 12);
+    return Math.min(d, 12 - d); // semitones, octave-agnostic
+  };
+  const nearestRefDist = (midi) => {
+    if (!refs.length) return 0;
+    let best = 12;
+    for (const r of refs) { const d = pcDist(midi, r); if (d < best) best = d; }
+    return best; // 0 = exact pitch class, 6 = tritone away
+  };
+  // Attach a salience weight + original index + a pitch-distance tie-breaker.
+  const withMeta = sung.map((s, i) => {
+    const midi = typeof s === "number" ? s : s.midi;
+    const durMs = typeof s === "number" ? 1 : (s.durMs != null && s.durMs > 0 ? s.durMs : 1);
+    return { i, midi, durMs, salience: durMs * durMs, refDist: nearestRefDist(midi), obj: s };
+  });
+  // Keep the N most salient.  When two candidates are similarly held (a common
+  // case: one intended note and one seeking stab of comparable length), the
+  // tie-breaker prefers the note whose pitch is closest to a reference pitch —
+  // i.e. the intended note survives and the seeking stab is the one dropped.
+  withMeta.sort((a, b) =>
+    (b.salience - a.salience) ||
+    (a.refDist - b.refDist) ||
+    (b.durMs - a.durMs) ||
+    (a.i - b.i)
+  );
+  const kept = withMeta.slice(0, n);
+  // Restore original time order for the alignment.
+  kept.sort((a, b) => a.i - b.i);
+  return kept.map((m) => m.obj);
 }

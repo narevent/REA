@@ -12,11 +12,14 @@
  *   sc.leave()  - release the microphone when navigating away.
  */
 
-import { NotationRenderer } from "../components/notationRenderer.js?v=56";
+import { NotationRenderer } from "../components/notationRenderer.js?v=63";
 import {
   PitchDetector, midiToName, hzToMidi,
   getVoiceOctaveOffset, setVoiceOctaveOffset,
-} from "../pitchDetector.js?v=56";
+} from "../pitchDetector.js?v=63";
+import {
+  SOUND_PRESETS, getCurrentSoundPreset, setSoundPresetById, soundPresetGroups,
+} from "../soundPresets.js?v=63";
 
 // Auto-detect: how long to listen while the user sings the reference, and the
 // minimum number of voiced frames needed before we trust the measurement.
@@ -76,40 +79,21 @@ export class SoundcheckView {
     this.built = true;
     this.container.innerHTML =
       '<div class="sc-wrap">' +
-        '<div class="sc-hero">' +
+        '<div class="sc-hero sc-hero-compact">' +
           "<h2>Soundcheck</h2>" +
-          "<p>Confirm your microphone and REA's pitch tracker agree with what you're " +
-          "actually singing. Play a reference tone, sing it back, and check that the " +
-          "note name, frequency and staff marker all line up.</p>" +
+          "<p>Sing the reference tone and watch the note track live on the staff below. " +
+          "Adjust your voice profile and playback sound in the setup card.</p>" +
         "</div>" +
-        '<div class="sc-panel">' +
+        // ---- Live reading (the point of this view) — prominent, first ----
+        '<div class="sc-panel sc-live">' +
           '<div class="sc-panel-head">' +
-            '<span class="sc-panel-lbl">Microphone</span>' +
+            '<span class="sc-panel-lbl">Live reading</span>' +
             '<span class="sc-mic-status" id="sc-mic-status"><span class="sc-dot"></span><span>Not started</span></span>' +
           "</div>" +
-          '<button type="button" id="sc-mic-toggle" class="sc-btn primary">Enable microphone</button>' +
-        "</div>" +
-        '<div class="sc-panel">' +
-          '<div class="sc-panel-head">' +
-            '<span class="sc-panel-lbl">Voice profile</span>' +
-            '<span class="sc-profile-cur" id="sc-profile-cur" title="Octave shift applied to the tracked pitch">In pitch</span>' +
-          "</div>" +
-          '<div class="sc-profile-controls">' +
-            '<button type="button" id="sc-ref-play" class="sc-btn">Play ' + REFERENCE.label + "</button>" +
-            '<div class="sc-stepper" title="Octave shift — nudge if your voice tracks an octave off (common for male voices)">' +
-              '<button type="button" id="sc-oct-down" class="sc-step-btn" aria-label="Shift down an octave">−</button>' +
-              '<span class="sc-oct-val" id="sc-oct-val">0</span>' +
-              '<button type="button" id="sc-oct-up" class="sc-step-btn" aria-label="Shift up an octave">+</button>' +
-            "</div>" +
-            '<button type="button" id="sc-autodetect" class="sc-btn">Auto-detect</button>' +
-            '<span class="sc-autodetect-status" id="sc-autodetect-status"></span>' +
-          "</div>" +
-        "</div>" +
-        '<div class="sc-panel sc-live">' +
-          '<div class="sc-panel-head"><span class="sc-panel-lbl">Live reading</span></div>' +
           '<div class="sc-readout">' +
             '<div class="sc-note" id="sc-note">–</div>' +
             '<div class="sc-hz" id="sc-hz">– Hz</div>' +
+            '<div class="sc-cents muted" id="sc-cents">enable the microphone and sing</div>' +
           "</div>" +
           '<div class="sc-meter">' +
             '<div class="sc-meter-track">' +
@@ -118,8 +102,40 @@ export class SoundcheckView {
             "</div>" +
             '<div class="sc-meter-scale"><span>-50¢</span><span>in tune</span><span>+50¢</span></div>' +
           "</div>" +
-          '<div class="sc-cents muted" id="sc-cents">no signal yet</div>' +
           '<div id="soundcheck-notation" class="notation sc-notation"></div>' +
+          '<div class="sc-live-actions">' +
+            '<button type="button" id="sc-mic-toggle" class="sc-btn primary">Enable microphone</button>' +
+            '<button type="button" id="sc-ref-play" class="sc-btn">Play ' + REFERENCE.label + "</button>" +
+          "</div>" +
+        "</div>" +
+        // ---- Compact setup card: mic state + voice profile + playback sound ----
+        '<div class="sc-panel sc-setup">' +
+          // Voice profile row
+          '<div class="sc-setup-row sc-setup-voice">' +
+            '<div class="sc-setup-lbl">Voice profile' +
+              '<span class="sc-setup-sub" id="sc-profile-cur" title="Octave shift applied to the tracked pitch">In pitch</span>' +
+            "</div>" +
+            '<div class="sc-setup-field">' +
+              '<div class="sc-stepper" title="Octave shift — nudge if your voice tracks an octave off (common for male voices)">' +
+                '<button type="button" id="sc-oct-down" class="sc-step-btn" aria-label="Shift down an octave">−</button>' +
+                '<span class="sc-oct-val" id="sc-oct-val">0</span>' +
+                '<button type="button" id="sc-oct-up" class="sc-step-btn" aria-label="Shift up an octave">+</button>' +
+              "</div>" +
+              '<button type="button" id="sc-autodetect" class="sc-btn">Auto-detect</button>' +
+              '<span class="sc-autodetect-status" id="sc-autodetect-status"></span>' +
+            "</div>" +
+          "</div>" +
+          // Playback sound row — compact grouped <select> (22 presets would
+          // otherwise take the whole screen as a pill grid).
+          '<div class="sc-setup-row sc-setup-sound">' +
+            '<div class="sc-setup-lbl">Playback sound' +
+              '<span class="sc-setup-sub" id="sc-sound-cur">Soft Triangle</span>' +
+            "</div>" +
+            '<div class="sc-setup-field">' +
+              '<select id="sc-sound-select" class="sc-sound-select" aria-label="Playback sound"></select>' +
+              '<button type="button" id="sc-sound-preview" class="sc-btn">Preview</button>' +
+            "</div>" +
+          "</div>" +
         "</div>" +
       "</div>";
 
@@ -137,6 +153,9 @@ export class SoundcheckView {
       octUp: this.container.querySelector("#sc-oct-up"),
       autoDetect: this.container.querySelector("#sc-autodetect"),
       autoStatus: this.container.querySelector("#sc-autodetect-status"),
+      soundSelect: this.container.querySelector("#sc-sound-select"),
+      soundCur: this.container.querySelector("#sc-sound-cur"),
+      soundPreview: this.container.querySelector("#sc-sound-preview"),
     };
     this.renderer = new NotationRenderer(this.container.querySelector("#soundcheck-notation"));
 
@@ -145,7 +164,14 @@ export class SoundcheckView {
     this.els.octDown.addEventListener("click", () => this._setOffset(getVoiceOctaveOffset() - 1));
     this.els.octUp.addEventListener("click", () => this._setOffset(getVoiceOctaveOffset() + 1));
     this.els.autoDetect.addEventListener("click", () => this._startAutoDetect());
+    this.els.soundSelect.addEventListener("change", () => {
+      setSoundPresetById(this.els.soundSelect.value);
+      this._renderSoundPresets();
+      this._playReference();
+    });
+    this.els.soundPreview.addEventListener("click", () => this._playReference());
     this._renderProfile();
+    this._renderSoundPresets();
   }
 
   /** Reflect the current voice-profile offset across its controls. */
@@ -159,6 +185,27 @@ export class SoundcheckView {
   _setOffset(oct) {
     setVoiceOctaveOffset(oct);
     this._renderProfile();
+  }
+
+  /** Build the playback-sound picker as a grouped <select> (optgroups by
+   *  timbre family).  Selecting a preset persists it, applies it to all
+   *  playback, and plays a preview.  The current label is shown beside the
+   *  row label.  Uses a <select> rather than a pill grid because 22 presets
+   *  would otherwise consume the whole screen and bury the staff. */
+  _renderSoundPresets() {
+    if (!this.els.soundSelect) return;
+    const current = getCurrentSoundPreset();
+    this.els.soundCur.textContent = current.label;
+    const groups = soundPresetGroups();
+    const html = groups.map((g) => {
+      const opts = SOUND_PRESETS.filter((p) => p.group === g).map((p) => {
+        const sel = p.id === current.id ? " selected" : "";
+        return '<option value="' + p.id + '"' + sel + ">" + p.label + "</option>";
+      }).join("");
+      return '<optgroup label="' + g + '">' + opts + "</optgroup>";
+    }).join("");
+    this.els.soundSelect.innerHTML = html;
+    this.els.soundSelect.value = current.id;
   }
 
   _renderReferenceStaff() {
