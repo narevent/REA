@@ -76,10 +76,13 @@ REMOTE_REPO_TMP="/tmp/rea5-init"
 # --- SSH connection multiplexing -------------------------------------------
 # We open ONE master SSH connection and reuse it for every ssh/scp/rsync call,
 # so you enter the SSH password (if any) only ONCE for the whole run instead of
-# being prompted for every remote command.  The socket lives in a private temp
-# dir; %C is expanded by ssh to a hash of user/host/port (keeps the path short,
-# avoiding the macOS 104-char socket-path limit).  Set up after HOST is known.
-SSH_CONTROL_DIR=""
+# being prompted for every remote command.
+#
+# IMPORTANT — socket path length: macOS limits Unix-domain socket paths to 104
+# chars.  Using $TMPDIR (e.g. /var/folders/.../T/) + mktemp + ssh's %C hash
+# expansion blows past that limit and fails with "path ... too long for Unix
+# domain socket".  So we use a SHORT, fixed path directly under /tmp:
+#   /tmp/rea-ssh.<pid>.<hash>   (~30 chars, well under the limit on all OSes).
 SSH_CONTROL_SOCK=""
 
 # ===========================================================================
@@ -112,33 +115,33 @@ ssh_args_str() {
 }
 
 # Open the SSH master control connection (once).  Prompts for the login
-# password here if key auth is not set up.  Idempotent: re-uses an existing
-# master if already present.  Must be called AFTER $HOST is known.
+# password here if key auth is not set up.  Must be called AFTER $HOST is known.
 ssh_control_setup() {
-  SSH_CONTROL_DIR="$(mktemp -d -t rea-ssh-ctrl)"
-  SSH_CONTROL_SOCK="$SSH_CONTROL_DIR/ssh-%C"
+  # Short, unique-ish socket path under /tmp.  Keep it well under macOS's
+  # 104-char Unix-socket limit (this is ~30 chars).  No %C: a literal path
+  # avoids any hash-expansion surprises and is trivial to clean up.
+  SSH_CONTROL_SOCK="/tmp/rea-ssh.$$.$(printf '%s' "$HOST" | cksum | awk '{print $1}')"
+  rm -f "$SSH_CONTROL_SOCK"  # stale socket from a previous crashed run
   local master_opts=( -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15
                       -o ControlMaster=yes -o ControlPath="$SSH_CONTROL_SOCK"
                       -o ControlPersist=300 )
   [[ -n "$SSH_KEY" ]] && master_opts+=( -i "$SSH_KEY" )
   log "  opening SSH master connection to $HOST (enter password if prompted)..."
-  # A backgrounded master (-MfN) stays up with no remote command; -o exits 0
-  # once the master is established.  We foreground with a trivial command so a
-  # failure surfaces immediately.
+  # Foreground with a trivial command so a connection failure surfaces now.
   if ! ssh "${master_opts[@]}" -o ServerAliveInterval=30 "$HOST" 'true'; then
-    rm -rf "$SSH_CONTROL_DIR"
+    rm -f "$SSH_CONTROL_SOCK"
     SSH_CONTROL_SOCK=""
     die "Could not establish SSH connection to $HOST (check host/credentials/network)."
   fi
   ok "  SSH master connection up (reused for the rest of the run)."
 }
 
-# Tear down the master connection and its socket dir.  Safe to call if never set up.
+# Tear down the master connection and remove its socket.  Safe to call if never set up.
 ssh_control_teardown() {
-  if [[ -n "$SSH_CONTROL_SOCK" && -n "$SSH_CONTROL_DIR" ]]; then
-    local opts=( -o ControlPath="$SSH_CONTROL_SOCK" -O exit "$HOST" )
-    ssh "${opts[@]}" 2>/dev/null || true
-    rm -rf "$SSH_CONTROL_DIR"
+  if [[ -n "$SSH_CONTROL_SOCK" ]]; then
+    ssh -o ControlPath="$SSH_CONTROL_SOCK" -O exit "$HOST" 2>/dev/null || true
+    rm -f "$SSH_CONTROL_SOCK"
+    SSH_CONTROL_SOCK=""
   fi
 }
 
