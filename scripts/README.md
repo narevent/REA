@@ -19,6 +19,33 @@ from `/opt/rea-data` into the checkout, so `git pull` / `update.sh` can freely
 overwrite the repo without ever touching the database or the JSON exercise
 libraries. They are ignored by `.gitignore` and never committed.
 
+## SSH access — root is *not* required
+
+The server-side scripts (`init_vps.sh`, `deploy.sh`, …) need **root
+privileges**, but you do **not** need to SSH in as `root` (many VPS providers
+disable root SSH login). You can SSH as any normal user that can become root
+via `sudo`. `bootstrap_local.sh` handles all three cases automatically:
+
+| SSH user            | What happens                                                                 |
+|---------------------|------------------------------------------------------------------------------|
+| `root`              | Commands run directly, no sudo.                                              |
+| a sudoer, already NOPASSWD | Commands run via `sudo`.                                               |
+| a sudoer with a password | The script provisions passwordless sudo **once** (writes `/etc/sudoers.d/rea-bootstrap`), prompting for the password on your local terminal — or pass it with `--sudo-password`. The rest of the run is then non-interactive. |
+
+So a typical first run with a non-root user is simply:
+
+```bash
+bash scripts/bootstrap_local.sh \
+    --host youruser@203.0.113.10 \
+    --domain rea.example.com \
+    --repo https://github.com/narevent/REA.git
+```
+
+…enter the sudo password when prompted, and it does everything. To avoid the
+prompt (e.g. in automation), add `--sudo-password 'your-sudo-password'`. If you
+don't want the script touching sudoers, pass `--no-setup-sudo` (then the SSH
+user must already have passwordless sudo).
+
 ## Scripts
 
 | Script              | When to run            | What it does |
@@ -34,27 +61,28 @@ libraries. They are ignored by `.gitignore` and never committed.
 ## First-time setup
 
 The easiest path is the local orchestrator — run it from your machine and it
-does everything over SSH (steps 1–5 below):
+does everything over SSH (steps 1–5 below). **You can SSH as root or any sudo
+user** (see [SSH access](#ssh-access--root-is-not-required) above):
 
 ```bash
 bash scripts/bootstrap_local.sh \
-    --host root@203.0.113.10 \
+    --host youruser@203.0.113.10 \
     --domain rea.example.com \
     --repo https://github.com/narevent/REA.git
 ```
 
 Add `--with-db` to also ship your local `rea/db.sqlite3`, and `--ssl` to
 provision HTTPS with certbot. Run `bash scripts/bootstrap_local.sh --help` for
-all flags (non-root sudoer SSH user, custom data dir, branch, ssh key, etc.).
+all flags (sudo password, custom data dir, branch, ssh key, etc.).
 
 If you prefer to run the steps manually, here they are:
 
 1. Push your code to GitHub (make sure `relative/`, `absolute/`, `rea/db.sqlite3`
    and `rea/static/` are **not** committed — `.gitignore` already excludes them).
-2. On the fresh Debian 13 VPS, as root:
+2. On the fresh Debian 13 VPS, as root (or any sudoer — use `sudo`):
 
    ```bash
-   apt-get update && apt-get install -y git
+   sudo apt-get update && sudo apt-get install -y git
    git clone https://github.com/you/rea5.git /tmp/rea5
    cd /tmp/rea5
    sudo REA_REPO_URL=https://github.com/you/rea5.git \
@@ -62,17 +90,23 @@ If you prefer to run the steps manually, here they are:
         bash scripts/init_vps.sh
    ```
 
-3. Copy your exercise JSON onto the server into the persistent data dir:
+3. Copy your exercise JSON onto the server into the persistent data dir
+   (run as root, or as a sudoer with `sudo rsync`/`sudo scp`):
 
    ```bash
-   # from your local machine
-   rsync -av relative/ root@vps:/opt/rea-data/relative/
-   rsync -av absolute/ root@vps:/opt/rea-data/absolute/
+   # from your local machine, as root (or adjust paths + sudo on the server)
+   rsync -av relative/ youruser@vps:/tmp/relative/
+   rsync -av absolute/ youruser@vps:/tmp/absolute/
    # optionally ship an existing database
-   scp rea/db.sqlite3 root@vps:/opt/rea-data/db.sqlite3
+   scp rea/db.sqlite3 youruser@vps:/tmp/db.sqlite3
+   # then on the server:
+   sudo install -d -o rea -g rea /opt/rea-data && \
+   sudo mv /tmp/relative /tmp/absolute /opt/rea-data/ && \
+   sudo mv /tmp/db.sqlite3 /opt/rea-data/db.sqlite3 && \
+   sudo chown -R rea:rea /opt/rea-data
    ```
 
-4. Deploy:
+4. Deploy (as root or a sudoer):
 
    ```bash
    sudo bash /opt/rea5/scripts/deploy.sh
@@ -81,25 +115,27 @@ If you prefer to run the steps manually, here they are:
 5. (recommended) HTTPS via Let's Encrypt:
 
    ```bash
-   apt-get install -y certbot python3-certbot-nginx
-   certbot --nginx -d rea.example.com
+   sudo apt-get install -y certbot python3-certbot-nginx
+   sudo certbot --nginx -d rea.example.com
    ```
 
 ## Routine updates
 
-After pushing to `main` on GitHub:
+After pushing to `main` on GitHub (run from your machine, as any sudo user):
 
 ```bash
-sudo bash /opt/rea5/scripts/update.sh
+ssh youruser@vps 'sudo bash /opt/rea5/scripts/update.sh'
 ```
 
 ## Backups
 
+Run from your machine (as any sudo user), or directly on the server:
+
 ```bash
-sudo bash /opt/rea5/scripts/backup.sh                       # latest kept, rotation = 14
-sudo KEEP=30 bash /opt/rea5/scripts/backup.sh               # keep 30
-sudo bash /opt/rea5/scripts/restore.sh                      # restore latest
-sudo bash /opt/rea5/scripts/restore.sh /opt/rea-backups/rea-backup-20260717T120000Z.tar.gz
+ssh youruser@vps 'sudo bash /opt/rea5/scripts/backup.sh'                                       # keep last 14
+ssh youruser@vps 'sudo KEEP=30 bash /opt/rea5/scripts/backup.sh'                               # keep 30
+ssh youruser@vps 'sudo bash /opt/rea5/scripts/restore.sh'                                      # restore latest
+ssh youruser@vps 'sudo bash /opt/rea5/scripts/restore.sh /opt/rea-backups/rea-backup-20260717T120000Z.tar.gz'
 ```
 
 A recommended cron entry (root's crontab — `sudo crontab -e`):

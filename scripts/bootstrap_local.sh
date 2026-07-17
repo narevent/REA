@@ -29,7 +29,10 @@
 #   # also provision HTTPS:
 #   bash scripts/bootstrap_local.sh ... --ssl
 #
-#   # non-root SSH user that can sudo (the script uses sudo on the server):
+#   # non-root SSH user that can sudo (the script uses sudo on the server).
+#   # Works whether that user already has passwordless sudo OR only
+#   # passworded sudo (it provisions NOPASSWD once, prompting for the password
+#   # on your local terminal — or pass it with --sudo-password).
 #   bash scripts/bootstrap_local.sh --host ubuntu@1.2.3.4 ...
 #
 # All scripts/config.sh variables can be passed through with --env KEY=VAL.
@@ -40,6 +43,10 @@
 #   --ssh-key ~/.ssh/id_ed25519   explicit identity file
 #   --no-db               explicitly skip shipping the DB (default unless --with-db)
 #   --skip-data           skip rsync of relative/ and absolute/ (already uploaded)
+#   --sudo-password PASS  password for the non-root SSH user's sudo (used once to
+#                         enable passwordless sudo; otherwise prompted interactively)
+#   --no-setup-sudo       don't modify sudoers; require the SSH user to already
+#                         have passwordless sudo (fails otherwise)
 #
 # The script is idempotent-ish: re-running it re-clones/re-inits and re-deploys.
 # ---------------------------------------------------------------------------
@@ -58,6 +65,8 @@ SHIP_DB="no"            # set to "yes" with --with-db
 DO_SSL="no"             # set to "yes" with --ssl
 SKIP_DATA="no"          # set to "yes" with --skip-data
 EXTRA_ENV=()            # KEY=VAL pairs forwarded to the server scripts
+SUDO_PASSWORD=""        # one-time sudo password for NOPASSWD setup (--sudo-password)
+SETUP_SUDO="yes"        # set to "no" with --no-setup-sudo to refuse sudoers changes
 
 # Server-side path conventions (must match scripts/config.sh defaults).
 REMOTE_APP_ROOT="/opt/rea5"
@@ -89,6 +98,15 @@ remote_run() {
   # shellcheck disable=SC2206
   base=( $(ssh_args_str) )
   ssh "${base[@]}" "$HOST" "$@"
+}
+
+# Run a remote command over ssh WITH a tty (-t).  Needed for interactive sudo
+# (password prompt) and any command that writes to /dev/tty.
+remote_run_tty() {
+  local -a base
+  # shellcheck disable=SC2206
+  base=( $(ssh_args_str) )
+  ssh "${base[@]}" -t "$HOST" "$@"
 }
 
 # rsync over ssh with the same options as ssh.
@@ -136,7 +154,11 @@ _ship_db() {
 # ===========================================================================
 usage() {
   sed -n '3,/^# ---*$/p' "$0" | sed 's/^# \?//' >&2
-  exit 1
+}
+
+print_help() {
+  sed -n '3,/^# ---*$/p' "$0" | sed 's/^# \?//'
+  exit 0
 }
 
 while [[ $# -gt 0 ]]; do
@@ -152,8 +174,10 @@ while [[ $# -gt 0 ]]; do
     --ssl)         DO_SSL="yes"; shift ;;
     --skip-data)   SKIP_DATA="yes"; shift ;;
     --env)         EXTRA_ENV+=("$2"); shift 2 ;;
-    -h|--help)     usage ;;
-    *) die "Unknown option: $1 (try --help)" ;;
+    --sudo-password) SUDO_PASSWORD="$2"; shift 2 ;;
+    --no-setup-sudo) SETUP_SUDO="no"; shift ;;
+    -h|--help)     print_help ;;
+    *)             usage >&2; die "Unknown option: $1 (try --help)" ;;
   esac
 done
 
@@ -226,20 +250,63 @@ remote_run 'echo "ssh ok as $(id -un) on $(hostname)"' \
   || die "Could not SSH to $HOST. Check host/key/network."
 ok "  SSH connected."
 
-# We need to run init_vps.sh as root.  If the SSH user is root, fine; otherwise
-# we'll wrap with sudo -n (non-interactive) and make sure it works.
+# We need root privileges on the server.  If the SSH user is root, use it
+# directly; otherwise we need sudo.  We accept both passwordless sudo AND a
+# passworded sudoer (the latter gets elevated to passwordless for the rest of
+# the run, since the bootstrap makes many separate privileged calls).
 remote_is_root() {
   remote_run '[[ "$(id -u)" -eq 0 ]] && echo yes || echo no'
 }
+remote_user() {
+  remote_run 'id -un'
+}
+
+SUDO=""          # the sudo prefix used for privileged remote calls
+REMOTE_USER="$(remote_user)"
 IS_ROOT="$(remote_is_root)"
+
 if [[ "$IS_ROOT" == "yes" ]]; then
-  SUDO=""
+  ok "  SSH user is root — no sudo needed."
 else
-  log "  SSH user is non-root; verifying passwordless sudo..."
-  remote_run 'sudo -n true' \
-    || die "Passwordless sudo is required for the SSH user. Configure it first."
-  SUDO="sudo"
-  ok "  passwordless sudo available."
+  # 1) Already passwordless?
+  if remote_run 'sudo -n true' 2>/dev/null; then
+    SUDO="sudo"
+    ok "  passwordless sudo available for '$REMOTE_USER'."
+  else
+    if [[ "$SETUP_SUDO" == "no" ]]; then
+      die "Passwordless sudo is required (or pass --sudo-password, or omit --no-setup-sudo to let this script set it up)."
+    fi
+    # 2) Passworded sudo -> provision passwordless sudo for this user now,
+    #    using a single interactive sudo (with tty for the password prompt).
+    #    The sudo password may be supplied via --sudo-password, or entered
+    #    interactively on the local terminal.
+    log "  '$REMOTE_USER' is not passwordless sudo. Provisioning NOPASSWD sudo..."
+    if [[ -n "$SUDO_PASSWORD" ]]; then
+      # Pipe the password in (no tty needed).  Use -S so sudo reads it from stdin.
+      remote_run "echo '$(printf '%s' "$SUDO_PASSWORD" | sed "s/'/'\\\\''/g")' | \
+                  sudo -S -p '' bash -c ' \
+                    id -un >/dev/null && \
+                    install -d -m 700 /etc/sudoers.d && \
+                    echo \"$REMOTE_USER ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/rea-bootstrap && \
+                    chmod 440 /etc/sudoers.d/rea-bootstrap && \
+                    visudo -cf /etc/sudoers.d/rea-bootstrap >/dev/null'" \
+        || die "Could not set up passwordless sudo. Check the password / sudoers config."
+    else
+      # Interactive: open a tty so sudo can prompt on the *local* terminal via ssh -t.
+      remote_run_tty "sudo bash -c ' \
+        install -d -m 700 /etc/sudoers.d && \
+        echo \"$REMOTE_USER ALL=(ALL) NOPASSWD:ALL\" > /etc/sudoers.d/rea-bootstrap && \
+        chmod 440 /etc/sudoers.d/rea-bootstrap && \
+        visudo -cf /etc/sudoers.d/rea-bootstrap >/dev/null && \
+        echo SUDOERS_OK'" \
+        || die "Could not set up passwordless sudo. Enter the password when prompted, re-run if it failed."
+    fi
+    # Verify it took effect.
+    remote_run 'sudo -n true' \
+      || die "sudoers file was written but 'sudo -n true' still fails — check /etc/sudoers.d/rea-bootstrap on the server."
+    SUDO="sudo"
+    ok "  passwordless sudo provisioned for '$REMOTE_USER' (/etc/sudoers.d/rea-bootstrap)."
+  fi
 fi
 
 # Build the env string forwarded to init_vps.sh.
