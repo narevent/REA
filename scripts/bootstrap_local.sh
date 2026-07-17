@@ -329,19 +329,55 @@ IS_ROOT="$(remote_is_root)"
 if [[ "$IS_ROOT" == "yes" ]]; then
   ok "  SSH user is root — no sudo needed."
 else
-  # 1) Already passwordless?
-  if remote_run 'sudo -n true' 2>/dev/null; then
+  # Non-root SSH user. We need root privileges via sudo. Handle three sub-cases:
+  #  (a) sudo installed + already NOPASSWD  -> just use sudo
+  #  (b) sudo installed + passworded sudo   -> provision NOPASSWD with the
+  #      user's sudo password (--sudo-password or interactive prompt)
+  #  (c) sudo NOT installed on the server (some minimal Debian images ship
+  #      without it) -> install it via `su` (root password), then configure
+  #      NOPASSWD in the same step.
+  #
+  # NOTE on the original failure: a *very* minimal Debian 13 cloud image can
+  # come without `sudo` at all, so the very first `sudo ...` call dies with
+  # "sudo: command not found". We therefore check for sudo's existence FIRST.
+
+  SUDO_INSTALLED="$(remote_run 'command -v sudo >/dev/null 2>&1 && echo yes || echo no')"
+
+  if [[ "$SUDO_INSTALLED" != "yes" ]]; then
+    # (c) sudo is missing -> install it via `su` (needs the ROOT password).
+    #     `su` reads the password from its controlling tty, so we run this over
+    #     a real ssh pty (ssh -t reusing the master connection) and the prompt
+    #     reaches the local terminal.  `su` has no -S, so a tty is required here.
+    if [[ "$SETUP_SUDO" == "no" ]]; then
+      die "sudo is not installed on the server and --no-setup-sudo was given. SSH in as root (or use the provider console) and run: apt-get install -y sudo"
+    fi
+    warn "sudo is not installed on the server. Installing it now via 'su' — enter the ROOT password when prompted."
+    [[ -t 0 ]] || die "Need the root password to install sudo but stdin is not a terminal. SSH in as root and install sudo manually, then re-run."
+    remote_run_tty "su -c 'set -e; apt-get update -qq; apt-get install -y -qq sudo; \
+        install -d -m 700 /etc/sudoers.d; \
+        printf \"%s ALL=(ALL) NOPASSWD:ALL\\n\" \"$REMOTE_USER\" > /etc/sudoers.d/rea-bootstrap; \
+        chmod 440 /etc/sudoers.d/rea-bootstrap; \
+        visudo -cf /etc/sudoers.d/rea-bootstrap >/dev/null; \
+        echo SUDO_INSTALL_OK'" \
+      || die "Could not install/configure sudo via 'su' (wrong root password, or root account locked?). SSH in as root and run: apt-get install -y sudo && echo '$REMOTE_USER ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/rea-bootstrap && chmod 440 /etc/sudoers.d/rea-bootstrap"
+    # Sanity: sudo must now be on PATH.
+    remote_run 'command -v sudo >/dev/null 2>&1' \
+      || die "sudo install reported success but 'sudo' is still not on PATH — check the server."
+    # Verify NOPASSWD took effect.
+    remote_run 'sudo -n true' \
+      || die "sudo installed but 'sudo -n true' still fails — check /etc/sudoers.d/rea-bootstrap on the server."
+    SUDO="sudo"
+    ok "  sudo installed and NOPASSWD provisioned for '$REMOTE_USER' (/etc/sudoers.d/rea-bootstrap)."
+  elif remote_run 'sudo -n true' 2>/dev/null; then
+    # (a) already passwordless
     SUDO="sudo"
     ok "  passwordless sudo available for '$REMOTE_USER'."
   else
+    # (b) passworded sudo -> provision NOPASSWD for this user now.
     if [[ "$SETUP_SUDO" == "no" ]]; then
       die "Passwordless sudo is required (or pass --sudo-password, or omit --no-setup-sudo to let this script set it up)."
     fi
-    # 2) Passworded sudo -> provision passwordless sudo for this user now,
-    #    using a single interactive sudo (with tty for the password prompt).
-    #    The sudo password may be supplied via --sudo-password, or entered
-    #    interactively on the local terminal.
-    log "  '$REMOTE_USER' is not passwordless sudo. Provisioning NOPASSWD sudo..."
+    log "  '$REMOTE_USER' has passworded sudo. Provisioning NOPASSWD sudo..."
     if [[ -n "$SUDO_PASSWORD" ]]; then
       # Pipe the password in (no tty needed).  Use -S so sudo reads it from stdin.
       remote_run "echo '$(printf '%s' "$SUDO_PASSWORD" | sed "s/'/'\\\\''/g")' | \
@@ -353,14 +389,10 @@ else
                     visudo -cf /etc/sudoers.d/rea-bootstrap >/dev/null'" \
         || die "Could not set up passwordless sudo. Check the password / sudoers config."
     else
-      # Interactive: ask for the sudo password on the LOCAL terminal, then feed
-      # it to `sudo -S` over ssh stdin.  We deliberately do NOT use `ssh -t`
-      # (remote_run_tty) here: requesting a pty for sudo's /dev/tty-based
-      # password prompt over the multiplexed ControlMaster socket (which was
-      # opened without a tty) is unreliable — the prompt can appear and the
-      # typed password still not reach sudo, causing a silent auth failure.
-      # Reading the password locally and piping it to `sudo -S` uses the same
-      # proven path as the --sudo-password branch above.
+      # Ask for the sudo password on the LOCAL terminal, then feed it to
+      # `sudo -S` over ssh stdin.  We read it locally (no echo) and pipe it in
+      # rather than relying on a remote pty for sudo's prompt — this is the
+      # same proven path as the --sudo-password branch above.
       if [[ ! -t 0 ]]; then
         die "Need the sudo password for '$REMOTE_USER' but stdin is not a terminal. Re-run with --sudo-password '...'."
       fi
