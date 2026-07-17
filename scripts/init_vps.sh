@@ -65,6 +65,10 @@ chown -R "$ACCT" "$APP_ROOT"
 
 # --- 4. Persistent data directory ------------------------------------------
 log "Creating persistent data dir at $DATA_ROOT ..."
+# Create $DATA_ROOT itself as the service user FIRST (mode 750, writable by
+# the service user). SQLite writes its journal/WAL next to db.sqlite3 inside
+# this dir, so the service user MUST be able to write here.
+install -d -o "$SERVICE_USER" -g "$SERVICE_GROUP" -m 750 "$DATA_ROOT"
 install -d -o "$SERVICE_USER" -g "$SERVICE_GROUP" -m 750 \
   "$DATA_ROOT/relative/key_models" \
   "$DATA_ROOT/relative/lessons" \

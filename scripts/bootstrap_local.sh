@@ -185,7 +185,9 @@ _stage_and_move() {
     || die "rsync of $name/ to $stage failed."
   remote_run "$SUDO rm -rf $REMOTE_DATA_ROOT/$name && \
               $SUDO mv $stage $REMOTE_DATA_ROOT/$name && \
-              $SUDO chown -R rea:rea $REMOTE_DATA_ROOT/$name" \
+              $SUDO chown -R rea:rea $REMOTE_DATA_ROOT/$name && \
+              $SUDO chown rea:rea $REMOTE_DATA_ROOT && \
+              $SUDO chmod 750 $REMOTE_DATA_ROOT" \
     || die "Could not move staged $name into $REMOTE_DATA_ROOT."
 }
 
@@ -201,7 +203,9 @@ _ship_db() {
     || die "scp of db.sqlite3 failed."
   remote_run "$SUDO mv /tmp/rea-db.sqlite3 $REMOTE_DATA_ROOT/db.sqlite3 && \
               $SUDO chown rea:rea $REMOTE_DATA_ROOT/db.sqlite3 && \
-              $SUDO chmod 640 $REMOTE_DATA_ROOT/db.sqlite3" \
+              $SUDO chmod 640 $REMOTE_DATA_ROOT/db.sqlite3 && \
+              $SUDO chown rea:rea $REMOTE_DATA_ROOT && \
+              $SUDO chmod 750 $REMOTE_DATA_ROOT" \
     || die "Could not place db.sqlite3 into $REMOTE_DATA_ROOT."
 }
 

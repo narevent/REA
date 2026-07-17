@@ -41,6 +41,19 @@ link_data "$DATA_ROOT/relative" "$APP_ROOT/relative"
 link_data "$DATA_ROOT/absolute" "$APP_ROOT/absolute"
 link_data "$DATA_ROOT/db.sqlite3" "$APP_ROOT/rea/db.sqlite3"
 
+# Ensure the service user can actually WRITE the database.  SQLite needs to
+# create its journal/WAL file *next to* the (resolved) db file, i.e. inside
+# $DATA_ROOT, AND the checkout's rea/ dir (where the symlink lives) must be
+# writable too.  After a partial bootstrap or rsync-as-root these can end up
+# root-owned, which surfaces as "attempt to write a readonly database" during
+# migrate.  Normalize ownership + perms here, idempotently.
+chown -R "$ACCT" "$DATA_ROOT" "$APP_ROOT/rea"
+chmod 750 "$DATA_ROOT"
+chmod 640 "$DATA_ROOT/db.sqlite3" 2>/dev/null || true
+# The checkout's rea/ dir must be writable by the service user for the
+# SQLite journal created alongside the symlinked db.sqlite3.
+chmod g+w "$APP_ROOT/rea" 2>/dev/null || true
+
 # --- 2. Python deps --------------------------------------------------------
 log "Installing/updating Python dependencies..."
 as_user "$VENV/bin/pip install --upgrade pip wheel"
