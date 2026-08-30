@@ -26,16 +26,16 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=63";
-import { PitchDetector, midiToName } from "./pitchDetector.js?v=63";
-import { API } from "./api.js?v=63";
+import { AudioPlayer } from "./audioPlayer.js?v=75";
+import { PitchDetector, midiToName } from "./pitchDetector.js?v=75";
+import { API } from "./api.js?v=75";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt,
-} from "./practiceData.js?v=63";
+} from "./practiceData.js?v=75";
 import {
-  scoreSungBar, scoreGuessBar, scoreGuessNote, scoreLabel,
-} from "./practiceScore.js?v=63";
+  centsToScore, scoreGuessBar, scoreLabel,
+} from "./practiceScore.js?v=75";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 const SING_TAIL_MS = 600;  // extra recording tail so the user can finish
@@ -67,23 +67,100 @@ const NOTE_DOMINANCE = 0.55;
 const NOTE_LOCK_HYSTERESIS_CENTS = 75; // deadband past the strict 50c boundary before a change is even considered
 const NOTE_CONFIRM_MS = 100;           // how long a new pitch must persist before the switch is committed
 
-// Live target-note preview advancement (see `_makeSungPreview`): the marker
-// advances to the next reference note once the singer has been "okay enough"
-// on the current one for long enough.  The earlier rule — stay within 40c
-// (dead-center "green") for 180 ms straight — was too harsh: natural vibrato
-// routinely swings ±50c, so the hold timer kept resetting and the marker felt
-// stuck on a note the user was clearly singing well.  The replacement is a
-// forgiving *on-pitch credit accumulator*: every frame within
-// PREVIEW_OK_CENTS of the target (octave-agnostic) banks credit; every frame
-// outside erodes it at the same rate.  Symmetric rates mean a sustained note
-// — even with vibrato peaks that briefly cross the band — banks credit
-// steadily and advances, while a sweep that merely brushes the note never
-// accumulates enough to advance.  PREVIEW_OK_CENTS is wider than the strict
-// "green" band on purpose: "okay" (amber, ~in-tune-with-vibrato) is good
-// enough to move on; only a genuinely wrong/seeking pitch is not.
-const PREVIEW_OK_CENTS = 80;    // "okay enough" band that counts as on the note (covers natural vibrato; wider than the ~30c "green" band)
-const PREVIEW_ADVANCE_MS = 170; // banked on-pitch time required before advancing to the next reference note
-const PREVIEW_DECAY = 1.0;      // off-pitch frames erode credit at the same rate on-pitch frames add it (symmetric): vibrato peaks cost little, a passing sweep banks nothing
+// ---------------------------------------------------------------------------
+// Live note capture (singing modes 2, 5, 8, 9)
+// ---------------------------------------------------------------------------
+//
+// The exercise does NOT wait for the *correct* note.  As soon as the singer
+// settles on **any** pitch and holds it steadily, that pitch is committed as
+// the attempt for the current reference note, scored against it, and the
+// marker moves on to the next reference note.  Singing a wrong note therefore
+// costs points but never stalls the exercise — which is the whole point of a
+// sight-singing drill: you keep going.
+//
+// "Settled" is decided by `makePitchLock` below; these are the numbers it runs
+// on.  Each one exists to defeat a specific way singing fools a naive detector:
+//
+//   HYST      A held note is never dead still, so the lock keeps a deadband
+//             around its running centre.  It has to stay comfortably under a
+//             semitone, or a wrong note one semitone away reads as "still the
+//             same note" and is never captured — which is precisely the
+//             failure that leaves the singer stuck.
+//   DRIFT     A deadband around a *moving* centre is not enough on its own: a
+//             steady slide moves little per frame, so it creeps along inside
+//             the band the whole way and banks a note it never held.  Each
+//             lock therefore also remembers where it started.  Set above HYST
+//             so an ordinary scoop into a note still counts as that note.
+//   CONFIRM   Real vibrato is wider than HYST, so leaving the band only starts
+//             a candidate.  A vibrato peak crosses and comes straight back, so
+//             it never confirms; a genuine move to another pitch stays out and
+//             does.  (Same trick as the offline segmenter above.)
+//   HOLD      How long the lock must be held before the note is banked.
+//   GAP       Silence that releases the note — this is how a repeated pitch is
+//             re-articulated into two notes rather than read as one long one.
+//
+// Once a note is banked, the next one only opens when the lock reports a
+// different note or a release; otherwise one long held note would fill every
+// remaining slot in the bar at once.
+const CAPTURE_HOLD_MS = 240;     // stable hold required before a pitch is banked as a sung note
+const CAPTURE_HYST_CENTS = 60;   // deadband around the lock's running centre that still counts as "the same note"
+const CAPTURE_DRIFT_CENTS = 90;  // how far the pitch may wander from where the lock started before it is a different note
+const CAPTURE_CONFIRM_MS = 100;  // how long a pitch outside the lock must persist to count as a new note
+const CAPTURE_GAP_MS = 120;      // unvoiced time that releases the note (this is how a repeated note is re-articulated)
+// A note is also banked when the singer *leaves* it, provided it was held for
+// a viable fraction of the note's own written length — even if it never
+// reached CAPTURE_HOLD_MS.
+//
+// CAPTURE_HOLD_MS alone cannot work as an absolute threshold, because the
+// exercises are not all one speed: the lesson library runs to tempo 119, where
+// an eighth note lasts 252 ms.  Sing along at the written tempo and a note may
+// never accumulate the full hold, so it would never score, the marker would
+// never advance, and every note after it would be matched against the wrong
+// reference — the bar stalls.  Banking on release fixes that without changing
+// how the exercise feels at a slower pace: hold a note and it still banks at
+// CAPTURE_HOLD_MS with the marker leading you; sing at tempo and it banks the
+// moment you move on.
+//
+// The floor separates a short *sung* note from a glance across a pitch on the
+// way somewhere else, so it has to scale with the music: 150 ms is a real note
+// in a fast exercise and obvious hunting in a slow one.  Half the written note
+// is the rule, bounded at both ends — never so low that seeking survives it,
+// never above CAPTURE_HOLD_MS (past which the ordinary hold has already fired
+// and the release path is moot).
+const CAPTURE_MIN_HOLD_FRACTION = 0.5;
+const CAPTURE_MIN_HOLD_FLOOR_MS = 110;
+// Once a note has been scored, how far the voice must move to count as having
+// gone on to the *next* note — measured in cents from the pitch that was
+// scored, and held for CAPTURE_CONFIRM_MS.
+//
+// This is judged against the scored pitch rather than against the pitch lock's
+// own state, and that distinction matters more than it sounds.  The lock
+// re-anchors whenever the voice strays past its drift bound, and on a note
+// sung with a scooped attack that happens *while the singer is still holding
+// the same note*: the scoop leaves the anchor low, and ordinary vibrato around
+// the settled pitch then reads as drift.  Treating a re-anchor as "a new note
+// was sung" therefore let one held note bank itself two or three times over,
+// consuming the reference notes after it.  Scooping into a note is exactly
+// what an unsure singer does, so this has to be robust to it.
+//
+// 70 cents sits above vibrato and settling drift, and comfortably below the
+// semitone that separates any two notes in an exercise.
+const CAPTURE_NEW_NOTE_CENTS = 70;
+// While the singer stays on the scored note, that reference pitch follows the
+// voice with this time constant.  A note is rarely where it started: a scooped
+// attack means the pitch banked at CAPTURE_HOLD_MS sits below where the note
+// actually settles, and measuring "have they moved on" from that stale value
+// let ordinary drift and vibrato add up past the threshold.  Following is slow
+// enough that a real move to another note (~100 ms) outruns it easily, and
+// fast enough that settling never does.
+const CAPTURE_BANKED_FOLLOW_MS = 500;
+// There is deliberately no *level* requirement for banking a note here.  One
+// was tried (a note had to sit some margin above the calibrated gate) and it
+// can only ever cause the exercise to stall: soft singing that the detector
+// tracks perfectly well would fail it, the note would never bank, and the
+// marker would sit there.  Level belongs in one place — the calibrated noise
+// gate in pitchDetector, which decides what counts as sound at all.
+
 
 // The 10 modes, keyed by chapter key.  Each carries enough metadata to render
 // the session deck.  The `key` must match the chapter keys in chapters.js.
@@ -227,6 +304,7 @@ export class PracticeController {
 
   stop() {
     this.running = false;
+    this._singleRun = false;
     this._roundToken++;
     this.player.stop();
     this._clearTimers();
@@ -304,7 +382,7 @@ export class PracticeController {
         "</div>" +
         // live feedback
         '<div id="d-report" class="deck-report">' +
-          '<div class="fb-prompt" id="d-prompt">Press <b>Start</b> when you are ready.</div>' +
+          '<div class="fb-prompt" id="d-prompt">' + this._readyHint() + "</div>" +
         "</div>" +
         // mode-10 config
         '<div id="d-config"></div>' +
@@ -324,6 +402,9 @@ export class PracticeController {
 
   _sessionTotal() {
     if (!this.mode || !this.barSteps) return 0;
+    // A single-bar run (started by clicking a bar) is one round, whatever the
+    // full session for this chapter would have been.
+    if (this._singleRun) return 1;
     if (this.mode.key === "guess_multi") {
       // generated questions; compute lazily but cap for display
       return Math.max(1, Math.min(12, this.barSteps.length));
@@ -418,8 +499,25 @@ export class PracticeController {
     }
   }
 
+  /** The idle prompt: both ways into an exercise (Start, or a single bar). */
+  _readyHint() {
+    const mic = this.mode && this.mode.needsMic;
+    return "Press <b>Start</b> for the whole set, or <b>click a bar</b> to practise just that one" +
+      (mic ? " (the mic is enabled for you)." : ".");
+  }
+
+  /** Write the round prompt.  `_feedback` replaces the whole report block, so
+   *  the prompt element is routinely gone by the time the next round wants it
+   *  — recreate it rather than silently writing nowhere (which is what left
+   *  later rounds, and the timed modes' countdown readout, blank). */
   _prompt(html) {
-    const el = this.info.querySelector("#d-prompt");
+    let el = this.info.querySelector("#d-prompt");
+    if (!el) {
+      const rep = this.info.querySelector("#d-report");
+      if (!rep) return;
+      rep.innerHTML = '<div class="fb-prompt" id="d-prompt"></div>';
+      el = rep.querySelector("#d-prompt");
+    }
     if (el) el.innerHTML = html;
   }
 
@@ -493,6 +591,9 @@ export class PracticeController {
     } else {
       this.renderer = this.renderNotation(source, (idx) => this._onBarClick(idx));
     }
+    // A fresh run starts from a clean stave — accuracy colours accumulate
+    // across the rounds of one session, not across sessions.
+    if (this.renderer && this.renderer.clearNoteAccuracy) this.renderer.clearNoteAccuracy();
     this._lastAnswerBar = null;
   }
 
@@ -513,6 +614,7 @@ export class PracticeController {
     if (!this.barSteps || !this.barSteps.length) { this.setStatus("No bars to practice."); return; }
     this.stop();
     this.running = true;
+    this._singleRun = false;
     this.round = 0;
     this.scores = [];
     this._playedBars = new Set();
@@ -526,12 +628,58 @@ export class PracticeController {
     this._beginSession();
   }
 
+  /**
+   * Run a single bar as a one-off exercise.
+   *
+   * This is what clicking a bar does when no session is running: instead of
+   * working through every bar the way Start does, the clicked bar becomes the
+   * whole (one-round) exercise, in whatever mode the chapter is.  The click is
+   * a user gesture, which is exactly what `getUserMedia` wants, so for the
+   * singing chapters the mic is requested right here rather than a beat later
+   * inside the round.
+   */
+  async startSingle(barIndex) {
+    if (!this.mode) { this.setStatus("No mode."); return; }
+    if (!this.barSteps || !this.barSteps[barIndex]) return;
+    this.stop();
+
+    // Ask for the mic while we are still inside the click handler.
+    if (this.mode.needsMic) {
+      this._setLegend("Enabling microphone…");
+      this.setStatus("Enabling microphone…");
+      try { await this._ensureMic(); }
+      catch (e) {
+        this._setLegend("Microphone unavailable.");
+        this.setStatus("Microphone unavailable.");
+        this._feedback({ score: 0, verdict: "—", head: "Mic unavailable", detail: e.message });
+        return;
+      }
+    }
+
+    this.running = true;
+    this._singleRun = true;
+    this.round = 0;
+    this.scores = [];
+    this._playedBars = new Set();
+    this._renderScoreVisual();
+    this._showNotes();
+    this._setControls(true);
+    this.order = this.mode.key === "guess_multi"
+      ? [this._buildMultiQuestion(barIndex)].filter((q) => q && q.length)
+      : [barIndex];
+    if (!this.order.length) { this.running = false; this._setControls(false); return; }
+    this._renderProgress();
+    this._renderScore();
+    this.setStatus("Bar " + (barIndex + 1));
+    this._nextRound();
+  }
+
   stopSession() {
     this.stop();
     if (this.renderer) { this.renderer.clearHighlight(); this.renderer.clearBarHighlight(); }
     this._showNotes();
     this._setControls(false);
-    this._prompt("Session stopped.");
+    this._prompt("Session stopped. " + this._readyHint());
     this._setLegend("Stopped.");
     this.setStatus("Stopped.");
   }
@@ -559,6 +707,10 @@ export class PracticeController {
   }
 
   _finishSession() {
+    // `_singleRun` deliberately stays set: the deck should keep reading 1/1
+    // for the bar just practised rather than snapping back to the full
+    // session's round count.  start()/startSingle()/stop() clear it.
+    const single = this._singleRun;
     this.running = false;
     this._stopMic();
     this.round = this.order.length;
@@ -566,6 +718,16 @@ export class PracticeController {
     this._renderScore();
     this._showNotes();
     this._setControls(false);
+
+    // A single-bar run is a practice attempt, not a completed chapter: keep
+    // the round's own feedback card on screen, don't show the chapter summary,
+    // and don't record it against the chapter's progress.
+    if (single) {
+      const s = this.scores.length ? this.scores[this.scores.length - 1] : null;
+      this._setLegend(s == null ? "Bar done." : "Bar score: " + s + " — click another bar, or press Start for the full set.");
+      this.setStatus(s == null ? "Ready" : "Bar score: " + s);
+      return;
+    }
 
     // Listening (chapter 1) has no scoring — show a simple completion card.
     if (this.mode && this.mode.key === "listen") {
@@ -821,54 +983,89 @@ export class PracticeController {
     const finish = (timedOut, sung) => {
       if (done) return; done = true;
       this._stopCountdown();
-      this._finishSingNotes(barIndex, targetMidi, targetDegree, noteIdx, timedOut, sung || []);
+      this._stopRecording();
+      this._finishSingNotes(barIndex, targetMidi, targetDegree, noteIdx, timedOut, sung);
     };
-    // Live sung-pitch preview for the single target note.
+    // Live capture of the single target note.  Whatever pitch the singer
+    // settles on is taken as the attempt — right or wrong — and the round ends
+    // there instead of running the recorder out to its full length.
+    const capture = this._makeSingleNoteCapture(barIndex, noteIdx, targetMidi, (note) => finish(false, note));
+    // Countdown starts now — after the preview playback has ended.
+    if (timed) this._startCountdown(() => { if (this.running) finish(true, null); });
+    await this._recordNotes(recMs + SING_TAIL_MS, () => finish(false, capture.best()), capture.onPitch);
+  }
+
+  /**
+   * Single-note variant of `_makeLiveCapture`: watch one slot, commit the
+   * first pitch the singer holds steadily (correct or not), and hand it back.
+   * `best()` returns the held pitch even if it never reached the full hold
+   * time, so a short attempt that ran into the timer still gets scored rather
+   * than counting as silence.
+   */
+  _makeSingleNoteCapture(barIndex, noteIdx, targetMidi, onNote) {
     const r = this.renderer;
-    let onPitch = null;
-    if (r && r.getPitchedNotesInBar) {
-      const pitched = r.getPitchedNotesInBar(barIndex);
-      const slot = pitched[noteIdx] || pitched[0];
-      if (slot) {
-        r.setSungTarget(slot.globalIndex, targetMidi);
-        r.showSungNote(slot.globalIndex, targetMidi, targetMidi);
-        let lastDraw = 0;
-        onPitch = (info) => {
-          if (!this.running) return;
-          const now = performance.now();
-          if (now - lastDraw > 60) {
-            r.showSungNote(slot.globalIndex, info.midi != null ? info.midi : info.midiRound, targetMidi);
+    const pitched = (r && r.getPitchedNotesInBar) ? r.getPitchedNotesInBar(barIndex) : [];
+    const slot = pitched[noteIdx] || pitched[0] || null;
+    if (r && slot) {
+      r.setSungTarget(slot.globalIndex, targetMidi);
+      r.showSungNote(slot.globalIndex, targetMidi, targetMidi);
+    }
+    const lock = makePitchLock();
+    let bestNote = null, done = false;
+    let smoothMidi = targetMidi, lastT = null, lastDraw = 0;
+    return {
+      best: () => bestNote,
+      onPitch: (info) => {
+        if (!this.running || done) return;
+        const now = (info && info.t != null) ? info.t : performance.now();
+        const dt = lastT == null ? 0 : now - lastT;
+        lastT = now;
+        const usableDt = (dt > 0 && dt < 500) ? dt : 0;
+        const midi = (info && info.midi != null) ? info.midi
+                   : (info && info.midiRound != null) ? info.midiRound : null;
+
+        if (midi != null) {
+          if (usableDt) smoothMidi = smoothMidi + (midi - smoothMidi) * Math.min(1, usableDt / 90);
+          else smoothMidi = midi;
+          if (r && slot && now - lastDraw > 60) {
+            r.showSungNote(slot.globalIndex, smoothMidi, targetMidi);
             lastDraw = now;
           }
-        };
-      }
-    }
-    // Countdown starts now — after the preview playback has ended.
-    if (timed) this._startCountdown(() => { if (this.running) finish(true, []); });
-    await this._recordNotes(recMs + SING_TAIL_MS, (sung) => finish(false, sung), onPitch);
+        }
+
+        lock.feed(midi, usableDt, now);
+        const centre = lock.centre();
+        // Keep the best-so-far even before the hold gate passes, so an attempt
+        // cut short by the countdown is still scored rather than read as silence.
+        if (centre != null && lock.held() >= (bestNote ? bestNote.durMs : 0)) {
+          bestNote = { midi: centre, durMs: lock.held() };
+        }
+        if (lock.held() >= CAPTURE_HOLD_MS) {
+          done = true;
+          if (onNote) onNote(bestNote);
+        }
+      },
+    };
   }
 
   _finishSingNotes(barIndex, targetMidi, targetDegree, noteIdx, timedOut, sung) {
     if (!this.running) return;
-    sung = sung || [];
-    const sungMidi = sung.length ? (typeof sung[0] === "number" ? sung[0] : sung[0].midi) : null;
-    let score = 0, cents = null;
-    if (sungMidi != null) {
-      cents = (sungMidi - targetMidi) * 100;
-      score = Math.max(0, Math.round(100 - Math.abs(cents) / 1.5));
-      if (Math.abs(cents) > 600 && ((sungMidi - targetMidi) % 12 === 0)) score = Math.max(score, 70);
-      score = Math.max(0, Math.min(100, score));
-    }
+    const sungMidi = sung == null ? null : (typeof sung === "number" ? sung : sung.midi);
+    const cents = sungMidi != null ? (sungMidi - targetMidi) * 100 : null;
+    const score = sungMidi != null ? noteScoreFor(sungMidi, targetMidi) : 0;
     this.scores.push(score);
     this._renderScore(); this._renderProgress();
     this._feedback({
       score, verdict: scoreLabel(score),
       head: (timedOut ? "Time up! " : "") + "Target " + midiToName(targetMidi) + " (deg " + targetDegree + ")",
-      detail: "You sang " + (sungMidi != null ? midiToName(sungMidi) : "—") +
-        (cents != null ? " · " + (cents > 0 ? "+" : "") + cents + "c" : ""),
-      extra: noteBadge(targetMidi, sungMidi),
+      detail: "You sang " + (sungMidi != null ? midiToName(Math.round(sungMidi)) : "—") +
+        (cents != null ? " · " + (cents > 0 ? "+" : "") + Math.round(cents) + "c" : ""),
+      extra: '<div class="sn-row">' + noteCellHTML({ sung: sungMidi, ref: targetMidi, score }) + "</div>",
     });
     this._setLegend("Note score: " + score);
+    const slots = (this.renderer && this.renderer.getPitchedNotesInBar)
+      ? this.renderer.getPitchedNotesInBar(barIndex) : [];
+    this._markNoteAccuracy(slots, noteIdx, sungMidi != null ? score : null);
     this._advanceAfter(1100);
   }
 
@@ -984,53 +1181,54 @@ export class PracticeController {
 
   // ---- 10. Guessing notes (multiple) ---------------------------------------
 
-  _generateMultiQuestions() {
+  /** Build one generated question rooted at `rootBar`. */
+  _buildMultiQuestion(rootBar) {
     const o = this.multiOpts;
     const count = Math.max(2, Math.min(12, o.noteCount || 3));
     const allBars = this.barSteps.map((b, i) => i);
-    const questions = [];
     const intervalSemitones = { seconds: 1, thirds: 3, fourths: 5, fifths: 7, sixths: 9, sevenths: 11, octaves: 12 };
     const chordDegrees = { "5/3": [0, 3, 5], "6/3": [0, 4, 7], "6/4": [0, 5, 7] };
 
-    const buildQ = (rootBar) => {
-      const rootPitches = barPitches(this.barSteps[rootBar]);
-      if (!rootPitches.length) return null;
-      const rootMidi = rootPitches[0];
-      if (o.generation === "intervals") {
-        const iv = intervalSemitones[o.interval] || 3;
-        const arr = [];
-        for (let k = 0; k < count; k++) arr.push({ midi: rootMidi + iv * k, degree: String(1 + k) });
-        return arr;
-      }
-      if (o.generation === "chords") {
-        const pattern = chordDegrees[o.chord] || chordDegrees["5/3"];
-        const arr = [];
-        for (let k = 0; k < count; k++) arr.push({ midi: rootMidi + pattern[k % pattern.length], degree: String(1 + pattern[k % pattern.length]) });
-        return arr;
-      }
-      if (o.generation === "random_no_repeat") {
-        const pool = allBars.slice(); const arr = [];
-        for (let k = 0; k < count; k++) {
-          if (!pool.length) break;
-          const bi = pool.splice(randInt(pool.length), 1)[0];
-          const pp = barPitches(this.barSteps[bi]);
-          if (pp.length) arr.push({ midi: pp[0], degree: barDegrees(this.barSteps[bi])[0] });
-        }
-        return arr;
-      }
+    const rootPitches = barPitches(this.barSteps[rootBar]);
+    if (!rootPitches.length) return null;
+    const rootMidi = rootPitches[0];
+    if (o.generation === "intervals") {
+      const iv = intervalSemitones[o.interval] || 3;
       const arr = [];
+      for (let k = 0; k < count; k++) arr.push({ midi: rootMidi + iv * k, degree: String(1 + k) });
+      return arr;
+    }
+    if (o.generation === "chords") {
+      const pattern = chordDegrees[o.chord] || chordDegrees["5/3"];
+      const arr = [];
+      for (let k = 0; k < count; k++) arr.push({ midi: rootMidi + pattern[k % pattern.length], degree: String(1 + pattern[k % pattern.length]) });
+      return arr;
+    }
+    if (o.generation === "random_no_repeat") {
+      const pool = allBars.slice(); const arr = [];
       for (let k = 0; k < count; k++) {
-        const bi = allBars[randInt(allBars.length)];
+        if (!pool.length) break;
+        const bi = pool.splice(randInt(pool.length), 1)[0];
         const pp = barPitches(this.barSteps[bi]);
         if (pp.length) arr.push({ midi: pp[0], degree: barDegrees(this.barSteps[bi])[0] });
       }
       return arr;
-    };
+    }
+    const arr = [];
+    for (let k = 0; k < count; k++) {
+      const bi = allBars[randInt(allBars.length)];
+      const pp = barPitches(this.barSteps[bi]);
+      if (pp.length) arr.push({ midi: pp[0], degree: barDegrees(this.barSteps[bi])[0] });
+    }
+    return arr;
+  }
 
+  _generateMultiQuestions() {
+    const questions = [];
     const rounds = Math.max(1, Math.min(12, this.barSteps.length));
     for (let r = 0; r < rounds; r++) {
       const rootBar = this.barSteps.length ? r % this.barSteps.length : 0;
-      const q = buildQ(rootBar);
+      const q = this._buildMultiQuestion(rootBar);
       if (q && q.length) questions.push(q);
     }
     return questions;
@@ -1106,126 +1304,325 @@ export class PracticeController {
     catch (e) { this._feedback({ score: 0, verdict: "—", head: "Mic unavailable", detail: e.message }); this._advance(); return; }
     const ref = barPitches(this.barSteps[barIndex]);
     const dur = barDurationMs(this.barSteps[barIndex]);
-    // Non-timed singing: no fixed time limit.  The user sings and presses
-    // "Done singing" when ready; a generous safety cap keeps it bounded.
+    // Non-timed singing: no fixed time limit.  The bar ends by itself the
+    // moment the last reference note has been captured (see the capture's
+    // onComplete below) — the "Done" button is only an escape hatch for a
+    // singer who wants to give up on the remaining notes.
     const maxMs = Math.max(8000, dur * 3 + 4000);
-    this._setLegend("Singing… sing bar " + (barIndex + 1) + " now, then press Done.");
-    this._prompt("Singing <b>" + (this.round + 1) + "/" + this.order.length + "</b>");
-    const onPitch = this._makeSungPreview(barIndex, ref);
-    await this._recordNotesUntilDone(maxMs, (sung) => this._scoreSungBar(barIndex, ref, sung), onPitch);
+    this._setLegend("Sing bar " + (barIndex + 1) + " — each note scores as soon as you hold it.");
+    this._renderLiveStrip(ref, [], 0);
+
+    // `captured[i]` is the sung attempt for reference note i (or null if the
+    // singer stopped before reaching it).
+    const captured = new Array(ref.length).fill(null);
+    let finished = false;
+    const finishNow = () => {
+      if (finished) return;
+      finished = true;
+      // `_doneFinish` is installed by `_recordNotesUntilDone`; calling it
+      // tears down the recorder and routes into onDone below.
+      if (this._doneFinish) this._doneFinish();
+    };
+
+    // Stave slots for this bar's pitched notes, so a scored note can be
+    // coloured in place on the score.
+    const slots = (this.renderer && this.renderer.getPitchedNotesInBar)
+      ? this.renderer.getPitchedNotesInBar(barIndex) : [];
+    const onPitch = this._makeLiveCapture(barIndex, ref, {
+      noteMs: medianNoteDurationMs(this.barSteps[barIndex]),
+      onNote: (i, note) => {
+        captured[i] = note;
+        this._renderLiveStrip(ref, captured, Math.min(i + 1, ref.length - 1));
+      },
+      // The note is finished being sung: settle its colour on the stave.
+      onNoteDone: (i, note) => this._markNoteAccuracy(slots, i, noteScoreFor(note.midi, ref[i])),
+      // Every reference note has an attempt: end the bar immediately instead
+      // of leaving the singer waiting on a timer with nothing left to sing.
+      onComplete: () => finishNow(),
+    });
+    await this._recordNotesUntilDone(maxMs, () => this._scoreCapturedBar(barIndex, ref, captured), onPitch);
   }
 
   /**
-   * Build a live sung-pitch preview callback for a bar.  The marker starts at
-   * the bar's first reference note and advances to the next one once the
-   * singer has been "okay enough" on the current one for long enough.
+   * Build the live capture callback for a bar.
    *
-   * Advancement is driven by a forgiving *on-pitch credit accumulator*
-   * instead of a strict "must stay green" hold timer (see the
-   * PREVIEW_* constants above): every frame within PREVIEW_OK_CENTS of the
-   * target banks credit, off-pitch frames erode it at the same rate, and the
-   * marker advances when credit reaches PREVIEW_ADVANCE_MS.  This lets a
-   * sustained note with natural vibratio peaks through the band bank enough
-   * to advance, while a passing sweep that merely brushes the note never
-   * accumulates enough credit.  Octave-agnostic (pitch class, mod 12).
+   * The marker starts on the bar's first reference note.  Every time the
+   * singer settles on a pitch — *any* pitch, right or wrong — and holds it for
+   * CAPTURE_HOLD_MS, that pitch is committed as the attempt for the current
+   * reference note and the marker moves to the next one.  Nothing here
+   * compares the sung pitch to the target in order to decide whether to
+   * advance; the target is used only to colour the marker and, later, to
+   * score.  That is the difference from the old behaviour, where the exercise
+   * stalled on a note until it was sung correctly.
    *
-   * The marker's own vertical position is a light one-pole smoothing of the
-   * incoming fractional pitch so vibrato reads as a gentle wobble, not
-   * frame-to-frame jitter.
+   * The marker's vertical position is a light one-pole smoothing of the
+   * incoming fractional pitch, so vibrato reads as a gentle wobble rather
+   * than frame-to-frame jitter.
+   *
    * @param {number} barIndex
    * @param {number[]} refPitches  ordered reference MIDI pitches (pitched notes)
+   * @param {{onNote:(i:number, note:{midi:number,durMs:number})=>void, onComplete:()=>void}} hooks
    * @returns {(info)=>void}  pass to the recorder as onPitch
    */
-  _makeSungPreview(barIndex, refPitches) {
+  _makeLiveCapture(barIndex, refPitches, { noteMs, onNote, onNoteDone, onComplete } = {}) {
     const r = this.renderer;
-    if (!r || !r.getPitchedNotesInBar) return () => {};
-    const pitched = r.getPitchedNotesInBar(barIndex);
-    if (!pitched.length) return () => {};
-    let step = 0;
-    r.setSungTarget(pitched[0].globalIndex, pitched[0].midi);
-    r.showSungNote(pitched[0].globalIndex, pitched[0].midi);
-    const targets = refPitches.slice();
-    // Throttle DOM updates; one-pole smoothing of the displayed pitch.
-    let lastDraw = 0;
-    let smoothMidi = pitched[0].midi; // seed at the target so the marker starts on it
-    let lastT = null;
-    // On-pitch credit (ms).  Frames within the okay band add dt; off-pitch
-    // frames subtract PREVIEW_DECAY·dt.  Capped so an overshoot doesn't
-    // carry a huge surplus into the next note (each note starts fresh-ish).
-    let credit = 0;
-    const CREDIT_CAP = PREVIEW_ADVANCE_MS * 1.5;
-    return (info) => {
-      if (!this.running) return;
-      const midi = info.midi != null ? info.midi : info.midiRound;
-      const target = targets[step];
-      if (target == null) return;
-      const now = performance.now();
+    const targets = (refPitches || []).slice();
+    if (!targets.length) return () => {};
+    const pitched = (r && r.getPitchedNotesInBar) ? r.getPitchedNotesInBar(barIndex) : [];
+    const slotOf = (i) => pitched[i] || pitched[pitched.length - 1] || null;
 
-      // Smooth the displayed pitch (time-constant ~90 ms) for a calm marker.
+    let step = 0;
+    const showTarget = (i, sung) => {
+      if (i >= targets.length) return;
+      const slot = slotOf(i);
+      if (!r || !slot) return;
+      r.setSungTarget(slot.globalIndex, targets[i]);
+      r.showSungNote(slot.globalIndex, sung != null ? sung : targets[i], targets[i]);
+    };
+    showTarget(0);
+
+    // How long a note must be held to count when the singer moves off it,
+    // derived from this exercise's own tempo (see CAPTURE_MIN_HOLD_FRACTION).
+    const minHoldMs = Math.max(
+      CAPTURE_MIN_HOLD_FLOOR_MS,
+      Math.min(CAPTURE_HOLD_MS, CAPTURE_MIN_HOLD_FRACTION * (noteMs || 0)),
+    );
+
+    const lock = makePitchLock();
+    // Whether the note currently being sung has already been scored, so a
+    // sustained note fills one reference slot rather than every remaining one.
+    let banked = false;
+    let bankedMidi = null;   // the pitch that was scored, for "have they moved on?"
+    let bankedIndex = -1;    // which reference note that was, for refining its score
+    let bankedSince = 0;     // when it was scored, so its duration keeps growing
+    let awayMs = 0;          // time spent clear of it (decays, so vibrato never adds up)
+    let lastRefine = 0;
+    // Snapshot of the *un-banked* note under the lock, carried one frame so the
+    // frame that ends it can still bank it — by then the lock has moved on or
+    // been cleared.  Null whenever `banked`, so a scored note can never be
+    // banked a second time by the release path.
+    let prev = null;
+
+    let smoothMidi = targets[0];
+    let lastT = null;
+    let lastDraw = 0;
+
+    /** Score `step` and move the marker on.  Returns true when that was the
+     *  bar's last note (the caller should stop touching the capture).
+     *
+     *  `final` says the note is finished as well as scored — true for one
+     *  banked retroactively (the singer has already left it) and for the
+     *  bar's last note (the bar ends there).  A note banked while it is still
+     *  being sung is not final: it keeps refining until the singer moves on,
+     *  and only then is its accuracy settled. */
+    const bank = (noteMidi, heldMs, final) => {
+      if (noteMidi == null) return false;
+      const i = step;
+      step += 1;
+      showTarget(step, smoothMidi);
+      if (onNote) onNote(i, { midi: noteMidi, durMs: heldMs });
+      const last = step >= targets.length;
+      if (final || last) {
+        if (onNoteDone) onNoteDone(i, { midi: noteMidi, durMs: heldMs });
+      }
+      if (last) {
+        // The bar is done the moment its last note has a score — waiting for
+        // the singer to release it would just be dead air.
+        if (onComplete) onComplete();
+        return true;
+      }
+      return false;
+    };
+
+    return (info) => {
+      if (!this.running || step >= targets.length) return;
+
+      const now = (info && info.t != null) ? info.t : performance.now();
       const dt = lastT == null ? 0 : now - lastT;
       lastT = now;
-      if (dt > 0 && dt < 500) {
-        const a = Math.min(1, dt / 90);
-        smoothMidi = smoothMidi + (midi - smoothMidi) * a;
-      } else {
-        smoothMidi = midi;
-      }
+      const usableDt = (dt > 0 && dt < 500) ? dt : 0;
 
-      if (now - lastDraw > 60) {            // ~16fps DOM update cap
-        r.showSungNote(pitched[step].globalIndex, smoothMidi, target);
-        lastDraw = now;
-      }
+      const midi = (info && info.midi != null) ? info.midi
+                 : (info && info.midiRound != null) ? info.midiRound : null;
 
-      // Credit accumulator: bank time spent "okay enough" on the target.
-      // Octave-agnostic — same pitch class (mod 12) counts — measured in cents
-      // so it's tighter than a loose "within a semitone" check.
-      const pcDiff = (((midi - target) % 12) + 12) % 12;
-      const centsOff = Math.min(pcDiff, 12 - pcDiff) * 100;
-      if (dt > 0 && dt < 500) {
-        if (centsOff <= PREVIEW_OK_CENTS) credit += dt;
-        else credit -= dt * PREVIEW_DECAY;
-        if (credit < 0) credit = 0;
-        if (credit > CREDIT_CAP) credit = CREDIT_CAP;
-      }
-      if (credit >= PREVIEW_ADVANCE_MS) {
-        credit = 0;
-        step += 1;
-        if (step < pitched.length) {
-          r.setSungTarget(pitched[step].globalIndex, pitched[step].midi);
-          r.showSungNote(pitched[step].globalIndex, smoothMidi, pitched[step].midi);
+      if (midi != null) {
+        // Smooth the displayed pitch (time-constant ~90 ms) for a calm marker.
+        if (usableDt) smoothMidi = smoothMidi + (midi - smoothMidi) * Math.min(1, usableDt / 90);
+        else smoothMidi = midi;
+        const slot = slotOf(step);
+        if (r && slot && now - lastDraw > 60) {   // ~16fps DOM update cap
+          r.showSungNote(slot.globalIndex, smoothMidi, targets[step]);
+          lastDraw = now;
         }
       }
+
+      const state = lock.feed(midi, usableDt, now);
+
+      // --- Still on the note we just scored? -------------------------------
+      // Judged against the scored pitch (see CAPTURE_NEW_NOTE_CENTS), not
+      // against the lock, which re-anchors on its own for reasons that have
+      // nothing to do with the singer having moved on.
+      if (banked) {
+        if (state === "released") {
+          banked = false; awayMs = 0;          // a breath ends the note outright
+        } else if (midi != null) {
+          const awayCents = Math.abs(midi - bankedMidi) * 100;
+          if (awayCents >= CAPTURE_NEW_NOTE_CENTS) {
+            awayMs += usableDt;
+          } else {
+            awayMs = Math.max(0, awayMs - usableDt);      // vibrato never accumulates
+            // Still on the note: let the reference settle onto where the voice
+            // actually is, and improve the note's score as it steadies — a
+            // singer who scoops in and then lands the pitch should be scored on
+            // where they landed, not on the way in.
+            if (usableDt) {
+              bankedMidi += (midi - bankedMidi) * Math.min(1, usableDt / CAPTURE_BANKED_FOLLOW_MS);
+            }
+            if (onNote && bankedIndex >= 0 && now - lastRefine > 80) {
+              lastRefine = now;
+              onNote(bankedIndex, { midi: bankedMidi, durMs: now - bankedSince });
+            }
+          }
+          if (awayMs >= CAPTURE_CONFIRM_MS) { banked = false; awayMs = 0; }
+        }
+        if (banked) { prev = null; return; }
+        // They have moved on, so that note's accuracy is settled: this is the
+        // moment its colour goes onto the stave.
+        if (bankedIndex >= 0 && onNoteDone) {
+          onNoteDone(bankedIndex, { midi: bankedMidi, durMs: now - bankedSince });
+        }
+        bankedIndex = -1;
+        // If the lock is somehow still sitting on the note we scored, drop it
+        // so its held time can't be credited to the new one.
+        if (lock.centre() != null &&
+            Math.abs(lock.centre() - bankedMidi) * 100 < CAPTURE_NEW_NOTE_CENTS) {
+          lock.clear();
+        }
+        bankedMidi = null;
+        prev = null;
+        return;
+      }
+
+      // The note under the lock has ended (a breath, or a different pitch).
+      if (state === "released" || state === "new") {
+        // If it was a real note that simply never reached the full hold —
+        // which is the normal case when singing at the exercise's own tempo —
+        // bank it now instead of losing it.  Losing it is not a small matter:
+        // the marker would stay put, so the singer's *next* note would be
+        // scored against this reference note and every one after it would be
+        // out by one, which is what "gets stuck" looks like from the outside.
+        if (prev && prev.held >= minHoldMs) {
+          if (bank(prev.midi, prev.held, true)) return;   // bar finished
+          prev = null;
+        }
+      }
+
+      // Held long enough to bank while still singing it.  This is the path
+      // that makes the marker *lead* at a comfortable pace: scoring the note
+      // and moving the marker on are deliberately the same moment.  Splitting
+      // them (marker waits until the singer leaves the note) was tried and
+      // felt markedly worse — the moving marker is the cue that says "got it,
+      // next", and without it the exercise follows the singer instead of
+      // leading them, so every note drags.
+      if (lock.held() >= CAPTURE_HOLD_MS) {
+        bankedMidi = lock.centre();
+        bankedIndex = step;
+        bankedSince = now - lock.held();
+        banked = true;
+        awayMs = 0;
+        lastRefine = now;
+        prev = null;
+        bank(bankedMidi, lock.held(), false);
+        return;
+      }
+
+      // Remember the note under the lock, so the frame that ends it can still
+      // bank it (by then the lock has already moved on or been cleared).
+      prev = lock.centre() != null ? { midi: lock.centre(), held: lock.held() } : null;
     };
   }
 
-  _scoreSungBar(barIndex, ref, sung) {
+  /**
+   * Score a bar from the notes captured live, one per reference note.
+   *
+   * Because each sung note was committed against a known reference slot there
+   * is nothing left to align: the pairing is positional by construction, so
+   * no DTW pass and no pruning of "seeking stabs" is needed (a stab never gets
+   * committed in the first place — it does not survive the hold gate).
+   * Reference notes the singer never reached (they pressed Done, or the safety
+   * cap fired) score 0 and are shown as missing.
+   */
+  _scoreCapturedBar(barIndex, ref, captured) {
     if (!this.running) return;
-    sung = sung || [];
-    // The tracker reliably captures *pitches*, but a singer "seeking" the
-    // right note often holds an intermediate semitone just long enough to
-    // pass the length/dominance gates, so the sung list frequently contains
-    // more notes than the exercise has.  Those extras bias the alignment and
-    // the score.  Before scoring, prune the sung notes down to the reference
-    // count, keeping the most salient ones (longest + most dominant) so the
-    // real intended notes survive and the seeking stabs drop out.
-    const pruned = pruneSungToReferenceCount(sung, ref.length, ref);
-    const { score, perNote } = scoreSungBar(pruned, ref);
+    const perNote = ref.map((refMidi, i) => {
+      const c = captured && captured[i];
+      if (!c) return { sung: null, ref: refMidi, cents: null, score: 0, missing: true };
+      const cents = (c.midi - refMidi) * 100;
+      return { sung: c.midi, ref: refMidi, cents, score: noteScoreFor(c.midi, refMidi), missing: false };
+    });
+    const score = perNote.length
+      ? Math.round(perNote.reduce((a, p) => a + p.score, 0) / perNote.length)
+      : 0;
+    // Final, authoritative pass over the stave: every reference note gets the
+    // score it ended up with, including ones the singer never reached (which
+    // the live colouring never sees, because they had no note to finish).
+    const slots = (this.renderer && this.renderer.getPitchedNotesInBar)
+      ? this.renderer.getPitchedNotesInBar(barIndex) : [];
+    perNote.forEach((p, i) => this._markNoteAccuracy(slots, i, p.missing ? null : p.score));
     this.scores.push(score);
     this._renderScore(); this._renderProgress();
-    const noteCells = perNote.map((p) => {
-      const cls = p.score >= 70 ? "good" : p.score >= 40 ? "ok" : "weak";
-      return "<span class='sn-cell " + cls + "'>" + (p.sung != null ? midiToName(p.sung) : "—") + "/" + (p.ref != null ? midiToName(p.ref) : "—") + " <b>" + p.score + "</b></span>";
-    }).join("");
     this._feedback({
       score, verdict: scoreLabel(score),
       head: "Bar " + (barIndex + 1) + " singing",
       detail: score + "/100",
-      extra: '<div class="sn-row">' + noteCells + "</div>",
+      extra: '<div class="sn-row">' + perNote.map(noteCellHTML).join("") + "</div>",
     });
     this._setLegend("Bar score: " + score);
     this._advanceAfter(1200);
   }
 
+  /** Colour one reference note on the stave by its accuracy.  `slots` is the
+   *  bar's pitched-note list from the renderer (reference index -> stave slot). */
+  _markNoteAccuracy(slots, i, score) {
+    const slot = slots && slots[i];
+    if (!slot || !this.renderer || !this.renderer.setNoteAccuracy) return;
+    this.renderer.setNoteAccuracy(slot.globalIndex, score);
+  }
+
+  /** Live per-note strip shown in the prompt while the bar is being sung, so
+   *  the singer sees each note score land as they move through the bar. */
+  _renderLiveStrip(ref, captured, activeIdx) {
+    const cells = ref.map((refMidi, i) => {
+      const c = captured && captured[i];
+      if (!c) {
+        const cls = i === activeIdx ? "sn-cell pending active" : "sn-cell pending";
+        return "<span class='" + cls + "'>" + midiToName(refMidi) + "</span>";
+      }
+      return noteCellHTML({ sung: c.midi, ref: refMidi, score: noteScoreFor(c.midi, refMidi) });
+    }).join("");
+    this._prompt("Sing it — <b>" + (this.round + 1) + "/" + this.order.length +
+      "</b> · each note scores as soon as you hold it" +
+      "<div class='sn-row'>" + cells + "</div>");
+    // The Done button lives inside the prompt, so a re-render drops it.
+    if (this._doneFinish) this._showDoneButton(this._doneFinish);
+  }
+
+  /**
+   * Detach the live recorder: stop feeding pitch frames to the round's
+   * callbacks, drop the safety timer, and clear the sung-pitch marker.  Called
+   * whenever a round ends — including when it ends *early* because the live
+   * capture already collected every note it needed.
+   */
+  _stopRecording() {
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    if (this.detector) this.detector.onPitch = () => {};
+    this._hideDoneButton();
+    if (this.renderer && this.renderer.clearSungNote) this.renderer.clearSungNote();
+  }
+
+  /** Record for a fixed window.  Every frame is forwarded to `onPitch`,
+   *  unvoiced ones included — the live capture needs to see silence to know a
+   *  note was released. */
   _recordNotes(ms, onDone, onPitch) {
     const token = this._roundToken;
     if (!this.detector || !this.detector.isRunning) {
@@ -1240,52 +1637,46 @@ export class PracticeController {
     const start = performance.now();
     this.detector.onPitch = (info) => {
       if (!this.running || token !== this._roundToken) return;
-      if (info.midi != null) {
-        frames.push({ t: info.t, midi: info.midi });
-        if (onPitch) onPitch({ midiRound: info.midiRound, midi: info.midi, cents: info.cents });
-      }
+      if (info.midi != null) frames.push({ t: info.t, midi: info.midi });
+      if (onPitch) onPitch(info);
     };
     const finish = () => {
       this._timer = null;
       if (token !== this._roundToken) return;
-      this.detector.onPitch = () => {};
-      if (this.renderer && this.renderer.clearSungNote) this.renderer.clearSungNote();
+      this._stopRecording();
       onDone(segmentNotes(frames, start));
     };
     this._timer = setTimeout(finish, ms);
   }
 
   /**
-   * Record singing with no fixed time limit: the user finishes by clicking a
-   * "Done" button (rendered into the prompt).  A generous safety cap prevents
-   * an abandoned session from recording forever.  Used by the non-timed
-   * singing modes (2, 5, 8) so no question is time-limited.
+   * Record singing with no fixed time limit.  The round normally ends by
+   * itself the moment the live capture has an attempt for every reference
+   * note (it calls `_doneFinish`); the "Done" button is the escape hatch for a
+   * singer who wants to stop early, and the safety cap keeps an abandoned
+   * session bounded.  Used by the non-timed singing modes (2, 5).
    */
   _recordNotesUntilDone(maxMs, onDone, onPitch) {
     const token = this._roundToken;
-    const start = (this.detector && performance.now()) || performance.now();
+    const start = performance.now();
     const begin = () => {
       const frames = [];
       this.detector.onPitch = (info) => {
         if (!this.running || token !== this._roundToken) return;
-        if (info.midi != null) {
-          frames.push({ t: info.t, midi: info.midi });
-          if (onPitch) onPitch({ midiRound: info.midiRound, midi: info.midi, cents: info.cents });
-        }
+        if (info.midi != null) frames.push({ t: info.t, midi: info.midi });
+        if (onPitch) onPitch(info);
       };
       const finish = () => {
-        if (this._timer) { clearTimeout(this._timer); this._timer = null; }
         if (token !== this._roundToken) return;
-        this.detector.onPitch = () => {};
-        this._hideDoneButton();
-        if (this.renderer && this.renderer.clearSungNote) this.renderer.clearSungNote();
+        this._stopRecording();
         onDone(segmentNotes(frames, start));
       };
       // Safety cap.
       this._timer = setTimeout(finish, maxMs);
-      // Done button.
-      this._showDoneButton(() => finish());
+      // Done button (escape hatch) — also the hook the live capture calls to
+      // end the bar as soon as the last note has been sung.
       this._doneFinish = finish;
+      this._showDoneButton(finish);
     };
     if (!this.detector || !this.detector.isRunning) {
       this._ensureMic().then(() => { this._recordNotesUntilDone(maxMs, onDone, onPitch); }).catch((e) => {
@@ -1306,7 +1697,7 @@ export class PracticeController {
       btn = document.createElement("button");
       btn.id = "d-done";
       btn.className = "btn btn-primary";
-      btn.innerHTML = glyph("check", 14) + "<span>Done singing</span>";
+      btn.innerHTML = glyph("check", 14) + "<span>Score now</span>";
       rep.appendChild(btn);
     }
     btn.disabled = false;
@@ -1363,12 +1754,17 @@ export class PracticeController {
   }
 
   _onBarClick(idx) {
+    // A round is waiting for an answer (the guessing modes): the click is the
+    // answer, not a request to start something.
     if (this._clickGuard) { this._clickGuard(idx); return; }
-    // No active input guard: in listening mode a bar click plays just that
-    // bar and advances the round progress to that bar's position.
-    if (this.mode && this.mode.key === "listen") {
-      this._listenClick(idx);
-    }
+    if (!this.mode) return;
+    // Listening: a bar click just plays that bar and moves the progress on.
+    if (this.mode.key === "listen") { this._listenClick(idx); return; }
+    // A round is mid-flight (playing back, or recording a sung bar): ignore
+    // stray clicks rather than restarting underneath the user.
+    if (this.running) return;
+    // Otherwise the click starts that one bar as a one-round exercise.
+    this.startSingle(idx);
   }
 
   /** Manual bar click in listening mode: play it and advance the round
@@ -1388,11 +1784,140 @@ export class PracticeController {
   }
 }
 
-/** Small badge comparing target vs sung note. */
-function noteBadge(target, sung) {
-  if (sung == null) return '<div class="sn-row"><span class="sn-cell weak">— / ' + midiToName(target) + "</span></div>";
-  const cls = Math.abs(sung - target) <= 0 ? "good" : Math.abs((sung - target) * 100) <= 50 ? "ok" : "weak";
-  return '<div class="sn-row"><span class="sn-cell ' + cls + '">' + midiToName(sung) + " / " + midiToName(target) + "</span></div>";
+/**
+ * A "pitch lock": the note the singer is sitting on right now, as a running
+ * centre plus how long it has been held.
+ *
+ * The lock exists so the live capture can answer one question — *has the
+ * singer settled on a note?* — without ever asking whether it is the right
+ * note.  Two gates keep it honest:
+ *
+ *   - a CAPTURE_HYST_CENTS deadband around the running centre, so the same
+ *     note keeps accumulating hold time while pitch wanders inside it;
+ *   - a CAPTURE_DRIFT_CENTS bound on how far it may get from where the lock
+ *     started, so a steady slide cannot creep along inside the moving band and
+ *     pass itself off as a held note;
+ *   - a CAPTURE_CONFIRM_MS gate on anything outside those, so a vibrato peak
+ *     that crosses the boundary and comes straight back does not read as a new
+ *     note, while a genuine move to another pitch does.
+ *
+ * Unvoiced frames accumulate towards CAPTURE_GAP_MS; once that is reached the
+ * note is released, which is what lets a repeated pitch be re-articulated as
+ * two separate notes.
+ */
+function makePitchLock() {
+  let sum = 0, count = 0, heldMs = 0, anchor = null;
+  let candSum = 0, candCount = 0, candSince = null, candAnchor = null;
+  let silentMs = 0;
+
+  const centre = () => (count ? sum / count : null);
+  const dropCandidate = () => { candSum = 0; candCount = 0; candSince = null; candAnchor = null; };
+  const clear = () => {
+    sum = 0; count = 0; heldMs = 0; anchor = null;
+    dropCandidate(); silentMs = 0;
+  };
+  // A frame belongs to a lock when it is both near the lock's running centre
+  // and still near where that lock began.
+  const belongs = (midi, c, a) =>
+    Math.abs(midi - c) * 100 <= CAPTURE_HYST_CENTS &&
+    Math.abs(midi - a) * 100 <= CAPTURE_DRIFT_CENTS;
+
+  return {
+    centre,
+    held: () => heldMs,
+    clear,
+    /**
+     * Feed one frame; `midi` is null for an unvoiced one.  Returns:
+     *   "idle"     nothing locked (silence before the first note)
+     *   "new"      a different pitch was confirmed — the lock now tracks it
+     *   "holding"  the same note continues
+     *   "released" a silence gap ended the note
+     */
+    feed(midi, dt, now) {
+      if (midi == null) {
+        silentMs += dt;
+        if (silentMs >= CAPTURE_GAP_MS && count) { clear(); return "released"; }
+        return count ? "holding" : "idle";
+      }
+      silentMs = 0;
+
+      const c = centre();
+      if (c == null) { sum = midi; count = 1; heldMs = 0; anchor = midi; dropCandidate(); return "new"; }
+
+      if (belongs(midi, c, anchor)) {
+        sum += midi; count += 1; heldMs += dt;
+        dropCandidate();
+        return "holding";
+      }
+
+      // Outside the lock: a candidate for a new note.  It has to persist — and
+      // hold still on its own terms — before the lock moves, which is what
+      // keeps a wobble from becoming a note and a sweep from becoming several.
+      const cc = candCount ? candSum / candCount : null;
+      if (cc == null || !belongs(midi, cc, candAnchor)) {
+        candSum = midi; candCount = 1; candSince = now; candAnchor = midi;
+      } else {
+        candSum += midi; candCount += 1;
+      }
+      if (candSince != null && now - candSince >= CAPTURE_CONFIRM_MS) {
+        // Confirmed.  Carry the candidate's own frames over so the time already
+        // spent on the new note counts towards its hold.
+        heldMs = now - candSince;
+        sum = candSum; count = candCount; anchor = candAnchor;
+        dropCandidate();
+        return "new";
+      }
+      // Not confirmed: treat it as a wobble — the lock survives, but time spent
+      // off it earns no hold credit.  That matters when the excursion is not a
+      // wobble at all but a sweep whose candidate keeps restarting: crediting
+      // those frames would let the stale lock reach its hold time and bank a
+      // pitch the singer had already left.
+      return "holding";
+    },
+  };
+}
+
+/** Median written duration of a bar's pitched notes, in ms — "how long is a
+ *  note in this exercise", used to scale the capture's timing to the tempo.
+ *  Median rather than mean so one long final note doesn't skew a bar of
+ *  eighths. */
+function medianNoteDurationMs(barSteps) {
+  const d = ((barSteps && barSteps.steps) || [])
+    .filter((s) => !s.isRest && s.midi != null)
+    .map((s) => s.durationMs)
+    .sort((a, b) => a - b);
+  return d.length ? d[(d.length - 1) >> 1] : 0;
+}
+
+/**
+ * Score one sung pitch against one reference pitch, on the shared 0-100 note
+ * scale used everywhere in the app.
+ *
+ * `sungMidi` is the *fractional* tracked pitch, so the cents deviation is
+ * real rather than quantised to a semitone.  An octave error is treated
+ * leniently (it is the right pitch class in the wrong register), matching the
+ * bar scorer in practiceScore.js.
+ */
+function noteScoreFor(sungMidi, refMidi) {
+  if (sungMidi == null || refMidi == null) return 0;
+  const diff = sungMidi - refMidi;
+  let score = centsToScore(diff * 100);
+  if (Math.abs(diff) > 2) {
+    // Fold to the nearest octave and score the residual, then discount it —
+    // an exact octave lands on 70, the same as the bar scorer gives.
+    const mod = Math.abs(diff) % 12;
+    const folded = Math.min(mod, 12 - mod);
+    score = Math.max(score, Math.round(0.7 * centsToScore(folded * 100)));
+  }
+  return Math.max(0, Math.min(100, score));
+}
+
+/** One sung/reference chip for the per-note feedback rows. */
+function noteCellHTML(p) {
+  const cls = p.score >= 70 ? "good" : p.score >= 40 ? "ok" : "weak";
+  const sung = p.sung != null ? midiToName(Math.round(p.sung)) : "—";
+  const ref = p.ref != null ? midiToName(p.ref) : "—";
+  return "<span class='sn-cell " + cls + "'>" + sung + "/" + ref + " <b>" + p.score + "</b></span>";
 }
 
 /**
@@ -1487,73 +2012,4 @@ function segmentNotes(frames, startTime) {
   }
   close();
   return groups;
-}
-
-/** Plain-MIDI view of `segmentNotes`, for callers that only need the pitch
- *  numbers (the single-note singing modes). */
-function segmentNotesMidi(frames, startTime) {
-  return segmentNotes(frames, startTime).map((g) => g.midi);
-}
-
-/**
- * Prune a sung-note list down to (at most) the reference note count, keeping
- * the most salient notes so the tracked count aligns with the exercise.
- *
- * A singer "seeking" the right pitch routinely holds an intermediate
- * semitone just long enough to pass the segmenter's length/dominance gates,
- * so the sung list has more notes than the exercise — those extras are
- * almost always shorter and less stably held than the intended notes.
- * Salience here is the held duration (durMs): a genuinely intended note is
- * held; a seeking stab is touched.  We pick the top-N most salient notes and
- * return them in their original time order (the scorer expects a temporal
- * sequence, not a salience-sorted one).
- *
- * When two candidates are similarly held (an intended note and a seeking
- * stab of comparable length), the tie-breaker prefers the note whose pitch
- * is closest to a reference pitch (octave-agnostic) — so the intended note
- * survives and the spurious seeking stab is the one dropped.  `refPitches`
- * (the bar's reference MIDIs) is optional; without it the tie-breaker is
- * skipped.
- *
- * Accepts both the detailed note objects ({ midi, durMs }) produced by
- * `segmentNotes` and plain MIDI numbers (treated as equal weight).  When the
- * sung count is already ≤ the reference count, nothing is removed.
- */
-function pruneSungToReferenceCount(sung, refCount, refPitches) {
-  if (!sung || !sung.length) return sung || [];
-  const n = refCount != null && refCount > 0 ? refCount : 0;
-  if (n <= 0 || sung.length <= n) return sung;
-  // Reference pitches (for the pitch-aware tie-breaker).  Octave-folded so a
-  // note sung an octave off still counts as "near" the exercise.
-  const refs = (refPitches || []).filter((m) => m != null);
-  const pcDist = (midi, r) => {
-    const d = Math.abs((((midi - r) % 12) + 12) % 12);
-    return Math.min(d, 12 - d); // semitones, octave-agnostic
-  };
-  const nearestRefDist = (midi) => {
-    if (!refs.length) return 0;
-    let best = 12;
-    for (const r of refs) { const d = pcDist(midi, r); if (d < best) best = d; }
-    return best; // 0 = exact pitch class, 6 = tritone away
-  };
-  // Attach a salience weight + original index + a pitch-distance tie-breaker.
-  const withMeta = sung.map((s, i) => {
-    const midi = typeof s === "number" ? s : s.midi;
-    const durMs = typeof s === "number" ? 1 : (s.durMs != null && s.durMs > 0 ? s.durMs : 1);
-    return { i, midi, durMs, salience: durMs * durMs, refDist: nearestRefDist(midi), obj: s };
-  });
-  // Keep the N most salient.  When two candidates are similarly held (a common
-  // case: one intended note and one seeking stab of comparable length), the
-  // tie-breaker prefers the note whose pitch is closest to a reference pitch —
-  // i.e. the intended note survives and the seeking stab is the one dropped.
-  withMeta.sort((a, b) =>
-    (b.salience - a.salience) ||
-    (a.refDist - b.refDist) ||
-    (b.durMs - a.durMs) ||
-    (a.i - b.i)
-  );
-  const kept = withMeta.slice(0, n);
-  // Restore original time order for the alignment.
-  kept.sort((a, b) => a.i - b.i);
-  return kept.map((m) => m.obj);
 }
