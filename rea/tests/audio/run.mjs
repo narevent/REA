@@ -26,11 +26,45 @@
  * `profile.mjs`  the voice profile the soundcheck measures — vibrato width and
  *                articulation floor — and what having one does for a singer
  *                whose voice is nothing like the default.
+ * `learner.mjs`  the singer who does not know the note yet: hunting for an
+ *                interval, hesitating, wobbling, getting it wrong.  Every
+ *                other file here sings the exercise correctly; this is the
+ *                case the app exists for, and the one it used to score worst.
+ * `articulation.mjs`  whether the singer *began* a note or the tracker merely
+ *                found them elsewhere — the level cue that tells a slide from
+ *                an attack, with the figures its threshold is set from.
+ * `singlenote.mjs`  chapters 8 and 9, which had no coverage at all until the
+ *                capture they run on called a helper that no longer existed.
+ * `scoring.mjs`  what a sung note is worth at each difficulty — the table is
+ *                printed, so what the settings actually promise can be read
+ *                rather than inferred from the constants.
+ * `voice.mjs`    a voice that is not sure of the note — the singing that broke
+ *                the exercise on a real recording, put back in terms the
+ *                synthesiser can produce: a pitch that wanders further inside
+ *                one note than the tolerance a note is allowed, notes detached
+ *                by gaps too short to be silences, and a tempo half of what
+ *                was written.  Nothing else here sings badly enough to have
+ *                caught any of it.
+ *
+ * `roomtone.mjs`  silence, in a room that is not silent.  The only file that
+ *                drives the *whole* detector — the gate, the voicing machine,
+ *                the median, the smoother — which everything else skips, and
+ *                which is where the worst bug in the singing exercises lived:
+ *                the room's own rumble reported as a held note, answering
+ *                references before the singer had sung anything.
+ *
+ * `REA_DIFFICULTY=medium node rea/tests/audio/run.mjs` runs the whole suite at
+ * another setting.  Segmentation must not depend on it — difficulty moves
+ * scoring and patience, not where a note begins and ends — and running all
+ * three is how that stays true.
  *
  * `measure.mjs` and `strength.mjs` print the figures the onset thresholds are
- * set from — run them if you change those constants.
+ * set from — run them if you change those constants.  `inspect.mjs` is a
+ * diagnostic: it prints the notes the segmenter finds in a phrase, with why
+ * each one began and whether it settled, which is the first thing to look at
+ * when a learner case fails.
  */
-const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs", "./lastnote.mjs", "./profile.mjs"];
+const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs", "./lastnote.mjs", "./profile.mjs", "./learner.mjs", "./articulation.mjs", "./singlenote.mjs", "./scoring.mjs", "./roomtone.mjs", "./voice.mjs"];
 let failed = false;
 for (const m of mods) {
   const before = process.exitCode;

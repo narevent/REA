@@ -1,12 +1,14 @@
 """Tests for user accounts: roles, auth pages, progress tracking and permissions."""
 
+import json
+
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from rea.apps.accounts import progress as progress_calc
-from rea.apps.accounts.models import PracticeSession, Profile, Role
+from rea.apps.accounts.models import Difficulty, PracticeSession, Profile, Role
 from rea.apps.accounts.permissions import is_student, is_teacher
 
 
@@ -217,6 +219,50 @@ class SessionApiTests(TestCase):
         data = self.client.get(reverse("accounts-me")).json()
         self.assertTrue(data["is_teacher"])
         self.assertNotIn("progress", data)
+
+    def test_difficulty_starts_easy_and_is_reported(self):
+        make_user()
+        self.client.login(username="sam", password="practice-pass-123")
+        data = self.client.get(reverse("accounts-me")).json()
+        # The widest setting is the default: a student meeting the exercises
+        # for the first time should not be met by the tightest scoring in it.
+        self.assertEqual(data["difficulty"], Difficulty.EASY)
+
+    def test_difficulty_can_be_changed_and_persists(self):
+        user = make_user()
+        self.client.login(username="sam", password="practice-pass-123")
+        response = self.client.patch(
+            reverse("accounts-me"),
+            data=json.dumps({"difficulty": "hard"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        user.profile.refresh_from_db()
+        self.assertEqual(user.profile.difficulty, Difficulty.HARD)
+        # ...and comes back on the next device the student signs in on.
+        self.assertEqual(
+            self.client.get(reverse("accounts-me")).json()["difficulty"], "hard"
+        )
+
+    def test_difficulty_rejects_anything_else(self):
+        user = make_user()
+        self.client.login(username="sam", password="practice-pass-123")
+        response = self.client.patch(
+            reverse("accounts-me"),
+            data=json.dumps({"difficulty": "impossible"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        user.profile.refresh_from_db()
+        self.assertEqual(user.profile.difficulty, Difficulty.EASY)
+
+    def test_difficulty_needs_a_signed_in_user(self):
+        response = self.client.patch(
+            reverse("accounts-me"),
+            data=json.dumps({"difficulty": "hard"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)
 
 
 class ProgressCalcTests(TestCase):

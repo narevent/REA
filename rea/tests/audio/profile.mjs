@@ -9,8 +9,7 @@
  */
 import { sing, analyse, SR } from "./synth.mjs";
 const JS = "../../apps/rea_frontend/static/rea_frontend/js/";
-globalThis.localStorage = { getItem: () => null, setItem: () => {} };
-globalThis.performance = globalThis.performance || { now: () => 0 };
+import "./env.mjs";
 const pd = await import(JS + "pitchDetector.js");
 const pc = await import(JS + "practiceController.js");
 const sc = await import(JS + "views/soundcheckView.js");
@@ -55,10 +54,10 @@ function firstNoteSurvives(profileCents) {
   const seg = pc.makeNoteSegmenter({ paceMs: 600, vibratoCents: profileCents });
   const notes = [];
   for (const f of frames) {
-    const r = seg.feed({ midi: f.midi, onsetStrength: f.onsetStrength, t: f.t, dt: 16.7 });
+    const r = seg.feed({ midi: f.midi, onsetStrength: f.onsetStrength, onsetAttack: f.onsetAttack, t: f.t, dt: 16.7 });
     if (r.ended) notes.push(Number(r.ended.midi.toFixed(2)));
   }
-  const tail = seg.feed({ midi: null, onsetStrength: 0, t: frames[frames.length - 1].t + 400, dt: 400 });
+  const tail = seg.feed({ midi: null, onsetStrength: 0, onsetAttack: 0, t: frames[frames.length - 1].t + 400, dt: 400 });
   if (tail.ended) notes.push(Number(tail.ended.midi.toFixed(2)));
   return notes;
 }

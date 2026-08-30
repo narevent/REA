@@ -28,6 +28,10 @@ import {
   categoryByUid, firstCategory, pathOf, neighbourCategory,
 } from "./curriculum.js?v=114";
 import { createNav } from "./curriculumNav.js?v=114";
+import {
+  DIFFICULTIES, DIFFICULTY_LABELS, getDifficulty, setDifficulty,
+  adoptAccountDifficulty,
+} from "./difficulty.js?v=114";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -1521,6 +1525,8 @@ const nav = createNav({
   partValue,
   keyOptions,
   keyValue,
+  difficultyOptions: () => DIFFICULTIES.map((d) => ({ value: d, label: DIFFICULTY_LABELS[d] })),
+  difficultyValue: () => getDifficulty(),
   goCategory: (node, part, exercise) => applyCategory(node, part, exercise),
   goPart: (value, exercise) => applyCategory(state.category, value, exercise),
   goExercise: async (i) => {
@@ -1532,6 +1538,14 @@ const nav = createNav({
     await setKey(id);
     const list = exerciseList();
     await openChapter(list[exerciseIndex()].id);
+  },
+  // Changing how much room the exercises give does not reload anything — it
+  // only changes how the next attempt is judged — so the run in progress is
+  // left alone and the chip simply re-renders.
+  goDifficulty: (value) => {
+    setDifficulty(value);
+    renderTopbar();
+    setStatus("Difficulty: " + DIFFICULTY_LABELS[getDifficulty()]);
   },
 });
 /** Build one multi-select dropdown control: a compact pill trigger (label +
@@ -1811,6 +1825,7 @@ function renderTopbar() {
   sessionTopbar.innerHTML =
     '<nav class="path" id="path-bar" aria-label="Curriculum path"></nav>' +
     '<div class="path-key" id="path-key"></div>' +
+    '<div class="path-key path-difficulty" id="path-difficulty"></div>' +
     // Combination categories keep their multi-select panel: they merge many
     // leaves into one lesson, so they are a selection, not a single path.
     (comboOpen ? '<div class="topbar-ctx combo-ctx">' + comboPanelHTML() + '</div>' : "");
@@ -2076,13 +2091,16 @@ viewSession.addEventListener("rea:next-chapter", (e) => {
   setStatus("Loading…");
   // Who (if anyone) is signed in.  Practising does not depend on this, so it
   // is awaited only so the first completed session can be attributed.
-  await loadAccount();
+  const me = await loadAccount();
+  // A difficulty chosen on another device belongs to the person, not to the
+  // browser they chose it in.
+  if (me && me.difficulty) adoptAccountDifficulty(me.difficulty);
   footerHint.textContent = "Use headphones for the best intonation practice.";
   await loadKeys();
 
   // Straight into an exercise — where the student left off, or the method's
-  // first playable one.  Position zero is the Introduction document and the
-  // first Intonation leaf is the Numeric placeholder, so neither opens well.
+  // first playable one.  Position zero is the Introduction document, which
+  // does not open as an exercise.
   // The switcher can only be drawn once we know whether this user is a
   // teacher, since one area is theirs alone.
   renderNav();

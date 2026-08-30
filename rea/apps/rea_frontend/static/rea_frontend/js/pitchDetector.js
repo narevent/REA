@@ -190,6 +190,37 @@ const DEFAULT_NOISE_GATE = 0.0025;
  *  threshold, so a note whose sustain decays near the gate doesn't stutter. */
 const GATE_RELEASE_RATIO = 0.7;
 
+// ---------------------------------------------------------------------------
+// The gate follows the room, not just the setting.
+//
+// A fixed gate cannot be right for every microphone in every room, and the one
+// number that has to serve everybody who has not run the calibration is the
+// default — which sits at about -52 dBFS.  On a recording of a real session
+// the room's own floor was -48 dB, comfortably *above* it, and the consequence
+// was not subtle: the tracker found a periodicity in the rumble at around 65 Hz
+// and reported it, frame after frame, steady enough that the segmenter called
+// it a held note.  Every silence in the exercise became a note at B1, and the
+// references the singer had not reached yet were answered by it before they
+// opened their mouth.  Measured on that recording: ninety-nine per cent of the
+// room-tone frames cleared the fixed gate; none clear this one, and every
+// frame of actual singing still does.
+//
+// So the gate has a second term that watches the input.  `floor` is a leaky
+// minimum — it drops to whatever quiet it hears and creeps back up — and the
+// gate sits a few times above it.  This is not automatic *gain*, which is off
+// for good reason (AGC pumps, and pumping distorts pitch); nothing here
+// touches the signal.  It only decides what counts as silence, and it decides
+// it from what silence in this room actually sounds like.
+//
+// The peak term is the safety catch.  A singer who never stops would let the
+// floor creep up towards their own voice and eventually gate themselves out,
+// so the adaptive term is capped at a fraction of the loudest recent input:
+// however wrong the floor estimate gets, the gate stays below the singing.
+const NOISE_FLOOR_MARGIN = 4;      // how far above the room's floor the gate sits
+const NOISE_FLOOR_RISE_MS = 9000;  // how fast the floor estimate creeps back up
+const NOISE_PEAK_FRACTION = 0.25;  // the adaptive gate never exceeds this much of the peak
+const NOISE_PEAK_FALL_MS = 4000;   // how fast the peak estimate decays
+
 let _inputGain = 1;
 let _noiseGate = DEFAULT_NOISE_GATE;
 try {
@@ -275,6 +306,24 @@ const ONSET_ENV_MIN_DB = 1.5;     // below this the level tells us nothing
 // sustained collapse.  Below this, nothing is starting.
 const ONSET_RELEASE_DB = -4;
 const ONSET_REFRACTORY_MS = 70;   // strength ramps back in over this, rather than being gated off
+// How long the input must actually be quiet before sound returning counts as a
+// new note.
+//
+// "Sound after silence is a note start beyond argument" is true of silence and
+// false of a dip.  A breath in the middle of a held note, an unvoiced
+// consonant, a moment where the level ducks under the gate — each of those put
+// the input below the gate for a tenth of a second, and each was answered with
+// the maximum possible onset strength, which no amount of resistance further
+// down the chain can argue with.  From the singer's side that is a note cut in
+// half: the exercise decided they had moved on because they took a breath.
+//
+// So a dip shorter than this is not silence.  The envelopes are held across it
+// rather than reset, and the refractory ramp is re-armed on the way out, so the
+// transient of the voice coming back does not score either.
+//
+// A real rest, a real detachment, a real new phrase all last longer than this
+// and are unaffected.
+const ONSET_SILENCE_MS = 200;
 const ONSET_HISTORY = 24;         // ~400 ms of flux at 60 fps
 
 function median(sorted) { return sorted[(sorted.length - 1) >> 1]; }
@@ -324,15 +373,33 @@ export function makeOnsetDetector(opts) {
   let envFast = null, envSlow = null;
   let lastOnsetT = -1e9;
   let wasSounding = false;
+  let quietMs = 0;
+  let attackDb = 0;
+  const silenceMs = o.silenceMs != null ? o.silenceMs : ONSET_SILENCE_MS;
 
   const reset = () => {
     hist = []; prevFlux = 0; prevAttack = 0;
     envFast = null; envSlow = null; wasSounding = false;
+    quietMs = 0;
     lastOnsetT = -1e9;
   };
 
   return {
     reset,
+    /**
+     * How much *louder* the input just got, in dB of fast envelope over slow.
+     *
+     * The strength below answers "did a note just start"; this answers "was it
+     * the singer's voice that said so".  They come apart on exactly one thing,
+     * and it is the thing that matters most to a sight-singing exercise: a
+     * pitch on the move sweeps every harmonic across the spectrum and produces
+     * as much flux as a consonant does, so on spectral evidence alone a legato
+     * slide is indistinguishable from an articulation.  Level is not fooled —
+     * a slide happens at a steady level, and a note being started does not.  A
+     * caller that needs to know whether the singer *began* something, rather
+     * than whether something changed, should ask this as well.
+     */
+    attackDb: () => attackDb,
     /**
      * @param {object} f  { flux, db, sounding, t, dt }
      * @returns {number}  strength; 0 for "nothing happened", 1.0 for "this is a
@@ -343,17 +410,38 @@ export function makeOnsetDetector(opts) {
       const dt = f.dt > 0 && f.dt < 500 ? f.dt : 0;
 
       if (!f.sounding) {
+        attackDb = 0;
+        quietMs += dt;
+        // Only a dip so far.  Leave the envelopes where they were: feeding them
+        // the quiet would make the voice's return look like an attack, which is
+        // the very thing being avoided here.
+        if (quietMs < silenceMs) return 0;
         wasSounding = false;
         envFast = null; envSlow = null; prevAttack = 0; prevFlux = 0;
         return 0;
       }
 
-      // Sound after silence is a note start beyond argument.
+      // Sound after real silence is a note start beyond argument.
       if (!wasSounding) {
         wasSounding = true;
+        quietMs = 0;
         envFast = f.db; envSlow = f.db; prevAttack = 0; prevFlux = f.flux || 0;
         lastOnsetT = t;
+        attackDb = ONSET_ENV_STRONG_DB;   // starting to sing is as plain as it gets
         return 2;
+      }
+
+      // The voice coming back from a dip.  Nothing began: re-arm the refractory
+      // ramp so the transient of the sound returning is discounted, and take
+      // this frame's flux as the baseline so the step up from quiet is not read
+      // as a rising edge.
+      if (quietMs > 0) {
+        quietMs = 0;
+        lastOnsetT = t;
+        prevFlux = f.flux || 0;
+        prevAttack = 0;
+        attackDb = 0;
+        return 0;
       }
 
       const db = f.db;
@@ -363,6 +451,7 @@ export function makeOnsetDetector(opts) {
         envSlow += (db - envSlow) * Math.min(1, dt / 180);
       }
       const attack = envFast - envSlow;
+      attackDb = attack;
       const flux = f.flux || 0;
 
       let thresh = fluxFloor;
@@ -828,6 +917,8 @@ export class PitchDetector {
     this._offCount = 0;
     this._belowCount = 0; // consecutive frames under the noise gate
     this._gateOpen = false;
+    this._floor = null;   // leaky-minimum estimate of this room's quiet
+    this._peak = null;    // decaying estimate of the loudest recent input
     this._ema = null;     // smoothed MIDI
     this._last = null;    // last emitted voiced info (held through short dropouts)
   }
@@ -933,8 +1024,38 @@ export class PitchDetector {
     this._emit({
       freq: null, midi: null, midiRound: null, cents: 0, clarity: 0, t,
       rms: rms || 0, db: rmsToDb(rms), gated: !this._gateOpen,
-      onset: this._lastOnset, onsetStrength: this._onsetStrength || 0, flux: this._flux || 0,
+      onset: this._lastOnset, onsetStrength: this._onsetStrength || 0,
+      onsetAttack: this._onset ? this._onset.attackDb() : 0, flux: this._flux || 0,
     });
+  }
+
+  /**
+   * The level below which this frame is silence, for this microphone in this
+   * room right now.
+   *
+   * Never below the configured gate — a calibration the user ran is a floor
+   * under this, not a suggestion — and never above a fraction of the loudest
+   * recent input, so a singer who does not pause cannot be gated out by their
+   * own voice creeping into the floor estimate.
+   */
+  _updateGate(rms, dt) {
+    const step = dt > 0 && dt < 500 ? dt : 0;
+    if (this._floor == null) { this._floor = rms; this._peak = rms; }
+    // Falls at once to any quiet it hears; creeps back up, so a room that gets
+    // noisier is followed rather than fought.
+    if (rms < this._floor) this._floor = rms;
+    else if (step) this._floor *= Math.exp(step / NOISE_FLOOR_RISE_MS);
+    if (rms > this._peak) this._peak = rms;
+    else if (step) this._peak *= Math.exp(-step / NOISE_PEAK_FALL_MS);
+
+    let adaptive = this._floor * NOISE_FLOOR_MARGIN;
+    // The peak is only a cap, and only once it means something.  Before the
+    // singer has made a sound the loudest thing heard is the room itself, and
+    // a cap derived from that would hold the gate down at the very moment the
+    // room is all there is — which is exactly when it needs to be up.
+    const cap = this._peak * NOISE_PEAK_FRACTION;
+    if (cap > getNoiseGate()) adaptive = Math.min(adaptive, cap);
+    return Math.max(getNoiseGate(), adaptive);
   }
 
   /** Turn a raw per-frame MPM result into a stable, de-jittered reading. */
@@ -943,15 +1064,17 @@ export class PitchDetector {
     rms = rms || 0;
     this._flux = this.mpm ? this.mpm.flux : 0;
 
+    const dt = this._lastT == null ? 0 : t - this._lastT;
+    this._lastT = t;
+    const gate = this._updateGate(rms, dt);
+
     // Onset runs on every frame, ahead of the voicing machine and independent
     // of whether this frame yielded a pitch.  A consonant carries no pitch at
     // all, and it is exactly the cue that a new note has begun.
-    const dt = this._lastT == null ? 0 : t - this._lastT;
-    this._lastT = t;
     this._onsetStrength = this._onset.feed({
       flux: this._flux,
       db: rmsToDb(rms),
-      sounding: rms >= getNoiseGate() * GATE_RELEASE_RATIO,
+      sounding: rms >= gate * GATE_RELEASE_RATIO,
       t, dt,
     });
     // `onset` stays for anything that just wants a verdict; the exercise's
@@ -964,8 +1087,8 @@ export class PitchDetector {
     // `offFrames` hold keeps a note from chattering when a sustain dips near
     // the threshold.
     const open = this._gateOpen
-      ? rms >= getNoiseGate() * GATE_RELEASE_RATIO
-      : rms >= getNoiseGate();
+      ? rms >= gate * GATE_RELEASE_RATIO
+      : rms >= gate;
     this._gateOpen = open;
     this._belowCount = open ? 0 : this._belowCount + 1;
     // A below-gate frame may never *start* a note — otherwise clear-but-quiet
@@ -1035,7 +1158,8 @@ export class PitchDetector {
     if (this._last) {
       this._emit(Object.assign({}, this._last, {
         t, rms, db: rmsToDb(rms), gated: false,
-        onset: this._lastOnset, onsetStrength: this._onsetStrength, flux: this._flux,
+        onset: this._lastOnset, onsetStrength: this._onsetStrength,
+        onsetAttack: this._onset.attackDb(), flux: this._flux,
       }));
     }
     else this._emitUnvoiced(t, rms);
