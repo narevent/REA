@@ -142,6 +142,174 @@ try {
 } catch (e) { /* localStorage unavailable */ }
 
 // Every running detector, so a gain change takes effect while the user listens.
+// ---------------------------------------------------------------------------
+// Onset detection
+// ---------------------------------------------------------------------------
+//
+// Why this exists: without it the only way to know a new note has begun is a
+// pitch change or a silence.  Neither covers the case that matters most in a
+// sight-singing drill — the same pitch sung twice ("1 1 3 5").  Re-articulating
+// a note rarely drops the level below the noise gate for long enough to read as
+// silence, so two notes arrived as one long one, the exercise advanced a single
+// slot, and every note after it was scored against the wrong reference.
+//
+// Two independent cues, because a singer can start a note in two different ways
+// and each cue is blind to one of them:
+//
+//   FLUX  Rectified spectral flux (see Mpm._updateFlux): spectral *shape*
+//         change.  Fires on a consonant, a new vowel, a glottal re-attack — the
+//         things that make a new note audible without changing the pitch.  It
+//         is normalised, so its threshold is adaptive: a running median plus a
+//         multiple of the median absolute deviation, which tracks how noisy
+//         this particular voice and room actually are rather than assuming.
+//
+//   ENV   A fast envelope crossing above a slow one, in dB.  This is the pure
+//         level attack — the re-articulation flux is blind to, because a second
+//         note on the same vowel and pitch has nearly the same spectral shape.
+//
+// A refractory period follows every onset.  Both cues can fire on the same
+// attack, and a single attack must produce exactly one note.
+const FLUX_BAND_LO_HZ = 100;    // below this is rumble and handling noise
+const FLUX_BAND_HI_HZ = 5000;   // above this is mostly hiss for a sung voice
+const FLUX_BANDS = 24;          // log-spaced bands across that range
+const FLUX_FFT_SIZE = 1024;     // ~21 ms at 48 kHz: resolves an attack in time
+const ONSET_REFRACTORY_MS = 80; // one attack, one onset
+// Absolute floor for the flux test, set from measurement rather than taste
+// (rea/tests/audio measures these on synthesised singing):
+//
+//   re-articulated note ............ 0.14 - 0.29   (varies: a 20 ms transient
+//                                                   may straddle two frames)
+//   legato slide to another pitch .. 0.19
+//   wide vibrato (80 cents) ........ 0.13  sustained, not a burst
+//   ordinary vibrato (45 cents) .... 0.07  sustained
+//   steady sustain ................. 0.005
+//
+// The floor cannot be set above vibrato, because a badly-aligned articulation
+// reaches only 0.14.  So the floor is set just clear of a *steady* sustain, and
+// vibrato is left to the adaptive half of the threshold: while a voice is
+// wobbling, its own running median and MAD rise with it, and the bar rises too.
+// A burst stands out against its own recent past; a wobble is its own past.
+const ONSET_FLUX_FLOOR = 0.06;
+const ONSET_FLUX_K = 3.2;       // MAD multiples above the running median
+// ...and it must also be a *jump*: at least this many times the largest flux of
+// the last few frames.  A median-plus-MAD test looks backwards over ~400 ms, so
+// a flux that climbs gradually — vibrato developing over the first beat of a
+// held note — stays under the bar for a while and then quietly walks through
+// it, splitting one note into three.  An articulation does not climb; it
+// arrives.  Measuring the jump against the immediate past separates a burst
+// from a swell without needing any lookahead, so it costs no latency.
+const ONSET_FLUX_JUMP = 1.8;
+const ONSET_JUMP_FRAMES = 4;   // ~65 ms of immediate past
+const ONSET_ENV_ATTACK_DB = 3.5;// fast-over-slow envelope rise that counts as an attack
+// Note for anyone tempted to require a simultaneous rise in level here: an
+// articulation's flux spike lands on the *dip* — the consonant or glottal
+// closure — not on the rise that follows it a frame or two later.  Gating flux
+// on a rising envelope was tried and it suppressed every re-articulation while
+// letting vibrato through.  The two cues are independent on purpose; they are
+// combined by OR, not by AND.
+const ONSET_ENV_FAST_MS = 25;
+const ONSET_ENV_SLOW_MS = 180;
+const ONSET_HISTORY = 24;       // ~400 ms of flux at 60 fps
+
+function median(sorted) { return sorted[(sorted.length - 1) >> 1]; }
+
+/**
+ * Decide, frame by frame, when a new note has been articulated.
+ *
+ * Exported for testing: it is pure state over a stream of frames, so it can be
+ * driven from synthesised audio without a microphone.
+ *
+ * @returns {{feed: function, reset: function}} `feed` returns true on the frame
+ *   an onset is detected.
+ */
+export function makeOnsetDetector(opts) {
+  const o = opts || {};
+  const fluxFloor = o.fluxFloor != null ? o.fluxFloor : ONSET_FLUX_FLOOR;
+  const fluxK = o.fluxK != null ? o.fluxK : ONSET_FLUX_K;
+  const envAttackDb = o.envAttackDb != null ? o.envAttackDb : ONSET_ENV_ATTACK_DB;
+  const refractoryMs = o.refractoryMs != null ? o.refractoryMs : ONSET_REFRACTORY_MS;
+
+  let hist = [];
+  let prevFlux = 0;
+  let prevAttack = 0;
+  let envFast = null, envSlow = null;
+  let lastOnsetT = -1e9;
+  let wasSounding = false;
+
+  const reset = () => {
+    hist = []; prevFlux = 0; prevAttack = 0;
+    envFast = null; envSlow = null; wasSounding = false;
+    lastOnsetT = -1e9;
+  };
+
+  return {
+    reset,
+    /**
+     * @param {object} f  { flux, db, sounding, t, dt }
+     *   `sounding` is the gate/voicing verdict: no onset is reported while the
+     *   input is below the noise gate, or the room itself would articulate.
+     */
+    feed(f) {
+      const t = f.t, dt = f.dt > 0 && f.dt < 500 ? f.dt : 0;
+
+      if (!f.sounding) {
+        // Silence resets the envelopes; the next sound starts a note on its own
+        // account (below), so nothing is lost by forgetting the old levels.
+        wasSounding = false;
+        envFast = null; envSlow = null; prevAttack = 0; prevFlux = 0;
+        return false;
+      }
+
+      // Sound after silence is always a note start, whatever the spectrum says.
+      if (!wasSounding) {
+        wasSounding = true;
+        envFast = f.db; envSlow = f.db; prevAttack = 0; prevFlux = f.flux || 0;
+        lastOnsetT = t;
+        return true;
+      }
+
+      const db = f.db;
+      if (envFast == null) { envFast = db; envSlow = db; }
+      else if (dt) {
+        envFast += (db - envFast) * Math.min(1, dt / ONSET_ENV_FAST_MS);
+        envSlow += (db - envSlow) * Math.min(1, dt / ONSET_ENV_SLOW_MS);
+      }
+      const attack = envFast - envSlow;
+
+      const flux = f.flux || 0;
+      // Threshold from the recent past of this voice in this room.  MAD rather
+      // than standard deviation: one loud onset already in the window must not
+      // raise the bar enough to hide the next one.
+      let thresh = fluxFloor;
+      if (hist.length >= 8) {
+        const sorted = hist.slice().sort((a, b) => a - b);
+        const med = median(sorted);
+        const devs = sorted.map((v) => Math.abs(v - med)).sort((a, b) => a - b);
+        thresh = Math.max(fluxFloor, med + fluxK * median(devs));
+      }
+
+      // Rising edge on both cues: an onset is the *start* of a change, and
+      // testing the edge keeps the whole sustain that follows from re-firing.
+      let recentMax = 0;
+      for (let i = Math.max(0, hist.length - ONSET_JUMP_FRAMES); i < hist.length; i++) {
+        if (hist[i] > recentMax) recentMax = hist[i];
+      }
+      const jumped = flux >= ONSET_FLUX_JUMP * recentMax;
+      const fluxOnset = flux >= thresh && flux > prevFlux && jumped;
+      const envOnset = attack >= envAttackDb && attack > prevAttack;
+
+      hist.push(flux);
+      if (hist.length > ONSET_HISTORY) hist.shift();
+      prevFlux = flux;
+      prevAttack = attack;
+
+      if (t - lastOnsetT < refractoryMs) return false;
+      if (fluxOnset || envOnset) { lastOnsetT = t; return true; }
+      return false;
+    },
+  };
+}
+
 const _liveDetectors = new Set();
 
 /** Current app-wide input gain (linear multiplier). */
@@ -242,7 +410,9 @@ function nextPow2(n) { let p = 1; while (p < n) p <<= 1; return p; }
 // MPM core (pure DSP, no audio).  Reused buffers keep the per-frame path
 // allocation-free.  `detect(buf)` returns { freq, clarity } or null.
 // ---------------------------------------------------------------------------
-class Mpm {
+/* Exported for tests: the analysis is pure computation over a sample buffer,
+   so it can be driven from synthesised singing without a microphone. */
+export class Mpm {
   constructor(sampleRate, windowSize, minHz, maxHz, clarityThreshold, peakThreshold) {
     this.sampleRate = sampleRate;
     this.W = windowSize;
@@ -257,6 +427,97 @@ class Mpm {
     this.im = new Float64Array(this.N);
     this.nsdf = new Float64Array(windowSize);
     this.prefix = new Float64Array(windowSize + 1); // prefix sums of squares
+
+    // Onset feature: rectified spectral flux over a voice band, taken from the
+    // forward FFT this class already computes for the autocorrelation, so it
+    // costs one pass over ~400 bins rather than a second transform.
+    // The onset feature gets its own short, Hann-windowed transform rather
+    // than riding on the autocorrelation's.  Two reasons, both decisive:
+    // that window is deliberately un-windowed (windowing biases the NSDF), so
+    // its per-bin magnitudes swing frame to frame purely from where the
+    // waveform's phase lands — leakage far larger than an onset; and a shorter
+    // window resolves an attack in time, which is exactly what an onset is.
+    this.fluxN = FLUX_FFT_SIZE;
+    this.fre = new Float64Array(this.fluxN);
+    this.fim = new Float64Array(this.fluxN);
+    this.hann = new Float64Array(this.fluxN);
+    for (let i = 0; i < this.fluxN; i++) {
+      this.hann[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (this.fluxN - 1));
+    }
+    // Log-spaced bands: a spectral change is a band-shaped thing, and summing
+    // bins into bands averages out what leakage remains.
+    this.fluxEdges = [];
+    {
+      const lo = FLUX_BAND_LO_HZ, hi = FLUX_BAND_HI_HZ;
+      const nyqBin = (this.fluxN >> 1) - 1;
+      for (let b = 0; b <= FLUX_BANDS; b++) {
+        const hz = lo * Math.pow(hi / lo, b / FLUX_BANDS);
+        const bin = Math.min(nyqBin, Math.max(1, Math.round((hz * this.fluxN) / sampleRate)));
+        if (!this.fluxEdges.length || bin > this.fluxEdges[this.fluxEdges.length - 1]) {
+          this.fluxEdges.push(bin);
+        }
+      }
+    }
+    const bands = Math.max(1, this.fluxEdges.length - 1);
+    this.prevBand = new Float64Array(bands);
+    this.curBand = new Float64Array(bands);
+    this.hasPrevMag = false;
+    this.flux = 0;
+  }
+
+  /**
+   * Rectified spectral flux over the voice band, from the current spectrum.
+   *
+   * Both frames are normalised to unit sum before differencing, so this
+   * measures a change in spectral *shape* — a re-articulation, a consonant, a
+   * new vowel — and is deliberately blind to a pure change in level.  That
+   * blindness is the point: it lets one threshold hold for a whisper and a
+   * belt alike, and it leaves loudness to the envelope test, which is a
+   * different question with a different answer.
+   */
+  /**
+   * Rectified, band-wise spectral flux over the most recent FLUX_FFT_SIZE
+   * samples — the onset feature.
+   *
+   * Both frames are normalised to unit sum before differencing, so this
+   * measures a change in spectral *shape*: a consonant, a new vowel, a glottal
+   * re-attack — the things that make a new note audible without changing the
+   * pitch.  It is deliberately blind to a pure change in level, which keeps one
+   * threshold honest for a whisper and a belt alike and leaves loudness to the
+   * envelope test, a different question with a different answer.
+   */
+  _updateFlux(buf) {
+    const n = this.fluxN, re = this.fre, im = this.fim, w = this.hann;
+    const off = Math.max(0, this.W - n);       // the most recent n samples
+    let mean = 0;
+    for (let i = 0; i < n; i++) mean += buf[off + i];
+    mean /= n;
+    for (let i = 0; i < n; i++) { re[i] = (buf[off + i] - mean) * w[i]; im[i] = 0; }
+    fft(re, im, false);
+
+    const edges = this.fluxEdges, prev = this.prevBand, cur = this.curBand;
+    const bands = cur.length;
+    let sum = 0;
+    for (let b = 0; b < bands; b++) {
+      let e = 0;
+      for (let k = edges[b]; k < edges[b + 1]; k++) e += re[k] * re[k] + im[k] * im[k];
+      // Amplitude, not power: power is dominated by the fundamental, while an
+      // onset's evidence is spread thinly across the upper bands.
+      const a = Math.sqrt(e);
+      cur[b] = a;
+      sum += a;
+    }
+    if (!(sum > 0)) { this.flux = 0; this.hasPrevMag = false; return; }
+    const inv = 1 / sum;
+    let flux = 0;
+    for (let b = 0; b < bands; b++) {
+      const v = cur[b] * inv;
+      cur[b] = v;
+      if (this.hasPrevMag) { const d = v - prev[b]; if (d > 0) flux += d; }
+    }
+    this.flux = this.hasPrevMag ? flux : 0;
+    prev.set(cur);
+    this.hasPrevMag = true;
   }
 
   detect(buf) {
@@ -274,7 +535,17 @@ class Mpm {
       rms += s * s;
     }
     rms = Math.sqrt(rms / W);
-    if (rms < 0.004) return null;               // silence
+    if (rms < 0.004) {                          // silence
+      // Drop the reference spectrum too: the first frame after a silence would
+      // otherwise be differenced against whatever was being sung before it,
+      // reporting a large flux for a note that has not started yet.
+      this.flux = 0; this.hasPrevMag = false;
+      return null;
+    }
+    // Onset feature first, and unconditionally: it must still be measured on a
+    // frame whose pitch this method goes on to reject, because a consonant
+    // carries no pitch at all and is precisely the cue we are after.
+    this._updateFlux(buf);
     for (let i = W; i < N; i++) { re[i] = 0; im[i] = 0; }
 
     // Prefix sums of squares (for the NSDF normalisation term m(τ)).
@@ -402,6 +673,9 @@ export class PitchDetector {
   }
 
   _resetSmoothing() {
+    if (!this._onset) this._onset = makeOnsetDetector();
+    this._onset.reset();
+    this._lastOnset = false;
     this._raw = [];       // recent raw (fractional) MIDI estimates, voiced only
     this._voiced = false;
     this._onCount = 0;
@@ -513,6 +787,7 @@ export class PitchDetector {
     this._emit({
       freq: null, midi: null, midiRound: null, cents: 0, clarity: 0, t,
       rms: rms || 0, db: rmsToDb(rms), gated: !this._gateOpen,
+      onset: this._lastOnset, flux: this._flux || 0,
     });
   }
 
@@ -520,6 +795,19 @@ export class PitchDetector {
   _process(res, t, rms) {
     const clarity = res ? res.clarity : 0;
     rms = rms || 0;
+    this._flux = this.mpm ? this.mpm.flux : 0;
+
+    // Onset runs on every frame, ahead of the voicing machine and independent
+    // of whether this frame yielded a pitch.  A consonant carries no pitch at
+    // all, and it is exactly the cue that a new note has begun.
+    const dt = this._lastT == null ? 0 : t - this._lastT;
+    this._lastT = t;
+    this._lastOnset = this._onset.feed({
+      flux: this._flux,
+      db: rmsToDb(rms),
+      sounding: rms >= getNoiseGate() * GATE_RELEASE_RATIO,
+      t, dt,
+    });
 
     // Level gate, ahead of everything else.  NSDF clarity says nothing about
     // loudness, so without this a quiet periodic hum reads as a confidently
@@ -595,7 +883,12 @@ export class PitchDetector {
       };
     }
 
-    if (this._last) this._emit(Object.assign({}, this._last, { t, rms, db: rmsToDb(rms), gated: false }));
+    if (this._last) {
+      this._emit(Object.assign({}, this._last, {
+        t, rms, db: rmsToDb(rms), gated: false,
+        onset: this._lastOnset, flux: this._flux,
+      }));
+    }
     else this._emitUnvoiced(t, rms);
   }
 }

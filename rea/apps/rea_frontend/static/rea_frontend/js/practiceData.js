@@ -11,7 +11,7 @@
  * without depending on the main app state.
  */
 
-import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=76";
+import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=77";
 
 const DEFAULT_TEMPO = 80;
 const OFFSET_GAIN = 12;
