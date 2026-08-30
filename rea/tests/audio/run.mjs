@@ -17,11 +17,14 @@
  *                Sight-singing is not a rhythm test, and nothing here may
  *                depend on the singer matching the playback.
  * `patience.mjs` the ways the capture used to run ahead of the singer.
+ * `pacing.mjs`   *when* the marker moves on, as a fraction of the note being
+ *                sung.  This is what "it feels too fast" means in numbers, and
+ *                it is asserted because it has regressed once already.
  *
  * `measure.mjs` and `strength.mjs` print the figures the onset thresholds are
  * set from — run them if you change those constants.
  */
-const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs"];
+const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs"];
 let failed = false;
 for (const m of mods) {
   const before = process.exitCode;

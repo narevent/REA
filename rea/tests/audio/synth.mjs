@@ -58,6 +58,12 @@ export function sing(notes, opts = {}) {
       else if (artic === "soft") env = Math.min(1, tSec / 0.09);
       else env = Math.min(1, tSec / 0.012);    // fast, consonant-like
       env *= Math.min(1, (1 - u) / 0.06 + 0.35);
+      // Dynamics within the note.  A singer swelling into a long note changes
+      // level by several dB, which is exactly what the envelope half of onset
+      // detection is looking for — so it has to be modelled, or the tests are
+      // quietly agreeing that nobody sings expressively.
+      if (n.swellDb) env *= Math.pow(10, (n.swellDb * Math.sin(Math.PI * u)) / 20);
+      if (n.crescDb) env *= Math.pow(10, (n.crescDb * u) / 20);
       env = Math.min(1, env);
 
       const f = midiToHz(midi);

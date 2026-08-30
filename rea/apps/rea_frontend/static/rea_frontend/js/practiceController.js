@@ -26,16 +26,16 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=78";
-import { PitchDetector, midiToName } from "./pitchDetector.js?v=78";
-import { API } from "./api.js?v=78";
+import { AudioPlayer } from "./audioPlayer.js?v=79";
+import { PitchDetector, midiToName } from "./pitchDetector.js?v=79";
+import { API } from "./api.js?v=79";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt,
-} from "./practiceData.js?v=78";
+} from "./practiceData.js?v=79";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=78";
+} from "./practiceScore.js?v=79";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 const SING_TAIL_MS = 600;  // extra recording tail so the user can finish
@@ -1417,11 +1417,19 @@ export class PracticeController {
         }
       }
 
-      // --- the open note has locked: score it and let the marker lead -------
-      // Locked, not merely stable: a hundred milliseconds of steadiness is a
-      // singer arriving at a note, not a singer having sung one, and scoring
-      // there is what made the marker run ahead of the voice.
-      if (scoredIndex < 0 && note.locked && note.pitch != null) {
+      // --- the note has been sung: commit its slot and let the marker lead --
+      // Locked *and* held.  Locking alone is a singer arriving at a note, not
+      // having sung one; committing there set the marker off at a quarter of
+      // the way in and left the singer chasing it.  At speed the note ends
+      // before this and is committed on the way out instead, which is the
+      // honest moment and still feels immediate.
+      // The first note of a bar is never led: until one has been sung there is
+      // no measure of this singer's pace but the written tempo, and taking the
+      // phrase at half speed would have the first note or two judged against
+      // the score's idea of it — most of a short bar.  It commits when it ends,
+      // and everything after it is led properly.
+      if (scoredIndex < 0 && note.locked && note.pitch != null &&
+          seg.hasPace() && note.heldMs >= seg.commitMs()) {
         scoredIndex = step;
         scoredAt = now - note.heldMs;
         lastRefine = now;
@@ -1829,11 +1837,24 @@ export function makeNoteSegmenter(opts) {
   // --- timings, all derived from the singer's own pace ---------------------
   const attackSkipMs = () => segClamp(0.12 * pace, 45, 120);
   const settleWindowMs = () => segClamp(0.5 * pace, 180, 420);
-  const lockMs = () => segClamp(0.30 * pace, 90, 320);
-  const minSegmentMs = () => segClamp(0.42 * pace, 130, 600);
-  const confirmMs = () => segClamp(0.22 * pace, 80, 220);
-  const gapMs = () => segClamp(0.25 * pace, 90, 220);
-  const minNoteMs = () => segClamp(0.40 * pace, 120, 500);
+  // Locking says the pitch estimate can be trusted.  It is not permission to
+  // move the marker on — see commitMs.
+  const lockMs = () => segClamp(0.32 * pace, 110, 400);
+  const minSegmentMs = () => segClamp(0.50 * pace, 170, 700);
+  const confirmMs = () => segClamp(0.26 * pace, 100, 240);
+  const gapMs = () => segClamp(0.28 * pace, 110, 240);
+  const minNoteMs = () => segClamp(0.45 * pace, 150, 600);
+  // How long a note is held before its slot is committed and the marker leads
+  // on to the next reference.
+  //
+  // Locking is a much earlier moment than this, and tying the marker to it was
+  // a mistake: the pitch is established a third of the way into a held note, so
+  // the marker set off at 25% and the singer spent the rest of every note
+  // chasing something that had already left.  Waiting instead until most of a
+  // note has been sung means that on anything long the marker still leads — the
+  // "got it, next" cue — while at speed the note simply ends first and the
+  // marker moves on then, which is the honest moment anyway.
+  const commitMs = () => segClamp(0.60 * pace, 340, 1000);
 
   /** Vibrato over the tail of the open note: how wide, and how fast. */
   const estimateVibrato = (t) => {
@@ -1898,21 +1919,26 @@ export function makeNoteSegmenter(opts) {
 
   const close = (t) => {
     if (startT == null) return null;
+    const wasLocked = locked;
     const midi = bodyPitch();
     const durMs = (lastVoicedT != null ? lastVoicedT : t) - startT;
     startT = null; samples = []; centre = null; locked = false; rough = null;
     onsetEvidence = 0; departureMs = 0;
     vib = { present: false, halfWidth: 0, rateHz: 0 };
     if (midi == null) return null;
-    // Only a note long enough to be a note teaches us about the singer's pace;
-    // a clipped fragment would drag the estimate down and make everything after
-    // it more trigger-happy.
-    if (durMs >= minNoteMs()) {
+    // Only a note that was long enough *and* actually locked teaches us about
+    // the singer's pace.  Every threshold here scales with pace, so letting a
+    // clipped fragment lower it is a feedback loop: shorter pace, shorter
+    // minimum note, more fragments — and the exercise winds itself up until it
+    // is racing.  A note has to be one before it gets a vote.
+    if (durMs >= minNoteMs() && wasLocked) {
       durations.push(durMs);
-      if (durations.length > 5) durations.shift();
-      if (durations.length >= 2) {
-        pace = segClamp(medianOf(durations), SEG_PACE_MIN_MS, SEG_PACE_MAX_MS);
-      }
+      if (durations.length > 4) durations.shift();
+      // Adopt the very first sung note, rather than waiting for a second.  The
+      // seed is the written tempo, and a singer taking the phrase at half speed
+      // should not have two notes judged against the score's idea of the pace
+      // before the exercise catches up — that is most of a short bar.
+      pace = segClamp(medianOf(durations), SEG_PACE_MIN_MS, SEG_PACE_MAX_MS);
     }
     return { midi, durMs, startT: t - durMs };
   };
@@ -1927,6 +1953,11 @@ export function makeNoteSegmenter(opts) {
     pitch: () => centre,
     paceMs: () => pace,
     minNoteMs,
+    commitMs,
+    /** Has this singer's own pace been measured yet, or is `pace` still the
+     *  written tempo's guess?  Until a note has been sung there is nothing to
+     *  base a lead on. */
+    hasPace: () => durations.length > 0,
     reset: () => {
       startT = null; samples = []; centre = null; locked = false;
       onsetEvidence = 0; departureMs = 0; silentMs = 0; lastVoicedT = null;
