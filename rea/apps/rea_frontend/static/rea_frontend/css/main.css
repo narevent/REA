@@ -117,7 +117,8 @@ body {
 /* The small uppercase label used above every control and stat. */
 .hstat-lbl, .filters-group-lbl, .ctx-lbl, .combo-pop-group-lbl, .card-num, .card-best,
 .tc-num, .g-text small, .cfg-title, .sc-panel-lbl, .sc-setup-lbl, .acc-h2, .acc-stat-lbl,
-.acc-field label, .acc-table th, .topbar-ctx label, .cfg label, .sc-meter-scale, .acc-chip-role {
+.acc-field label, .acc-table th, .topbar-ctx label, .cfg label, .sc-meter-scale, .acc-chip-role,
+.sc-input-head, .sc-input-scale {
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -462,6 +463,29 @@ body {
 .notation.noteheads-only .vf-beam { display: none !important; }
 
 /* Live sung-pitch preview marker (singing exercises). */
+/* Per-note accuracy, left on the stave after singing so a finished run can be
+   read back at a glance: which notes landed and which were off.  These use the
+   palette's status inks: the notehead sits on the notation's white paper, the
+   same ground the rest of the app's status colours are mixed for. */
+.notation .vf-stavenote.vf-acc-good .vf-notehead text,
+.notation .vf-stavenote.vf-acc-good .vf-notehead path { fill: #17754e !important; stroke: #17754e !important; }
+.notation .vf-stavenote.vf-acc-ok .vf-notehead text,
+.notation .vf-stavenote.vf-acc-ok .vf-notehead path { fill: #a76a17 !important; stroke: #a76a17 !important; }
+.notation .vf-stavenote.vf-acc-weak .vf-notehead text,
+.notation .vf-stavenote.vf-acc-weak .vf-notehead path { fill: #b23a2f !important; stroke: #b23a2f !important; }
+/* Never sung — present on the stave but greyed, so a skipped note reads as
+   "no attempt" rather than as a bad one. */
+.notation .vf-stavenote.vf-acc-miss .vf-notehead text,
+.notation .vf-stavenote.vf-acc-miss .vf-notehead path { fill: #9a9da5 !important; stroke: #9a9da5 !important; }
+
+/* The transient playback cursor still wins over a result colour, so following
+   the music never gets lost behind last round's scores.  This has to stay
+   below the accuracy rules: same specificity, so source order decides. */
+.notation .vf-stavenote.vf-note-active .vf-notehead text,
+.notation .vf-stavenote.vf-note-active .vf-notehead path { fill: #a76a17 !important; stroke: none !important; }
+
+/* Live sung-pitch preview marker (singing exercises) — floats over the paper
+   rather than sitting on it, so it keeps its own outline. */
 .notation .vf-sung-note { stroke: #16171a; stroke-width: 1; opacity: 0.9; }
 .notation .vf-sung-good { fill: #17754e; }
 .notation .vf-sung-ok { fill: #a76a17; }
@@ -499,7 +523,7 @@ body {
 .ds-progress { display: flex; flex-direction: column; gap: 10px; }
 .dsp-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
 .dsp-top b { color: var(--ink); font-weight: 600; font-family: var(--font-num); }
-.dsp-track { height: 6px; background: var(--surface-2); border-radius: 999px; overflow: hidden; }
+.dsp-track { height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; }
 .dsp-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 999px; transition: width .4s cubic-bezier(.4,0,.2,1); }
 .dsp-pips { display: flex; gap: 4px; flex-wrap: wrap; }
 .pip { width: 8px; height: 8px; border-radius: 50%; background: var(--surface-3); transition: background .2s; }
@@ -587,7 +611,14 @@ body {
 .sn-cell.good, .mg-cell.good { border-color: color-mix(in srgb, var(--good) 35%, transparent); color: var(--good); background: var(--good-tint); }
 .sn-cell.ok { border-color: var(--border-strong); color: var(--ink-2); }
 .sn-cell.weak, .mg-cell.wrong { border-color: color-mix(in srgb, var(--bad) 35%, transparent); color: var(--bad); background: var(--bad-tint); }
-.mg-cell.pending { border-style: dashed; color: var(--muted-2); background: transparent; }
+.sn-cell.pending, .mg-cell.pending { border-style: dashed; color: var(--muted-2); background: transparent; }
+/* The reference note the singer is on right now, in the live per-note strip.
+   A ring rather than a glow — it has to be findable at a glance mid-phrase. */
+.sn-cell.pending.active {
+  border-style: solid; border-color: var(--accent); color: var(--accent-ink);
+  background: var(--accent-tint);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+}
 
 /* summary */
 .summary {
@@ -710,7 +741,7 @@ body {
 .sc-cents.muted { color: var(--muted); font-weight: 500; }
 
 .sc-meter { margin-bottom: 12px; }
-.sc-meter-track { position: relative; height: 6px; border-radius: 999px; background: var(--surface-2); }
+.sc-meter-track { position: relative; height: 6px; border-radius: 999px; background: var(--surface-3); }
 .sc-meter-zero { position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--border-strong); transform: translateX(-50%); }
 .sc-meter-needle {
   position: absolute; top: 50%; left: 50%; width: 14px; height: 14px; border-radius: 50%;
@@ -724,6 +755,60 @@ body {
 .sc-meter-scale { display: flex; justify-content: space-between; margin-top: 8px; }
 
 .sc-notation { min-height: 180px; margin: 10px 0 16px; }
+
+/* Input-level meter: post-gain signal, the healthy band it should sit in, and
+   a tick where the noise gate is — so mic setup is a glance, not a guess. */
+.sc-input { margin: 4px 0 16px; }
+.sc-input-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  margin-bottom: 8px;
+}
+.sc-input-val { font-family: var(--font-num); font-size: 12px; letter-spacing: 0; text-transform: none; color: var(--muted); }
+.sc-input-val.good { color: var(--good); }
+.sc-input-val.hot { color: var(--bad); }
+.sc-input-val.low { color: var(--muted); }
+.sc-input-track {
+  position: relative; height: 6px; border-radius: 999px; overflow: hidden;
+  background: var(--surface-3);
+}
+/* The band to aim for, and where the gate opens. */
+.sc-input-good { position: absolute; top: 0; bottom: 0; background: color-mix(in srgb, var(--good) 22%, var(--surface-3)); }
+.sc-input-gate { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--muted-2); }
+.sc-input-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+  background: var(--muted-2); border-radius: 999px; transition: width .06s linear, background .2s;
+}
+.sc-input-fill.good { background: var(--good); }
+.sc-input-fill.hot { background: var(--bad); }
+.sc-input-scale { display: flex; justify-content: space-between; margin-top: 8px; }
+
+/* Calibration outcome card — the "it matched, here's what we measured, you're
+   done" signal for Auto gain and Auto-detect.  Sits on its own line under the
+   row's controls (flex-basis 100% breaks it to a new line in .sc-setup-row). */
+.sc-result-slot { flex: 1 1 100%; margin-top: 12px; }
+.sc-result-slot:empty { display: none; }
+/* Hint beside a setup control that the soundcheck normally sets for you. */
+.sc-setup-hint { font-size: 12px; color: var(--muted); }
+.sc-result {
+  display: flex; align-items: flex-start; gap: 10px; margin-top: 4px;
+  padding: 12px 14px; border-radius: var(--r-md);
+  border: 1px solid var(--border); background: var(--surface);
+}
+.sc-result-ico { display: flex; flex: none; margin-top: 1px; color: var(--muted); }
+.sc-result-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sc-result-title { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.sc-result-detail { font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+.sc-result-detail b { color: var(--ink); font-weight: 600; }
+/* A note name is data: tabular figures keep C4/A#3 from shifting about. */
+.sc-result-detail .sc-note-name { font-family: var(--font-num); font-weight: 600; }
+.sc-result.good { border-color: color-mix(in srgb, var(--good) 25%, transparent); background: var(--good-tint); }
+.sc-result.good .sc-result-ico, .sc-result.good .sc-result-title { color: var(--good); }
+.sc-result.warn { border-color: color-mix(in srgb, var(--warn) 25%, transparent); background: var(--warn-tint); }
+.sc-result.warn .sc-result-ico, .sc-result.warn .sc-result-title { color: var(--warn); }
+.sc-result.idle .sc-result-title { color: var(--ink-2); }
+.sc-result.busy { border-color: color-mix(in srgb, var(--accent) 25%, transparent); background: var(--accent-tint); }
+.sc-result.busy .sc-result-ico, .sc-result.busy .sc-result-title { color: var(--accent-ink); }
+.sc-result.busy .sc-result-ico { animation: sc-pulse 1.2s ease-in-out infinite; }
 .sc-live-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 
 /* ------------------------------------------------------------------ footer */
