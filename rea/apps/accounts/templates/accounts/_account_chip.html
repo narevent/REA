@@ -18,7 +18,7 @@ practice app's own template, so the two never disagree about session state.
   </div>
 {% else %}
   <div class="acc-chip">
-    <a class="acc-link-btn" href="{% url 'accounts:login' %}">Sign in</a>
-    <a class="acc-btn acc-btn-sm" href="{% url 'accounts:signup' %}">Sign up</a>
+    {# One entry point: the sign-in page itself offers "Create one". #}
+    <a class="acc-btn acc-btn-sm" href="{% url 'accounts:login' %}">Sign in</a>
   </div>
 {% endif %}

@@ -12,14 +12,14 @@
  *   sc.leave()  - release the microphone when navigating away.
  */
 
-import { NotationRenderer } from "../components/notationRenderer.js?v=64";
+import { NotationRenderer } from "../components/notationRenderer.js?v=67";
 import {
   PitchDetector, midiToName, hzToMidi,
   getVoiceOctaveOffset, setVoiceOctaveOffset,
-} from "../pitchDetector.js?v=64";
+} from "../pitchDetector.js?v=67";
 import {
   SOUND_PRESETS, getCurrentSoundPreset, setSoundPresetById, soundPresetGroups,
-} from "../soundPresets.js?v=64";
+} from "../soundPresets.js?v=67";
 
 // Auto-detect: how long to listen while the user sings the reference, and the
 // minimum number of voiced frames needed before we trust the measurement.

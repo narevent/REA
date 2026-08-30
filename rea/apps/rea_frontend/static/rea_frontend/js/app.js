@@ -11,17 +11,17 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=64";
-import { renderLessonNotation } from "./views/lessonView.js?v=64";
-import { renderScaleNotation } from "./views/scaleView.js?v=64";
-import { SoundcheckView } from "./views/soundcheckView.js?v=64";
-import { AudioPlayer } from "./audioPlayer.js?v=64";
-import { PracticeController } from "./practiceController.js?v=64";
-import { loadAccount, recordServerSession } from "./account.js?v=64";
+import { API } from "./api.js?v=67";
+import { renderLessonNotation } from "./views/lessonView.js?v=67";
+import { renderScaleNotation } from "./views/scaleView.js?v=67";
+import { SoundcheckView } from "./views/soundcheckView.js?v=67";
+import { AudioPlayer } from "./audioPlayer.js?v=67";
+import { PracticeController } from "./practiceController.js?v=67";
+import { loadAccount, recordServerSession } from "./account.js?v=67";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=64";
+} from "./chapters.js?v=67";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -1274,7 +1274,16 @@ function renderMap() {
     const completed = entry && entry.completed;
     const attempts = entry ? entry.attempts : 0;
 
-    const scoreRing = best == null ? '<div class="card-score empty">' + glyph("dot", 18) + '</div>' :
+    // Unplayed chapters show the same ring, empty, rather than a lone dot: the
+    // card then keeps its shape as scores arrive, and the blank ring reads as
+    // "no score yet" instead of as a stray bullet.
+    const scoreRing = best == null ?
+      '<div class="card-score empty">' +
+        '<div class="ring">' +
+          '<svg viewBox="0 0 36 36"><circle class="ring-bg" cx="18" cy="18" r="15.5"></circle></svg>' +
+          '<span class="ring-val">–</span>' +
+        '</div>' +
+      '</div>' :
       '<div class="card-score">' +
         '<div class="ring">' +
           '<svg viewBox="0 0 36 36"><circle class="ring-bg" cx="18" cy="18" r="15.5"></circle>' +
@@ -1283,15 +1292,16 @@ function renderMap() {
         '</div>' +
       '</div>';
 
+    // Completion reads in the footer next to the other tags, not as a floating
+    // badge over the card corner — that corner belongs to the score ring, and
+    // the two collided.  An attempt with no pass needs no marker of its own:
+    // the ring is already showing the score.
     const badge = completed
-      ? '<span class="card-badge done">' + glyph("check", 14) + '</span>'
-      : attempts
-        ? '<span class="card-badge try"></span>'
-        : "";
+      ? '<span class="card-tag done">' + glyph("check", 12) + 'passed</span>'
+      : "";
 
     return '<button class="chapter-card' + (completed ? " completed" : "") + '" ' +
       'style="--cc:' + c.color + '" data-chapter="' + c.id + '">' +
-      badge +
       '<div class="card-head">' +
         '<span class="card-ico">' + glyph(c.glyph, 24) + '</span>' +
         scoreRing +
@@ -1299,6 +1309,7 @@ function renderMap() {
       '<div class="card-title">' + c.title + '</div>' +
       '<div class="card-foot">' +
         '<div class="card-dots">' + dots(c.difficulty) + '</div>' +
+        badge +
         (c.tags.includes("mic") ? '<span class="card-tag mic">mic</span>' : '') +
         (c.tags.includes("timed") ? '<span class="card-tag timed">timed</span>' : '') +
       '</div>' +

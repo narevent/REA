@@ -33,7 +33,9 @@ class ReaLoginView(LoginView):
 class ReaLogoutView(LogoutView):
     """POST-only, which is Django's default and what the header form uses."""
 
-    next_page = reverse_lazy("rea_frontend:index")
+    # The practice app now requires a login, so sending someone there after
+    # signing out would only bounce them to the login page with a ?next.
+    next_page = reverse_lazy("accounts:login")
 
 
 class SignupView(CreateView):

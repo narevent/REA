@@ -12,7 +12,7 @@
  *  - per-note SVG references so the UI can highlight notes during playback.
  */
 
-import { modeChordToVexKey, noteNameToVexflow, parseNoteToken } from "../notation.js?v=64";
+import { modeChordToVexKey, noteNameToVexflow, parseNoteToken } from "../notation.js?v=67";
 
 const PX_PER_WHOLE = 260;
 const STAVE_PADDING = 26;
@@ -158,9 +158,9 @@ export class NotationRenderer {
     renderer.resize(availWidth, totalHeight);
     const context = renderer.getContext();
     context.setFont("Arial", 10);
-    context.setBackgroundFillStyle("#fbfbf7");
-    context.setFillStyle("#1a1a1a");
-    context.setStrokeStyle("#1a1a1a");
+    context.setBackgroundFillStyle("#ffffff");
+    context.setFillStyle("#16171a");
+    context.setStrokeStyle("#16171a");
 
     const effective = {};
     this._initKeySignatureState(effective, keySignature);
@@ -193,7 +193,7 @@ export class NotationRenderer {
           const lx = stave.getX() + (stave.getWidth() / 2) - (bar.label.length * 4);
           const ly = placement[i].y - 6;
           context.setFont("Arial", 11);
-          context.setFillStyle("#1a1a1a");
+          context.setFillStyle("#16171a");
           context.fillText(bar.label, lx, ly);
         } catch (e) { /* label best-effort */ }
       }
