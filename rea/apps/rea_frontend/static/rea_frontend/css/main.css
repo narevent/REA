@@ -132,11 +132,11 @@ body {
    account chip on the right outgrew the brand on the left. */
 .app-header {
   display: grid;
-  /* The middle column takes the slack and the outer two take what they need.
-     Three equal columns worked while there were two tabs and two links; with
-     four curricula the right-hand cluster outgrew its third and spilled back
-     over the switcher. */
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  /* Equal outer columns, so the switcher sits on the page's centre line and
+     not merely in the middle of whatever is left over.  This only holds while
+     the right-hand cluster fits its share — below 1200px the switcher takes a
+     row of its own rather than being pushed off centre. */
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 16px;
   padding: 14px 24px;
@@ -174,7 +174,7 @@ body {
 .app-nav-btn {
   background: none; border: none; color: var(--muted); cursor: pointer;
   font-family: var(--font-sans); font-size: 13px; font-weight: 600;
-  padding: 6px 16px; border-radius: 999px;
+  padding: 6px 13px; border-radius: 999px;
   transition: color .12s, background .12s;
 }
 .app-nav-btn:hover { color: var(--ink); }
@@ -724,7 +724,7 @@ svg.rea-score .vf-beam { display: none !important; }
 }
 
 /* -------------------------------------------------------------- responsive */
-@media (max-width: 1080px) {
+@media (max-width: 1200px) {
   .app-header { grid-template-columns: auto 1fr; gap: 12px; padding: 12px 16px; row-gap: 10px; }
   .app-nav { grid-row: 2; grid-column: 1 / -1; justify-self: stretch; }
   .app-nav-btn { flex: 1; text-align: center; justify-content: center; }
@@ -1125,13 +1125,20 @@ svg.rea-score .vf-beam { display: none !important; }
 /* --- the curriculum sheet -------------------------------------------------- */
 
 .curriculum-btn { display: inline-flex; align-items: center; gap: 7px; }
+/* The shortcut hint is a nicety, and the widest thing standing between the
+   switcher and the page's centre line.  It appears only where there is room
+   for it without pushing the tabs off centre; ⌘K works either way. */
 .curriculum-btn kbd {
+  display: none;
   font: inherit;
   font-size: 10.5px;
   padding: 1px 5px;
   border: 1px solid var(--border);
   border-radius: 4px;
   color: var(--muted-2);
+}
+@media (min-width: 1400px) {
+  .curriculum-btn kbd { display: inline-block; }
 }
 
 .curriculum-scrim {

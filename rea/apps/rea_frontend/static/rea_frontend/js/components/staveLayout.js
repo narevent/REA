@@ -27,7 +27,7 @@
  * editor's inspector names the sounding pitch for the teacher.
  */
 
-import { noteNameToVexflow, parseNoteToken } from "../notation.js?v=112";
+import { noteNameToVexflow, parseNoteToken } from "../notation.js?v=114";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
 export const METRICS = {

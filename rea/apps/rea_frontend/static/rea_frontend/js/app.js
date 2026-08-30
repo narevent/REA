@@ -11,22 +11,22 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=112";
-import { renderLessonNotation } from "./views/lessonView.js?v=112";
-import { renderScaleNotation } from "./views/scaleView.js?v=112";
-import { SoundcheckView } from "./views/soundcheckView.js?v=112";
-import { AudioPlayer } from "./audioPlayer.js?v=112";
-import { PracticeController } from "./practiceController.js?v=112";
-import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=112";
+import { API } from "./api.js?v=114";
+import { renderLessonNotation } from "./views/lessonView.js?v=114";
+import { renderScaleNotation } from "./views/scaleView.js?v=114";
+import { SoundcheckView } from "./views/soundcheckView.js?v=114";
+import { AudioPlayer } from "./audioPlayer.js?v=114";
+import { PracticeController } from "./practiceController.js?v=114";
+import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=114";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=112";
+} from "./chapters.js?v=114";
 import {
   AREAS, AREA_BY_ID, contextFor, kindOf, defaultCategory, categoryByUid,
   firstCategory, pathOf, neighbourCategory,
-} from "./curriculum.js?v=112";
-import { createNav } from "./curriculumNav.js?v=112";
+} from "./curriculum.js?v=114";
+import { createNav } from "./curriculumNav.js?v=114";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -1274,10 +1274,16 @@ function setPolyPart(value) {
 function renderHeader() {
   const p = state.progress;
   const done = completedCount(p);
+  // "n/10 chapters" counted the ten exercise types across the whole app, which
+  // the curriculum made misleading: those ten repeat in every category, so
+  // passing Listening once read as a tenth of the method done forever.  XP and
+  // the streak went with it — the run's own gauge and the profile dashboard
+  // are where progress is answered now, both of them per-session and honest.
   headerStats.innerHTML =
-    '<div class="hstat"><span class="hstat-num">' + done + "/" + CHAPTERS.length + '</span><span class="hstat-lbl">chapters</span></div>' +
-    '<div class="hstat"><span class="hstat-num">' + p.xp + '</span><span class="hstat-lbl">XP</span></div>' +
-    (p.streak >= 2 ? '<div class="hstat streak"><span class="hstat-ico">' + glyph("flame", 16) + '</span><span class="hstat-num">' + p.streak + '</span><span class="hstat-lbl">streak</span></div>' : "");
+    p.streak >= 2
+      ? '<div class="hstat streak"><span class="hstat-ico">' + glyph("flame", 16) +
+        '</span><span class="hstat-num">' + p.streak + '</span><span class="hstat-lbl">streak</span></div>'
+      : "";
 }
 
 // ---------------------------------------------------------------------------

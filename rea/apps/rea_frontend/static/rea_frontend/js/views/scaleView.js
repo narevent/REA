@@ -1,4 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=112";
+import { NotationRenderer } from "../components/notationRenderer.js?v=114";
 
 let renderer = null;
 
