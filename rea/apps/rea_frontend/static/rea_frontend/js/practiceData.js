@@ -103,8 +103,11 @@ export function buildBarSteps(item) {
  * from `note_name`.  Falls back to full noteNameToMidi resolution (used for
  * key models, which carry a key_signature but no per-event pitch_class in the
  * rendered UI - though the API does include it).  Returns null for rests.
+ *
+ * Exported because the numeric view needs the same answer for its own note
+ * chips: the pitch a degree stands for has to be the pitch the player sounds.
  */
-function midiFromEvent(ev, ks) {
+export function midiFromEvent(ev, ks) {
   const pc = ev.pitch_class;
   if (pc != null && pc >= 0 && pc <= 11) {
     // octave from the note token (bare letter => octave index 0 -> MIDI 48/C3).

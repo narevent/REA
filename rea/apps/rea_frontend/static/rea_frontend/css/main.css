@@ -378,6 +378,101 @@ svg.rea-score .vf-beam { display: none !important; }
 .notation .vf-sung-ok { fill: #a76a17; }
 .notation .vf-sung-off { fill: #b23a2f; }
 
+/* ==========================================================================
+   The numeric display
+   --------------------------------------------------------------------------
+   The same lesson the stave shows, read as scale degrees.  A bar is a button
+   holding its notes' numbers, so everything the stave answers to — click a
+   bar, follow the note in play, read last run's accuracy off the score — is
+   answered here in the same places, by the same states.
+
+   It is drawn on the notation's white paper, so it uses the same inks: the
+   stave's #16171a and the status colours mixed for that ground.
+   ========================================================================== */
+
+.num-score { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start; }
+
+/* A bar.  Flat, hairline, paper — a card only insofar as it is clickable. */
+.num-bar {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px;
+  /* The bottom padding is deliberately deep: the sung-pitch reading hangs
+     under the note it belongs to, and reserving its room in every bar keeps
+     the score from reflowing the moment a singer opens their mouth. */
+  padding: 10px 12px 24px; margin: 0; cursor: pointer; text-align: left;
+  background: #fff; border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  font: inherit; color: #16171a;
+  transition: background .12s, border-color .12s;
+}
+.num-bar:hover { background: #f2f3fb; border-color: var(--accent); }
+.num-bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The bar's number, and its harmonic label where the source carries one. */
+.num-bar-no {
+  display: flex; align-items: baseline; gap: 6px;
+  font-family: var(--font-num); font-size: 11px; font-weight: 600;
+  letter-spacing: .06em; color: var(--muted-2); font-variant-numeric: tabular-nums;
+}
+.num-bar-label { font-size: 11px; letter-spacing: 0; color: var(--muted); }
+
+.num-row { display: flex; align-items: center; gap: 6px; }
+
+/* A note: its degree, in a slot as wide as the note is long, so the bar keeps
+   its rhythm on the page even with the notation gone. */
+.num-note {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: calc(30px * var(--num-w, 1)); height: 38px; padding: 0 4px;
+  border-radius: var(--r-sm); background: var(--surface-2);
+  transition: background .1s, color .1s;
+}
+.num-deg {
+  font-family: var(--font-num); font-size: 19px; font-weight: 600;
+  font-variant-numeric: tabular-nums; color: #16171a;
+}
+.num-note.is-rest { background: transparent; min-width: 18px; }
+.num-note.is-rest .num-deg { color: var(--muted-2); font-weight: 400; }
+
+/* The bar in play, and the bar to sing — the numeric twins of the stave's
+   active noteheads and its dashed outline. */
+.num-note.is-bar-active .num-deg { color: var(--accent); }
+.num-bar.is-sing {
+  background: #fdf3e3; border-color: #a76a17;
+  box-shadow: inset 0 0 0 1px #a76a17;
+}
+
+/* Hidden notes (the guessing chapters): the slots stay, the numbers go — the
+   same bargain the stave strikes when it keeps stems and drops noteheads. */
+.notation.hidden-notes .num-deg { color: transparent !important; }
+.notation.hidden-notes .num-note.is-rest { opacity: .4; }
+
+/* Per-note accuracy, left on the score after singing so a finished run can be
+   read back at a glance.  Same thresholds, same inks as the stave. */
+.num-note.acc-good .num-deg { color: #17754e; }
+.num-note.acc-ok   .num-deg { color: #a76a17; }
+.num-note.acc-weak .num-deg { color: #b23a2f; }
+/* Never sung — present but greyed, so a skipped note reads as "no attempt". */
+.num-note.acc-miss .num-deg { color: #9a9da5; }
+
+/* The playback cursor wins over a result colour, so following the music never
+   gets lost behind last round's scores.  Below the accuracy rules on purpose:
+   same specificity, source order decides. */
+.num-note.is-playing { background: #fbf1e2; }
+.num-note.is-playing .num-deg { color: #a76a17 !important; }
+
+/* The live sung-pitch reading.  The stave floats a notehead at the height it
+   hears; there is no height here, so the same fact is given as a needle over
+   the degree being sung: which way off, and by how much. */
+.num-sung {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  top: calc(100% + 3px); white-space: nowrap;
+  font-family: var(--font-num); font-size: 11px; font-weight: 600;
+  font-variant-numeric: tabular-nums; letter-spacing: .02em;
+  padding: 1px 5px; border-radius: 999px; color: #fff;
+}
+.num-sung-good { background: #17754e; }
+.num-sung-ok   { background: #a76a17; }
+.num-sung-off  { background: #b23a2f; }
+
 /* info / deck container */
 .info { padding: 16px 24px 12px; max-width: 1100px; width: 100%; margin: 0 auto; }
 
@@ -736,6 +831,13 @@ svg.rea-score .vf-beam { display: none !important; }
   .topbar-ctx { flex-basis: 100%; }
   .session-stage, .info { padding-left: 16px; padding-right: 16px; }
   .notation { padding: 16px; }
+  /* The numeric bars wrap on their own; on a phone they simply need less air
+     around each number so a bar still fits across the screen. */
+  .num-score { gap: 8px; }
+  .num-bar { padding: 8px 9px 22px; }
+  .num-row { gap: 4px; }
+  .num-note { min-width: calc(26px * var(--num-w, 1)); height: 34px; }
+  .num-deg { font-size: 17px; }
 }
 
 /* The practice figures are a nicety; on a phone the header's job is the brand,

@@ -16,7 +16,7 @@
  *            lesson set, generated at runtime (they differ per category, so
  *            they are read from the loaded lessons rather than hard-coded)
  *   kind     "doc"     → an HTML document page, no exercises
- *            "numeric" → the numeric (scale-degree) display, not a staff
+ *            "numeric" → the same lesson drawn as scale degrees, not a staff
  *            "combo"   → a combinations panel, not a single lesson
  *            omitted   → an ordinary score category
  *
@@ -70,8 +70,9 @@ function relMonoFormula(name, keyMode) {
     ctx: { keyMode },
     children: [
       {
-        // Numeric shows scale degrees rather than a staff.  Placeholder for
-        // now — it is a different view, not a different lesson set.
+        // Numeric shows the same lessons the Notal branch does, drawn as
+        // scale degrees rather than on a staff — a different view of the
+        // material, not a different lesson set.
         name: "Numeric",
         children: [
           leaf("Octave", { formula: "Octave", variant: REL_MONO_VARIANTS.diatonic }, "numeric"),
@@ -411,9 +412,13 @@ export function kindOf(node) {
   return "score";
 }
 
-/** Only a score category runs the ten exercises; the rest are single views. */
+/** Which categories run the ten exercises.  A numeric category counts: it is
+ *  the same lesson as its Notal twin, read as scale degrees rather than as a
+ *  staff, so it practises exactly the same way.  Only the document pages are
+ *  a single view. */
 export function isPractisable(node) {
-  return kindOf(node) === "score" || kindOf(node) === "combo";
+  const k = kindOf(node);
+  return k === "score" || k === "combo" || k === "numeric";
 }
 
 /** Where an area opens: its first category that actually plays, else its
