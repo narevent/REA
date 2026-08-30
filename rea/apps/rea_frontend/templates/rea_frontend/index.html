@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=80" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=83" />
 </head>
 <body>
   <header class="app-header">
@@ -20,6 +20,11 @@
     </button>
     <nav class="app-nav" id="app-nav"></nav>
     <div class="header-right">
+      {% comment %}Teachers reach their editor from wherever they are; the
+      practice nav itself is built in JS and only lists practice areas.{% endcomment %}
+      {% if user.profile.is_teacher or user.is_staff %}
+        <a class="app-nav-btn" href="{% url 'rea_frontend:editor' %}">Editor</a>
+      {% endif %}
       <div class="header-stats" id="header-stats"></div>
       {% include "accounts/_account_chip.html" %}
     </div>
@@ -49,7 +54,7 @@
     <span class="footer-hint" id="footer-hint"></span>
   </footer>
 
-  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=80"></script>
-  <script type="module" src="{% static 'rea_frontend/js/app.js' %}?v=80"></script>
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=83"></script>
+  <script type="module" src="{% static 'rea_frontend/js/app.js' %}?v=83"></script>
 </body>
 </html>

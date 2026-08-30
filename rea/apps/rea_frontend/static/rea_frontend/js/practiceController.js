@@ -26,18 +26,18 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=80";
+import { AudioPlayer } from "./audioPlayer.js?v=83";
 import {
   PitchDetector, midiToName, getVoiceVibratoCents, getVoiceOnsetFloor,
-} from "./pitchDetector.js?v=80";
-import { API } from "./api.js?v=80";
+} from "./pitchDetector.js?v=83";
+import { API } from "./api.js?v=83";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt,
-} from "./practiceData.js?v=80";
+} from "./practiceData.js?v=83";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=80";
+} from "./practiceScore.js?v=83";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 const SING_TAIL_MS = 600;  // extra recording tail so the user can finish
@@ -219,9 +219,6 @@ export class PracticeController {
     this._renderDeck();
     this._renderScoreVisual();
     this._showNotes();
-    // All practice exercises focus on intonation: show noteheads only
-    // (stems/beams/flags hidden), while playback keeps the real rhythm.
-    this._setNoteheadsOnly(true);
     this._setLegend(this.chapter.instruct);
   }
 
@@ -545,13 +542,6 @@ export class PracticeController {
 
   _showNotes() { if (this.stage) this.stage.classList.remove("hidden-notes"); }
   _hideNotes() { if (this.stage) this.stage.classList.add("hidden-notes"); }
-
-  /** Show only noteheads (hide stems/beams/flags) — intonation focus.
-   *  Playback rhythm is unaffected. */
-  _setNoteheadsOnly(on) {
-    if (!this.stage) return;
-    this.stage.classList.toggle("noteheads-only", !!on);
-  }
 
   // ---- session -------------------------------------------------------------
 

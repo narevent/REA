@@ -1,5 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=80";
-import { modeChordToVexKey } from "../notation.js?v=80";
+import { NotationRenderer } from "../components/notationRenderer.js?v=83";
 
 let renderer = null;
 
@@ -60,8 +59,6 @@ export function renderScaleNotation(keyModel, onBarClick) {
       horizontal_offset_ms: e.horizontal_offset_ms,
     })),
   }));
-  const bars0 = keyModel.bars || [];
-  const vexKey = modeChordToVexKey(bars0[0] && bars0[0].music_mode_chord);
-  r.render(bars, { title: keyModel.name || "", keySignature: vexKey, onBarClick });
+  r.render(bars, { title: keyModel.name || "", onBarClick });
   return r;
 }
