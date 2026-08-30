@@ -19,8 +19,8 @@
  * pixel-identical to the practice view.
  */
 
-import { METRICS, drawScore, resolveVexFlow } from "../components/staveLayout.js?v=107";
-import { LETTERS, buildToken, splitToken } from "./scoreDoc.js?v=107";
+import { METRICS, drawScore, resolveVexFlow } from "../components/staveLayout.js?v=112";
+import { LETTERS, buildToken, splitToken } from "./scoreDoc.js?v=112";
 
 /** Vertical room added to each row when annotation lanes are showing. */
 const LANE_SPACE = 58;

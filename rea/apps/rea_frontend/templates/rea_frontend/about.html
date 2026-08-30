@@ -1,0 +1,58 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>About — REA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=112" />
+</head>
+<body>
+  <header class="app-header">
+    <a id="brand" class="brand" href="{% url 'rea_frontend:index' %}" title="Back to practice">
+      <span class="brand-mark"><svg width="22" height="26" viewBox="0 0 22 26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2v10a5 5 0 0 0 10 0V2"/><path d="M11 17v7"/><path d="M8 24h6"/></svg></span>
+      <span class="brand-text">
+        <span class="brand-name">REA</span>
+        <span class="brand-sub">About</span>
+      </span>
+    </a>
+    <nav class="app-nav"></nav>
+    <div class="header-right">
+      <a class="app-nav-btn" href="{% url 'rea_frontend:index' %}">Practice</a>
+      {% include "accounts/_account_chip.html" %}
+    </div>
+  </header>
+
+  <main id="app" class="acc-main">
+    <div class="about-wrap">
+      <h1 class="about-title">About REA</h1>
+      <p class="about-lede">
+        The three written chapters of the method. They are prose rather than
+        exercises, so they sit here rather than in the curriculum, where every
+        step is something you sing or hear.
+      </p>
+
+      {% comment %}Each chapter was a PDF in the original app; they become
+      HTML here. The sections are placeholders until the text is brought
+      across, so the page's shape is right and only its content is missing.
+      {% endcomment %}
+      <section class="about-part" id="introduction">
+        <h2>Introduction</h2>
+        <p class="about-todo">Not written up yet — this chapter still lives in the original PDF.</p>
+      </section>
+
+      <section class="about-part" id="method">
+        <h2>The REA method</h2>
+        <p class="about-todo">Not written up yet — this chapter still lives in the original PDF.</p>
+      </section>
+
+      <section class="about-part" id="theory">
+        <h2>Theory</h2>
+        <p class="about-todo">Not written up yet — this chapter still lives in the original PDF.</p>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

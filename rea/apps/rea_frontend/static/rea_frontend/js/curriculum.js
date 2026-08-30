@@ -237,93 +237,148 @@ function absChordsNode(name, category, qualities, inversions, comboCategory) {
 // The method
 // ---------------------------------------------------------------------------
 
-export const TREE = [
-  { name: "Introduction", kind: "doc" },
-  { name: "REA Method", kind: "doc" },
-  { name: "Theory", kind: "doc" },
+/** Rhythm and the dictation chapters have no lesson library behind them yet,
+ *  so their leaves are typed `todo`: they hold a real place in the method's
+ *  order and say plainly that they are not built, rather than being hidden
+ *  and quietly changing what "next" means once they arrive. */
+function soon(name) { return { name, kind: "todo" }; }
+
+const INTONATION = [
   {
-    name: "Intonation",
+    name: "Relative",
+    ctx: { system: "relative" },
     children: [
       {
-        name: "Relative",
-        ctx: { system: "relative" },
+        name: "Monophony",
+        ctx: { texture: "mono" },
         children: [
-          {
-            name: "Monophony",
-            ctx: { texture: "mono" },
-            children: [
-              relMonoFormula("Major Formula", "Major"),
-              relMonoFormula("Minor Formula", "Minor"),
-            ],
-          },
-          {
-            name: "Polyphony",
-            ctx: { texture: "poly" },
-            children: [
-              relTTFormula("Major TT Formula", "Major"),
-              relTTFormula("Minor TT Formula", "Minor"),
-            ],
-          },
+          relMonoFormula("Major Formula", "Major"),
+          relMonoFormula("Minor Formula", "Minor"),
         ],
       },
       {
-        name: "Absolute",
-        ctx: { system: "absolute" },
+        name: "Polyphony",
+        ctx: { texture: "poly" },
         children: [
-          {
-            name: "Monophony",
-            ctx: { texture: "mono" },
-            children: [
-              absMonoFormula("Basic Formula", "Formula"),
-              absMonoFormula("Inverse Formula", "FormulaInverse"),
-            ],
-          },
-          {
-            name: "Polyphony",
-            ctx: { texture: "poly" },
-            children: [
-              absIntervalsNode(),
-              absChordsNode(
-                "Absolute triads", "ChordsThirds",
-                TRIAD_QUALITIES.map((q) => [q, q]), TRIAD_INVERSIONS, "ComboTriads"
-              ),
-              absChordsNode(
-                "Absolute sevenths", "ChordsSevenths",
-                SEVENTH_QUALITIES, SEVENTH_INVERSIONS, "ComboSevenths"
-              ),
-            ],
-          },
+          relTTFormula("Major TT Formula", "Major"),
+          relTTFormula("Minor TT Formula", "Minor"),
         ],
       },
     ],
   },
-  { name: "Rhythm", kind: "doc" },
-  { name: "Dictates", kind: "doc" },
-  { name: "Dictate preparations", kind: "doc" },
+  {
+    name: "Absolute",
+    ctx: { system: "absolute" },
+    children: [
+      {
+        name: "Monophony",
+        ctx: { texture: "mono" },
+        children: [
+          absMonoFormula("Basic Formula", "Formula"),
+          absMonoFormula("Inverse Formula", "FormulaInverse"),
+        ],
+      },
+      {
+        name: "Polyphony",
+        ctx: { texture: "poly" },
+        children: [
+          absIntervalsNode(),
+          absChordsNode(
+            "Absolute triads", "ChordsThirds",
+            TRIAD_QUALITIES.map((q) => [q, q]), TRIAD_INVERSIONS, "ComboTriads"
+          ),
+          absChordsNode(
+            "Absolute sevenths", "ChordsSevenths",
+            SEVENTH_QUALITIES, SEVENTH_INVERSIONS, "ComboSevenths"
+          ),
+        ],
+      },
+    ],
+  },
 ];
+
+const RHYTHM = [soon("Exercises")];
+
+const DICTATES = [
+  {
+    name: "From literature",
+    children: [
+      { name: "Diatonic", children: [soon("Dur"), soon("Mol")] },
+      { name: "Alterations", children: [soon("Dur"), soon("Mol")] },
+      { name: "Modulations", children: [soon("Dur"), soon("Mol")] },
+      soon("Modes"),
+      soon("Contemporary music"),
+    ],
+  },
+  {
+    name: "Exercises and etudes",
+    children: [
+      {
+        name: "Melodic",
+        children: [
+          soon("Intervals"),
+          soon("Fifth chords and turns"),
+          soon("Seventh chords and turns"),
+        ],
+      },
+      {
+        name: "Rhythmic",
+        children: [
+          soon("Binary measures"),
+          soon("Ternary measures"),
+          soon("Complex measures"),
+        ],
+      },
+    ],
+  },
+];
+
+const PREPARATIONS = [soon("Exercises")];
+
+/**
+ * The practice areas.  Each is a curriculum of its own — its own tree, its own
+ * ordering, its own Previous/Next — so walking to the end of Intonation does
+ * not spill into Rhythm.
+ *
+ * `teacherOnly` areas are never offered to a student; the app filters them out
+ * of the area switcher and refuses to open them.
+ */
+export const AREAS = [
+  { id: "intonation", label: "Intonation", tree: INTONATION },
+  { id: "rhythm", label: "Rhythm", tree: RHYTHM },
+  { id: "dictates", label: "Dictates", tree: DICTATES },
+  { id: "preparations", label: "Dictate preparations", tree: PREPARATIONS, teacherOnly: true },
+];
+
+export const AREA_BY_ID = {};
+AREAS.forEach((a) => { AREA_BY_ID[a.id] = a; });
 
 // ---------------------------------------------------------------------------
 // Linking — parent pointers, ids, and the ordered list of categories
 // ---------------------------------------------------------------------------
 
-/** Every category (practisable leaf) in curriculum order. */
-export const CATEGORIES = [];
-
+/**
+ * Link each area's tree independently: parent pointers, unique ids, and that
+ * area's own ordered list of categories.  Ordering is per area, so Next at the
+ * end of Intonation stops there rather than spilling into Rhythm.
+ */
 let _uid = 0;
-(function link(nodes, parent) {
-  nodes.forEach((node) => {
-    node.parent = parent;
-    node.siblings = nodes;
-    node.uid = "c" + _uid++;
-    if (node.children && node.children.length) link(node.children, node);
-    // `parts` nodes get their children at runtime, but they are themselves
-    // the thing you navigate to — the part level is chosen once loaded.
-    if (!node.children || !node.children.length) {
-      node.pos = CATEGORIES.length;
-      CATEGORIES.push(node);
-    }
-  });
-})(TREE, null);
+AREAS.forEach((area) => {
+  area.categories = [];
+  (function link(nodes, parent) {
+    nodes.forEach((node) => {
+      node.parent = parent;
+      node.siblings = nodes;
+      node.area = area;
+      node.uid = "c" + _uid++;
+      if (node.children && node.children.length) link(node.children, node);
+      else {
+        node.pos = area.categories.length;
+        area.categories.push(node);
+      }
+    });
+  })(area.tree, null);
+});
 
 /** Root → node, inclusive. */
 export function pathOf(node) {
@@ -349,26 +404,38 @@ export function contextFor(node) {
   return ctx;
 }
 
-/** "doc" | "numeric" | "combo" | "score" — which view a category renders. */
+/** "todo" | "numeric" | "combo" | "score" — which view a category renders. */
 export function kindOf(node) {
   if (node.kind) return node.kind;
   for (const n of pathOf(node)) if (n.kind) return n.kind;
   return "score";
 }
 
-/** True when this category sits under Intonation (i.e. is a real lesson). */
-export function isIntonation(node) {
-  return pathOf(node).some((n) => n.name === "Intonation");
+/** Only a score category runs the ten exercises; the rest are single views. */
+export function isPractisable(node) {
+  return kindOf(node) === "score" || kindOf(node) === "combo";
 }
 
-/** The first category that actually plays a score — the app's landing spot. */
-export function defaultCategory() {
-  return CATEGORIES.find((c) => kindOf(c) === "score") || CATEGORIES[0];
+/** Where an area opens: its first category that actually plays, else its
+ *  first category at all (an area that is all placeholders opens on one). */
+export function defaultCategory(area) {
+  const list = (area && area.categories) || AREAS[0].categories;
+  return list.find((c) => kindOf(c) === "score") || list[0];
 }
 
-/** Look a category up by its uid (used to restore the last position). */
+/** Look a category up by its uid, across every area (used to restore the
+ *  last position, which may have been in a different area). */
 export function categoryByUid(uid) {
-  return CATEGORIES.find((c) => c.uid === uid) || null;
+  for (const area of AREAS) {
+    const found = area.categories.find((c) => c.uid === uid);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** The category `dir` steps away within the same area, or null at its edge. */
+export function neighbourCategory(node, dir) {
+  return node.area.categories[node.pos + dir] || null;
 }
 
 /** A short label for a category: its own name, prefixed by its parent when

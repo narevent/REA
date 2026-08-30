@@ -11,22 +11,22 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=107";
-import { renderLessonNotation } from "./views/lessonView.js?v=107";
-import { renderScaleNotation } from "./views/scaleView.js?v=107";
-import { SoundcheckView } from "./views/soundcheckView.js?v=107";
-import { AudioPlayer } from "./audioPlayer.js?v=107";
-import { PracticeController } from "./practiceController.js?v=107";
-import { loadAccount, recordServerSession } from "./account.js?v=107";
+import { API } from "./api.js?v=112";
+import { renderLessonNotation } from "./views/lessonView.js?v=112";
+import { renderScaleNotation } from "./views/scaleView.js?v=112";
+import { SoundcheckView } from "./views/soundcheckView.js?v=112";
+import { AudioPlayer } from "./audioPlayer.js?v=112";
+import { PracticeController } from "./practiceController.js?v=112";
+import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=112";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=107";
+} from "./chapters.js?v=112";
 import {
-  CATEGORIES, contextFor, kindOf, defaultCategory, categoryByUid,
-  firstCategory, pathOf,
-} from "./curriculum.js?v=107";
-import { createNav } from "./curriculumNav.js?v=107";
+  AREAS, AREA_BY_ID, contextFor, kindOf, defaultCategory, categoryByUid,
+  firstCategory, pathOf, neighbourCategory,
+} from "./curriculum.js?v=112";
+import { createNav } from "./curriculumNav.js?v=112";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -37,13 +37,18 @@ const headerStats = document.getElementById("header-stats");
 const appNav = document.getElementById("app-nav");
 const brand = document.getElementById("brand");
 
-// Top-level product areas.  Today only Intonation (the chapter map + session
-// views) and Soundcheck (mic/pitch-tracker calibration) exist; Rhythm is
-// planned as a future sibling here.
-const APPS = [
-  { id: "intonation", label: "Intonation" },
-  { id: "soundcheck", label: "Soundcheck" },
-];
+// Top-level areas: each curriculum from curriculum.js, plus Soundcheck, which
+// is a calibration screen rather than a curriculum.  A teacher-only area is
+// offered only once /api/accounts/me/ says the signed-in user is one.
+const SOUNDCHECK = { id: "soundcheck", label: "Soundcheck" };
+
+function visibleApps() {
+  const teacher = !!(currentAccount() || {}).is_teacher;
+  return AREAS
+    .filter((a) => !a.teacherOnly || teacher)
+    .map((a) => ({ id: a.id, label: a.label }))
+    .concat([SOUNDCHECK]);
+}
 
 const DEFAULT_KEY_NAME = "C-dur";
 const DEFAULT_FORMULA = "Octave";
@@ -1289,10 +1294,9 @@ const POSITION_KEY = "rea.position.v1";
 /** The ten exercises a category holds — none, for the document and numeric
  *  pages, which are a single view rather than a set to work through. */
 function exerciseList() {
-  if (state.category) {
-    const kind = kindOf(state.category);
-    if (kind === "doc" || kind === "numeric") return [];
-  }
+  // Only a real lesson runs the ten exercises; a placeholder is one view.
+  if (state.category && kindOf(state.category) !== "score" &&
+      kindOf(state.category) !== "combo") return [];
   // `short` is what the collapsed path shows: "2. Singing with repetition" is
   // wider than a phone's path line on its own, and the number plus the skill
   // already says which of the ten this is.
@@ -1350,8 +1354,14 @@ async function applyCategory(node, part, exercise) {
   const ctx = contextFor(node);
   const kind = kindOf(node);
   state.category = node;
+  // Jumping through the sheet, or restoring a position, can land in another
+  // area; the switcher has to follow rather than keep highlighting the old one.
+  if (node.area && state.app !== node.area.id) {
+    state.app = node.area.id;
+    renderNav();
+  }
 
-  if (kind === "doc" || kind === "numeric") {
+  if (kind !== "score" && kind !== "combo") {
     practice.stop();
     state.activeChapter = null;
     showPlaceholder(node, kind);
@@ -1422,14 +1432,20 @@ function showPlaceholder(node, kind) {
   if (info) info.hidden = true;
   if (!ph) return;
   ph.hidden = false;
+  const copy = kind === "numeric"
+    ? {
+        label: "Numeric display",
+        text: "The numeric view shows scale degrees rather than a staff. Not built yet — it is a separate display of the same lesson, not a different lesson.",
+      }
+    : {
+        label: "Not built yet",
+        text: "This part of the method has no exercises behind it yet. It keeps its place in the order so the path stays true to the method.",
+      };
   ph.innerHTML =
     '<div class="ph-card">' +
-      '<div class="ph-kind">' + (kind === "numeric" ? "Numeric display" : "Document") + "</div>" +
+      '<div class="ph-kind">' + copy.label + "</div>" +
       "<h2>" + node.name + "</h2>" +
-      "<p>" + (kind === "numeric"
-        ? "The numeric view shows scale degrees rather than a staff. Not built yet — it is a separate display of the same lesson, not a different lesson."
-        : "This chapter is a written document. Not built yet — it will render as a page in this same shell.") +
-      "</p>" +
+      "<p>" + copy.text + "</p>" +
     "</div>";
   setStatus(node.name);
 }
@@ -1448,19 +1464,35 @@ function hidePlaceholder() {
 function savePosition() {
   if (!state.category) return;
   try {
-    localStorage.setItem(POSITION_KEY, JSON.stringify({
+    localStorage.setItem(POSITION_KEY + "." + state.category.area.id, JSON.stringify({
       uid: state.category.uid,
       part: partValue(),
       exercise: exerciseIndex(),
     }));
+    localStorage.setItem(POSITION_KEY + ".area", state.category.area.id);
   } catch (e) { /* private browsing — position simply isn't remembered */ }
 }
 
-function loadPosition() {
+function loadPosition(areaId) {
   try {
-    const raw = localStorage.getItem(POSITION_KEY);
+    const id = areaId || localStorage.getItem(POSITION_KEY + ".area") || AREAS[0].id;
+    const raw = localStorage.getItem(POSITION_KEY + "." + id);
     return raw ? JSON.parse(raw) : null;
   } catch (e) { return null; }
+}
+
+/** Which area to open: `?area=` when something linked straight to one (the
+ *  teacher dashboard does, for its preparations), else the one last
+ *  practised — in both cases only if this user may open it. */
+function openingArea() {
+  let asked = null;
+  try { asked = new URLSearchParams(window.location.search).get("area"); } catch (e) { /* ignore */ }
+  if (!asked) {
+    try { asked = localStorage.getItem(POSITION_KEY + ".area"); } catch (e) { /* ignore */ }
+  }
+  const area = asked ? AREA_BY_ID[asked] : null;
+  if (!area) return AREAS[0];
+  return visibleApps().find((a) => a.id === area.id) ? area : AREAS[0];
 }
 
 // --- the navigation surface ------------------------------------------------
@@ -1709,7 +1741,7 @@ function showSession() {
 /** Render the top-level app nav (Intonation / Soundcheck / ...), highlighting
  *  the active one.  Called on boot and whenever `state.app` changes. */
 function renderNav() {
-  appNav.innerHTML = APPS.map((a) =>
+  appNav.innerHTML = visibleApps().map((a) =>
     '<button type="button" class="app-nav-btn' + (state.app === a.id ? " active" : "") +
     '" data-app="' + a.id + '">' + a.label + "</button>"
   ).join("");
@@ -1722,7 +1754,8 @@ function renderNav() {
  *  screen (not chapter/lesson-based), so entering it stops any Intonation
  *  session and hides the chapter-stats header; leaving it releases the mic. */
 function showApp(appId) {
-  if (!APPS.find((a) => a.id === appId) || state.app === appId) return;
+  if (!visibleApps().find((a) => a.id === appId) || state.app === appId) return;
+  const area = AREA_BY_ID[appId];
   state.app = appId;
   renderNav();
   if (appId === "soundcheck") {
@@ -1735,9 +1768,12 @@ function showApp(appId) {
   } else {
     soundcheck.leave();
     viewSoundcheck.hidden = true;
-    showSession();
-    renderTopbar();
-    setStatus("Ready");
+    // Each area is its own curriculum, so switching areas opens that area's
+    // remembered position, or its first playable category.
+    const saved = loadPosition(appId);
+    const start = (saved && categoryByUid(saved.uid)) || defaultCategory(area);
+    const same = saved && start === categoryByUid(saved.uid);
+    applyCategory(start, same ? saved.part : null, same ? saved.exercise : 0);
   }
 }
 
@@ -2009,7 +2045,7 @@ viewSession.addEventListener("rea:next-chapter", (e) => {
   const fromId = e.detail && e.detail.from;
   const idx = CHAPTERS.findIndex((c) => c.id === fromId);
   if (idx >= 0 && idx < CHAPTERS.length - 1) { openChapter(CHAPTERS[idx + 1].id); return; }
-  const next = state.category ? CATEGORIES[state.category.pos + 1] : null;
+  const next = state.category ? neighbourCategory(state.category, 1) : null;
   if (next) applyCategory(next, null, 0);
 });
 
@@ -2030,11 +2066,16 @@ viewSession.addEventListener("rea:next-chapter", (e) => {
   // Straight into an exercise — where the student left off, or the method's
   // first playable one.  Position zero is the Introduction document and the
   // first Intonation leaf is the Numeric placeholder, so neither opens well.
-  const saved = loadPosition();
-  const start = (saved && categoryByUid(saved.uid)) || defaultCategory();
-  await applyCategory(start,
-    saved && start === categoryByUid(saved.uid) ? saved.part : null,
-    saved && start === categoryByUid(saved.uid) ? saved.exercise : 0);
+  // The switcher can only be drawn once we know whether this user is a
+  // teacher, since one area is theirs alone.
+  renderNav();
+  const area = openingArea();
+  state.app = area.id;
+  renderNav();
+  const saved = loadPosition(area.id);
+  const start = (saved && categoryByUid(saved.uid)) || defaultCategory(area);
+  const same = saved && start === categoryByUid(saved.uid);
+  await applyCategory(start, same ? saved.part : null, same ? saved.exercise : 0);
   renderHeader();
   setStatus("Ready");
 })().catch((e) => setStatus("Boot error: " + e.message));

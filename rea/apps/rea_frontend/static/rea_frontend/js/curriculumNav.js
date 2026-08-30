@@ -27,8 +27,8 @@
  */
 
 import {
-  TREE, CATEGORIES, pathOf, firstCategory, labelFor, kindOf,
-} from "./curriculum.js?v=107";
+  pathOf, firstCategory, labelFor, kindOf, neighbourCategory,
+} from "./curriculum.js?v=112";
 
 function el(tag, cls, html) {
   const n = document.createElement(tag);
@@ -208,8 +208,9 @@ export function createNav(deps) {
       }
     }
 
-    // Off the end of the parts too: the neighbouring category.
-    const cat = CATEGORIES[category.pos + dir];
+    // Off the end of the parts too: the neighbouring category — within this
+    // area only, so the end of Intonation does not spill into Rhythm.
+    const cat = neighbourCategory(category, dir);
     if (!cat) return null;
     return {
       label: labelFor(cat),
@@ -270,7 +271,7 @@ export function createNav(deps) {
           b.addEventListener("click", () => { closeSheet(); deps.goCategory(node); });
         }
       });
-    })(TREE, host);
+    })(category.area.tree, host);
   }
 
   function openSheet() {

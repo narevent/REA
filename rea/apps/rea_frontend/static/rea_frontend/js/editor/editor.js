@@ -20,15 +20,15 @@
  * exercise half-written is worse than one not written at all.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=107";
-import { EditorAPI } from "./editorApi.js?v=107";
-import { Inspector } from "./inspector.js?v=107";
-import { Library } from "./library.js?v=107";
-import { ScoreCanvas } from "./scoreCanvas.js?v=107";
+import { AudioPlayer } from "../audioPlayer.js?v=112";
+import { EditorAPI } from "./editorApi.js?v=112";
+import { Inspector } from "./inspector.js?v=112";
+import { Library } from "./library.js?v=112";
+import { ScoreCanvas } from "./scoreCanvas.js?v=112";
 import {
   DURATIONS, LETTERS, MODIFIERS, OFFSET_GAIN, ScoreDoc,
   buildToken, noteMidi, splitToken, transposeToken,
-} from "./scoreDoc.js?v=107";
+} from "./scoreDoc.js?v=112";
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
