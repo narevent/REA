@@ -11,21 +11,25 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=83";
-import { renderLessonNotation } from "./views/lessonView.js?v=83";
-import { renderScaleNotation } from "./views/scaleView.js?v=83";
-import { SoundcheckView } from "./views/soundcheckView.js?v=83";
-import { AudioPlayer } from "./audioPlayer.js?v=83";
-import { PracticeController } from "./practiceController.js?v=83";
-import { loadAccount, recordServerSession } from "./account.js?v=83";
+import { API } from "./api.js?v=107";
+import { renderLessonNotation } from "./views/lessonView.js?v=107";
+import { renderScaleNotation } from "./views/scaleView.js?v=107";
+import { SoundcheckView } from "./views/soundcheckView.js?v=107";
+import { AudioPlayer } from "./audioPlayer.js?v=107";
+import { PracticeController } from "./practiceController.js?v=107";
+import { loadAccount, recordServerSession } from "./account.js?v=107";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=83";
+} from "./chapters.js?v=107";
+import {
+  CATEGORIES, contextFor, kindOf, defaultCategory, categoryByUid,
+  firstCategory, pathOf,
+} from "./curriculum.js?v=107";
+import { createNav } from "./curriculumNav.js?v=107";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
-const viewMap = document.getElementById("view-map");
 const viewSession = document.getElementById("view-session");
 const viewSoundcheck = document.getElementById("view-soundcheck");
 const sessionTopbar = document.getElementById("session-topbar");
@@ -593,6 +597,10 @@ let state = {
   absComboSelected: {},
   _absComboCatKey: null,    // cache guard for the abs combo category fetch
   activeChapter: null,
+  // Curriculum position: which category of the method is open, and which of
+  // its ten exercises.  This pair replaces the old chapter-map + selectors.
+  category: null,
+  contextVariant: "",
 };
 
 const practice = new PracticeController({
@@ -674,7 +682,15 @@ async function ensureLesson() {
     else setStatus("No lessons for " + formula + " in " + state.contextKey.name + " — showing " + state.contextLesson.formula_name + ".");
     return;
   }
-  state.contextLesson = state.lessons.find((l) => !l.variant) || state.lessons[0];
+  // The curriculum's leaf level for relative mono is the lesson `variant`:
+  // no variant is the plain diatonic formula, AL1 carries the alterations,
+  // SKALA the scale form.  Fall back to the plain form if the chosen variant
+  // has no lesson in this key.
+  const want = state.contextVariant || "";
+  state.contextLesson =
+    state.lessons.find((l) => (l.variant || "") === want) ||
+    state.lessons.find((l) => !l.variant) ||
+    state.lessons[0];
   state.contextLesson = await API.getLesson(state.contextLesson.id);
   state.contextLesson.system = "relative";
   setStatus("Ready");
@@ -1260,242 +1276,215 @@ function renderHeader() {
 }
 
 // ---------------------------------------------------------------------------
-// Chapter map (landing) — visual, emoji-free, nothing locked
+// Curriculum navigation
 // ---------------------------------------------------------------------------
+// The method's outline (curriculum.js) is the app's only structure.  A
+// *category* is one practisable leaf of it, and its ten exercises are the
+// chapters.  Opening a category writes that leaf's facets into the context
+// state above and runs the existing loaders — navigation owns the position,
+// never the lesson data.
 
-function renderMap() {
-  const p = state.progress;
-  const done = completedCount(p);
-  const pct = Math.round((done / CHAPTERS.length) * 100);
+const POSITION_KEY = "rea.position.v1";
 
-  const cards = CHAPTERS.map((c) => {
-    const entry = p.chapters[c.id];
-    const best = entry ? entry.best : null;
-    const completed = entry && entry.completed;
-    const attempts = entry ? entry.attempts : 0;
-
-    // Unplayed chapters show the same ring, empty, rather than a lone dot: the
-    // card then keeps its shape as scores arrive, and the blank ring reads as
-    // "no score yet" instead of as a stray bullet.
-    const scoreRing = best == null ?
-      '<div class="card-score empty">' +
-        '<div class="ring">' +
-          '<svg viewBox="0 0 36 36"><circle class="ring-bg" cx="18" cy="18" r="15.5"></circle></svg>' +
-          '<span class="ring-val">–</span>' +
-        '</div>' +
-      '</div>' :
-      '<div class="card-score">' +
-        '<div class="ring">' +
-          '<svg viewBox="0 0 36 36"><circle class="ring-bg" cx="18" cy="18" r="15.5"></circle>' +
-          '<circle class="ring-fg" cx="18" cy="18" r="15.5" style="stroke-dashoffset:' + ringOffset(best) + '"></circle></svg>' +
-          '<span class="ring-val">' + best + '</span>' +
-        '</div>' +
-      '</div>';
-
-    // Completion reads in the footer next to the other tags, not as a floating
-    // badge over the card corner — that corner belongs to the score ring, and
-    // the two collided.  An attempt with no pass needs no marker of its own:
-    // the ring is already showing the score.
-    const badge = completed
-      ? '<span class="card-tag done">' + glyph("check", 12) + 'passed</span>'
-      : "";
-
-    return '<button class="chapter-card' + (completed ? " completed" : "") + '" ' +
-      'style="--cc:' + c.color + '" data-chapter="' + c.id + '">' +
-      '<div class="card-head">' +
-        '<span class="card-ico">' + glyph(c.glyph, 24) + '</span>' +
-        scoreRing +
-      '</div>' +
-      '<div class="card-title">' + c.title + '</div>' +
-      '<div class="card-foot">' +
-        '<div class="card-dots">' + dots(c.difficulty) + '</div>' +
-        badge +
-        (c.tags.includes("mic") ? '<span class="card-tag mic">mic</span>' : '') +
-        (c.tags.includes("timed") ? '<span class="card-tag timed">timed</span>' : '') +
-      '</div>' +
-      '</button>';
-  }).join("");
-
-  viewMap.innerHTML =
-    '<div class="map-wrap">' +
-      '<div class="map-hero">' +
-        '<div class="hero-left">' +
-          '<h2>Solfege practice</h2>' +
-          '<p>Ten chapters. Train ear and voice for relative intonation.</p>' +
-        '</div>' +
-        '<div class="hero-progress">' +
-          '<div class="hero-ring">' +
-            '<svg viewBox="0 0 120 120">' +
-              '<circle class="hr-bg" cx="60" cy="60" r="52"></circle>' +
-              '<circle class="hr-fg" cx="60" cy="60" r="52" style="stroke-dashoffset:' + ringOffset(pct, 52) + '"></circle>' +
-            '</svg>' +
-            '<div class="hr-text"><b>' + done + '</b><span>/' + CHAPTERS.length + '</span></div>' +
-          '</div>' +
-          '<div class="hero-meta"><span>' + pct + '%</span><span>' + state.progress.xp + ' XP</span></div>' +
-        '</div>' +
-      '</div>' +
-      '<div class="map-filters">' +
-        '<div class="filters-group filters-mode">' +
-          '<span class="filters-group-lbl">Mode</span>' +
-          '<div class="filters-row">' +
-            filterItemHTML("map-texture", "Texture", TEXTURES.map((t) => ({ value: t.id, label: t.label })), state.texture) +
-            filterItemHTML("map-system", "System", SYSTEMS.map((s) => ({ value: s.id, label: s.label })), state.system) +
-          '</div>' +
-        '</div>' +
-        '<div class="filters-group filters-practice">' +
-          '<span class="filters-group-lbl">Practice</span>' +
-          '<div class="filters-row">' + contextSelectorsHTML() + '</div>' +
-        '</div>' +
-        '<button id="reset-progress" class="link-btn">reset progress</button>' +
-      '</div>' +
-      '<div class="chapter-grid">' + cards + '</div>' +
-    '</div>';
-
-  viewMap.querySelectorAll(".chapter-card").forEach((card) => {
-    card.addEventListener("click", () => openChapter(parseInt(card.dataset.chapter, 10)));
-  });
-  const textureSel = viewMap.querySelector("#map-texture");
-  if (textureSel) textureSel.addEventListener("change", async () => {
-    await setTexture(textureSel.value);
-    renderHeader();
-    renderMap();
-  });
-  const systemSel = viewMap.querySelector("#map-system");
-  if (systemSel) systemSel.addEventListener("change", async () => {
-    await setSystem(systemSel.value);
-    renderHeader();
-    renderMap();
-  });
-  const keySel = viewMap.querySelector("#map-key");
-  if (keySel) keySel.addEventListener("change", async () => {
-    await setKey(keySel.value);
-    renderHeader();
-    renderMap();
-  });
-  const formulaSel = viewMap.querySelector("#map-formula");
-  if (formulaSel) formulaSel.addEventListener("change", async () => {
-    await setFormula(formulaSel.value);
-    renderHeader();
-    renderMap();
-  });
-  const familySel = viewMap.querySelector("#map-family");
-  if (familySel) familySel.addEventListener("change", async () => {
-    await setAbsFamily(parseInt(familySel.value, 10));
-    renderHeader();
-    renderMap();
-  });
-  const partSel = viewMap.querySelector("#map-part");
-  if (partSel) partSel.addEventListener("change", () => {
-    setAbsPart(partSel.value);
-    renderHeader();
-    renderMap();
-  });
-  const polyCatSel = viewMap.querySelector("#map-poly-category");
-  if (polyCatSel) polyCatSel.addEventListener("change", async () => {
-    await setPolyCategory(polyCatSel.value);
-    renderHeader();
-    renderMap();
-  });
-  const polySubSel = viewMap.querySelector("#map-poly-subgroup");
-  if (polySubSel) polySubSel.addEventListener("change", async () => {
-    await setPolySubgroup(polySubSel.value);
-    renderHeader();
-    renderMap();
-  });
-  const polyQualSel = viewMap.querySelector("#map-poly-quality");
-  if (polyQualSel) polyQualSel.addEventListener("change", async () => {
-    await setPolyQuality(polyQualSel.value);
-    renderHeader();
-    renderMap();
-  });
-  const polyPhaseSel = viewMap.querySelector("#map-poly-phase");
-  if (polyPhaseSel) polyPhaseSel.addEventListener("change", async () => {
-    await setPolyPhase(polyPhaseSel.value);
-    renderHeader();
-    renderMap();
-  });
-  const polyPartSel = viewMap.querySelector("#map-poly-part");
-  if (polyPartSel) polyPartSel.addEventListener("change", () => {
-    setPolyPart(polyPartSel.value);
-    renderHeader();
-    renderMap();
-  });
-  // Combinations: inversion + tonality dropdowns (relative poly).
-  viewMap.querySelectorAll('input[id^="map-combo-inv-"]').forEach((chk) => {
-    chk.addEventListener("change", async () => {
-      const openId = openComboPanelId(viewMap);
-      setComboInversion(chk.id.replace("map-combo-inv-", ""), chk.checked);
-      renderAfterCombo(viewMap, openId);
-    });
-  });
-  viewMap.querySelectorAll('input[id^="map-combo-key-"]').forEach((chk) => {
-    chk.addEventListener("change", async () => {
-      const openId = openComboPanelId(viewMap);
-      setComboKey(chk.id.replace("map-combo-key-", ""), chk.checked);
-      renderAfterCombo(viewMap, openId);
-    });
-  });
-  // Absolute-poly combinations: subgroup + quality + phase dropdowns.
-  viewMap.querySelectorAll('input[id^="map-abscombo-sub-"]').forEach((chk) => {
-    chk.addEventListener("change", async () => {
-      const openId = openComboPanelId(viewMap);
-      await setAbsComboSubgroup(chk.id.replace("map-abscombo-sub-", ""), chk.checked);
-      renderAfterCombo(viewMap, openId);
-    });
-  });
-  viewMap.querySelectorAll('input[id^="map-abscombo-q-"]').forEach((chk) => {
-    chk.addEventListener("change", async () => {
-      const openId = openComboPanelId(viewMap);
-      await setAbsComboQuality(chk.id.replace("map-abscombo-q-", ""), chk.checked);
-      renderAfterCombo(viewMap, openId);
-    });
-  });
-  viewMap.querySelectorAll('input[id^="map-abscombo-p-"]').forEach((chk) => {
-    chk.addEventListener("change", async () => {
-      const openId = openComboPanelId(viewMap);
-      await setAbsComboPhase(chk.id.replace("map-abscombo-p-", ""), chk.checked);
-      renderAfterCombo(viewMap, openId);
-    });
-  });
-  wireComboDropdown("map", "combo-inv", viewMap, {
-    all: async () => { setAllComboInversions(true); },
-    none: async () => { setAllComboInversions(false); },
-  });
-  wireComboDropdown("map", "combo-key", viewMap, {
-    "all-major": async () => { setComboKeysByMode("Major", true); },
-    "all-minor": async () => { setComboKeysByMode("Minor", true); },
-    none: async () => { setAllComboKeys(false); },
-  });
-  wireComboDropdown("map", "abscombo-sub", viewMap, {
-    all: async () => { await setAllAbsComboSubgroups(true); },
-    none: async () => { await setAllAbsComboSubgroups(false); },
-  });
-  wireComboDropdown("map", "abscombo-q", viewMap, {
-    all: async () => { await setAllAbsComboQualities(true); },
-    none: async () => { await setAllAbsComboQualities(false); },
-  });
-  wireComboDropdown("map", "abscombo-p", viewMap, {
-    all: async () => { await setAllAbsComboPhases(true); },
-    none: async () => { await setAllAbsComboPhases(false); },
-  });
-  const reset = viewMap.querySelector("#reset-progress");
-  if (reset) reset.addEventListener("click", () => {
-    if (confirm("Reset all chapter progress?")) {
-      state.progress = { chapters: {}, xp: 0, streak: 0, lastPlayedChapter: null };
-      saveProgress(state.progress);
-      renderHeader();
-      renderMap();
-    }
-  });
+/** The ten exercises a category holds — none, for the document and numeric
+ *  pages, which are a single view rather than a set to work through. */
+function exerciseList() {
+  if (state.category) {
+    const kind = kindOf(state.category);
+    if (kind === "doc" || kind === "numeric") return [];
+  }
+  // `short` is what the collapsed path shows: "2. Singing with repetition" is
+  // wider than a phone's path line on its own, and the number plus the skill
+  // already says which of the ten this is.
+  return CHAPTERS.map((c) => ({
+    id: c.id,
+    title: c.title,
+    short: c.num + ". " + c.skill,
+  }));
 }
 
+function exerciseIndex() {
+  const id = state.activeChapter ? state.activeChapter.id : 1;
+  const i = CHAPTERS.findIndex((c) => c.id === id);
+  return i >= 0 ? i : 0;
+}
+
+/** The progressive parts of the open category, when it has any.  They come
+ *  from the loaded lessons rather than the outline, because which parts exist
+ *  differs per category (1, 1-2, 1-3, 4-5 …). */
+function partOptions() {
+  if (!state.category || !state.category.parts) return [];
+  if (state.system === "absolute" && state.texture === "mono") return state.absParts || [];
+  return state.polyParts || [];
+}
+
+function partValue() {
+  if (state.system === "absolute" && state.texture === "mono") return state.absPart;
+  return state.polyPart;
+}
+
+/** Tonalities offered for the open branch — relative lessons only, narrowed
+ *  to the mode the branch is in (Major Formula offers the major keys). */
+function keyOptions() {
+  if (!state.category || state.system !== "relative") return [];
+  const mode = contextFor(state.category).keyMode;
+  if (!mode) return [];
+  return state.keys
+    .filter((k) => k.mode === mode)
+    .sort((a, b) => keyOrderKey(a.name) - keyOrderKey(b.name))
+    .map((k) => ({ value: String(k.id), label: k.name }));
+}
+
+function keyValue() { return state.contextKey ? String(state.contextKey.id) : ""; }
+
 /**
- * Build the context-selector HTML for the current (texture, system):
- *   mono + relative  → Key + Formula
- *   mono + absolute  → Family + Part
- *   poly + relative  → Key + Category + Part
- *   poly + absolute  → Category + Part
+ * Open a curriculum category: translate its facets into the loader context,
+ * load the lesson, and start one of its exercises.
+ *
+ *   part      a progressive part value, or null to let the loader default
+ *   exercise  0-based index, or -1 for "the last one" — which is what
+ *             arriving backwards from the following category should land on
  */
+async function applyCategory(node, part, exercise) {
+  if (!node) return;
+  const ctx = contextFor(node);
+  const kind = kindOf(node);
+  state.category = node;
+
+  if (kind === "doc" || kind === "numeric") {
+    practice.stop();
+    state.activeChapter = null;
+    showPlaceholder(node, kind);
+    renderTopbar();
+    return;
+  }
+
+  const wasSystem = state.system;
+  const wasTexture = state.texture;
+  if (ctx.system) state.system = ctx.system;
+  if (ctx.texture) state.texture = ctx.texture;
+  if (state.system !== wasSystem || state.texture !== wasTexture) {
+    state._polyCatCacheKey = null;
+    state._absComboCatKey = null;
+  }
+
+  // Tonality follows the branch's mode, but a key already chosen in that mode
+  // is kept — walking the method shouldn't keep resetting the student's key.
+  if (ctx.keyMode && (!state.contextKey || state.contextKey.mode !== ctx.keyMode)) {
+    const pool = state.keys.filter((k) => k.mode === ctx.keyMode);
+    const preferred = ctx.keyMode === "Major" ? DEFAULT_KEY_NAME : "A-mol";
+    state.contextKey = pool.find((k) => k.name === preferred) || pool[0] || state.contextKey;
+  }
+
+  state.contextFormula = ctx.formula || state.contextFormula;
+  state.contextVariant = ctx.variant || "";
+
+  if (state.system === "absolute" && state.texture === "mono") {
+    const fam = ABS_FAMILIES.find((f) => f.category === ctx.category && f.span === ctx.span);
+    if (fam) state.absFamily = fam;
+    state.absPart = part != null ? part : null;
+  }
+
+  if (state.texture === "poly") {
+    const cats = state.system === "absolute" ? ABS_POLY_CATEGORIES : REL_POLY_CATEGORIES;
+    const chosen = cats.find((c) => c.value === ctx.category);
+    if (chosen) state.polyCategory = chosen;
+    // The loaders validate these against the data and fall back when a value
+    // isn't present, so passing the outline's values straight through is safe.
+    state.polySubgroup = ctx.subgroup ? { value: ctx.subgroup, label: ctx.subgroup } : null;
+    state.polyQuality = ctx.quality ? { value: ctx.quality, label: ctx.quality } : null;
+    state.polyPhase = ctx.phase || null;
+    state.polyPart = part != null ? part : null;
+  }
+
+  setStatus("Loading…");
+  await ensureLesson();
+
+  const list = exerciseList();
+  let i = exercise == null ? exerciseIndex() : exercise;
+  if (i < 0) i = list.length - 1;
+  if (i >= list.length) i = 0;
+  hidePlaceholder();
+  await openChapter(list[i].id);
+}
+
+// --- placeholder views -----------------------------------------------------
+// Numeric and the document chapters keep their place in the method's order
+// rather than being hidden, so the ordering stays honest and what is still
+// unbuilt is visible.  Each is one render away from being the real thing.
+
+function showPlaceholder(node, kind) {
+  showSession();
+  const stage = document.querySelector(".session-stage");
+  const info = document.getElementById("info");
+  const ph = document.getElementById("placeholder");
+  if (stage) stage.hidden = true;
+  if (info) info.hidden = true;
+  if (!ph) return;
+  ph.hidden = false;
+  ph.innerHTML =
+    '<div class="ph-card">' +
+      '<div class="ph-kind">' + (kind === "numeric" ? "Numeric display" : "Document") + "</div>" +
+      "<h2>" + node.name + "</h2>" +
+      "<p>" + (kind === "numeric"
+        ? "The numeric view shows scale degrees rather than a staff. Not built yet — it is a separate display of the same lesson, not a different lesson."
+        : "This chapter is a written document. Not built yet — it will render as a page in this same shell.") +
+      "</p>" +
+    "</div>";
+  setStatus(node.name);
+}
+
+function hidePlaceholder() {
+  const stage = document.querySelector(".session-stage");
+  const info = document.getElementById("info");
+  const ph = document.getElementById("placeholder");
+  if (stage) stage.hidden = false;
+  if (info) info.hidden = false;
+  if (ph) ph.hidden = true;
+}
+
+// --- position memory -------------------------------------------------------
+
+function savePosition() {
+  if (!state.category) return;
+  try {
+    localStorage.setItem(POSITION_KEY, JSON.stringify({
+      uid: state.category.uid,
+      part: partValue(),
+      exercise: exerciseIndex(),
+    }));
+  } catch (e) { /* private browsing — position simply isn't remembered */ }
+}
+
+function loadPosition() {
+  try {
+    const raw = localStorage.getItem(POSITION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+// --- the navigation surface ------------------------------------------------
+
+const nav = createNav({
+  exercises: exerciseList,
+  exerciseIndex,
+  partOptions,
+  partValue,
+  keyOptions,
+  keyValue,
+  goCategory: (node, part, exercise) => applyCategory(node, part, exercise),
+  goPart: (value, exercise) => applyCategory(state.category, value, exercise),
+  goExercise: async (i) => {
+    const list = exerciseList();
+    if (list[i]) await openChapter(list[i].id);
+  },
+  goKey: async (id) => {
+    setStatus("Loading key…");
+    await setKey(id);
+    const list = exerciseList();
+    await openChapter(list[exerciseIndex()].id);
+  },
+});
 /** Build one multi-select dropdown control: a compact pill trigger (label +
  *  selection count) and a popover panel of checkboxes, optionally split into
  *  labelled groups (used for Tonality's Major/Minor split).  `groups` is
@@ -1602,7 +1591,7 @@ function absComboSelectorsHTML(prefix) {
  *  that updates state and reloads the lesson; the view is re-rendered and
  *  this panel re-opened afterwards so the user sees the change take
  *  effect.  `prefix`/`dimId` identify the panel (see `comboDropdownHTML`);
- *  `root` is viewMap or sessionTopbar. */
+ *  `root` is the session topbar. */
 function wireComboDropdown(prefix, dimId, root, actions) {
   const key = prefix + "-" + dimId;
   const trigger = root.querySelector("#" + key + "-trigger");
@@ -1642,11 +1631,10 @@ function keepPanelOpen(panelId) {
 }
 
 /** Re-render after a combo change (checkbox toggle or quick action): refresh
- *  the parent view (map or session topbar) and keep `panelId` open, if any,
- *  so the user sees the selection change without the dropdown closing. */
+ *  the session topbar and keep `panelId` open, if any, so the user sees the
+ *  selection change without the dropdown closing. */
 function renderAfterCombo(root, panelId) {
-  if (root === viewMap) { renderHeader(); renderMap(); }
-  else { renderTopbar(); }
+  renderTopbar();
   keepPanelOpen(panelId);
 }
 
@@ -1664,105 +1652,6 @@ document.addEventListener("click", (e) => {
   });
 }, true);
 
-/** One filter control: a small uppercase label above a pill-styled <select>,
- *  matching the combo dropdowns' label-above-control shape (see
- *  `comboDropdownHTML`) so every control in the filters panel lines up the
- *  same way regardless of whether it's a plain select or a multi-select
- *  dropdown. */
-function filterItemHTML(id, label, options, current) {
-  return '<label class="filter-item"><span class="ctx-lbl">' + label + '</span>' +
-    '<select id="' + id + '">' + options.map((o) =>
-      '<option value="' + o.value + '"' + (o.value === current ? " selected" : "") + ">" + o.label + "</option>"
-    ).join("") + '</select>' +
-  '</label>';
-}
-
-function contextSelectorsHTML() {
-  const sel = filterItemHTML;
-
-  if (state.texture === "poly") {
-    const cats = state.system === "absolute" ? ABS_POLY_CATEGORIES : REL_POLY_CATEGORIES;
-    const catCur = state.polyCategory ? state.polyCategory.value : "";
-    let html = sel("map-poly-category", "Category", cats, catCur);
-
-    // Relative combinations: multi-select inversion + tonality checkboxes
-    // instead of the single Key / subgroup / Part selectors.
-    if (state.system === "relative" && isComboCategory(catCur)) {
-      html += comboSelectorsHTML("map");
-      return html;  // parts are implied; no Part dropdown for combinations
-    }
-
-    // Absolute combinations: multi-select subgroup + quality + phase.
-    if (state.system === "absolute" && isComboCategory(catCur)) {
-      html += absComboSelectorsHTML("map");
-      html += sel("map-poly-part", "Part", state.polyParts, state.polyPart || "");
-      return html;
-    }
-
-    if (state.system === "relative") {
-      const keys = state.keys.map((k) => ({ value: String(k.id), label: k.name + " (" + k.mode + ")" }));
-      const keyCur = state.contextKey ? String(state.contextKey.id) : "";
-      html = sel("map-key", "Key", keys, keyCur) + html;
-      // Subgroup (interval name / inversion) — only for categories that have one.
-      const sgOpts = computePolySubgroups(catCur, state.polyCategoryLessons);
-      if (sgOpts.length) {
-        const sgCur = state.polySubgroup ? state.polySubgroup.value : "";
-        html += sel("map-poly-subgroup",
-          (relPolySubgroupCfg(catCur) || {}).label || "Subgroup", sgOpts, sgCur);
-      }
-    } else {
-      // Absolute poly: subgroup (inversion / interval size).
-      const aCfg = absPolySubgroupCfg(catCur);
-      const sgOpts = computePolySubgroups(catCur, state.polyCategoryLessons);
-      if (sgOpts.length) {
-        const sgCur = state.polySubgroup ? state.polySubgroup.value : "";
-        html += sel("map-poly-subgroup",
-          (aCfg || {}).label || "Subgroup", sgOpts, sgCur);
-        // Quality (interval/chord quality) — per (category, subgroup).
-        const sgVal = state.polySubgroup ? state.polySubgroup.value : "";
-        const qOpts = computeAbsPolyQualities(catCur, sgVal, state.polyCategoryLessons);
-        if (qOpts.length) {
-          const qCur = state.polyQuality ? state.polyQuality.value : "";
-          html += sel("map-poly-quality",
-            (ABS_POLY_QUALITIES[catCur] || {}).label || "Quality", qOpts, qCur);
-        }
-        // Phase (I = melodic / II = harmonic) — distinct phases within the
-        // chosen subgroup (and quality, when set).
-        let phaseSrc = state.polyCategoryLessons.filter((l) => (l[aCfg.field] || "") === sgVal);
-        if (state.polyQuality) phaseSrc = phaseSrc.filter((l) => (l.quality || "") === state.polyQuality.value);
-        const phases = Array.from(new Set(phaseSrc.map((l) => l.phase || 0)))
-          .filter((p) => p).sort()
-          .map((p) => ({ value: String(p), label: p === 1 ? "I (melodic)" : "II (harmonic)" }));
-        if (phases.length) {
-          html += sel("map-poly-phase", "Phase", phases, String(state.polyPhase || ""));
-        }
-      }
-    }
-    html += sel("map-poly-part", "Part", state.polyParts, state.polyPart || "");
-    return html;
-  }
-  // mono
-  if (state.system === "relative") {
-    const keys = state.keys.map((k) => ({ value: String(k.id), label: k.name + " (" + k.mode + ")" }));
-    const keyCur = state.contextKey ? String(state.contextKey.id) : "";
-    const formulas = FORMULAS.map((f) => ({ value: f, label: f }));
-    return sel("map-key", "Key", keys, keyCur) + sel("map-formula", "Formula", formulas, state.contextFormula);
-  }
-  const families = ABS_FAMILIES.map((f, i) => ({ value: String(i), label: f.label }));
-  const famCur = ABS_FAMILIES.indexOf(state.absFamily);
-  return sel("map-family", "Family", families, String(famCur)) + sel("map-part", "Part", state.absParts, state.absPart || "");
-}
-
-function dots(diff) {
-  let s = "";
-  for (let i = 0; i < 5; i++) s += '<span class="dot ' + (i < diff ? "on" : "") + '"></span>';
-  return s;
-}
-
-function ringOffset(pct, r) {
-  const radius = r || 15.5;
-  return 2 * Math.PI * radius * (1 - (pct || 0) / 100);
-}
 
 // ---------------------------------------------------------------------------
 // Session
@@ -1794,14 +1683,12 @@ async function openChapter(chapterId) {
   } else if (state.texture === "poly" && state.system === "absolute") {
     const found = await pickAbsPolyLesson(chapterId);
     if (!found) {
-      setStatus("\"" + chapter.title + "\" isn't available for " + (state.polyCategory ? state.polyCategory.label : "") + " / " + polyPartLabel(state.polyPart) + ".");
-      return;
+      setStatus("\"" + chapter.title + "\" isn't recorded here — showing the nearest exercise.");
     }
   } else if (state.system === "absolute") {
     const found = await pickAbsLesson(chapterId);
     if (!found) {
-      setStatus("\"" + chapter.title + "\" isn't available for " + state.absFamily.label + " / " + absPartLabel(state.absPart) + ".");
-      return;
+      setStatus("\"" + chapter.title + "\" isn't recorded here — showing the nearest exercise.");
     }
   }
   if (!state.contextLesson) { setStatus("No lesson loaded."); return; }
@@ -1814,21 +1701,9 @@ async function openChapter(chapterId) {
 
 function showSession() {
   state.view = "session";
-  viewMap.hidden = true;
   viewSoundcheck.hidden = true;
   viewSession.hidden = false;
-}
-
-function showMap() {
-  state.view = "map";
-  practice.stop();
-  viewSession.hidden = true;
-  viewSoundcheck.hidden = true;
-  viewMap.hidden = false;
   headerStats.hidden = false;
-  renderHeader();
-  renderMap();
-  setStatus("Ready");
 }
 
 /** Render the top-level app nav (Intonation / Soundcheck / ...), highlighting
@@ -1852,7 +1727,6 @@ function showApp(appId) {
   renderNav();
   if (appId === "soundcheck") {
     practice.stop();
-    viewMap.hidden = true;
     viewSession.hidden = true;
     viewSoundcheck.hidden = false;
     headerStats.hidden = true;
@@ -1861,99 +1735,32 @@ function showApp(appId) {
   } else {
     soundcheck.leave();
     viewSoundcheck.hidden = true;
-    showMap();
+    showSession();
+    renderTopbar();
+    setStatus("Ready");
   }
 }
 
-function topbarContextHTML() {
-  const sel = (id, label, options, current) =>
-    '<label>' + label + '<select id="' + id + '">' + options.map((o) =>
-      '<option value="' + o.value + '"' + (o.value === current ? " selected" : "") + ">" + o.label + "</option>"
-    ).join("") + '</select></label>';
-
-  if (state.texture === "poly") {
-    const cats = state.system === "absolute" ? ABS_POLY_CATEGORIES : REL_POLY_CATEGORIES;
-    const catCur = state.polyCategory ? state.polyCategory.value : "";
-    let html = sel("ctx-poly-category", "Category", cats, catCur);
-    if (state.system === "relative" && isComboCategory(catCur)) {
-      html += comboSelectorsHTML("ctx");
-      return html;
-    }
-    if (state.system === "absolute" && isComboCategory(catCur)) {
-      html += absComboSelectorsHTML("ctx");
-      html += sel("ctx-poly-part", "Part", state.polyParts, state.polyPart || "");
-      return html;
-    }
-    if (state.system === "relative") {
-      const keys = state.keys.map((k) => ({ value: String(k.id), label: k.name + " (" + k.mode + ")" }));
-      const keyCur = state.contextKey ? String(state.contextKey.id) : "";
-      html = sel("ctx-key", "Key", keys, keyCur) + html;
-      const sgOpts = computePolySubgroups(catCur, state.polyCategoryLessons);
-      if (sgOpts.length) {
-        const sgCur = state.polySubgroup ? state.polySubgroup.value : "";
-        html += sel("ctx-poly-subgroup",
-          (relPolySubgroupCfg(catCur) || {}).label || "Subgroup", sgOpts, sgCur);
-      }
-    } else {
-      // Absolute poly: subgroup + quality + phase.
-      const aCfg = absPolySubgroupCfg(catCur);
-      const sgOpts = computePolySubgroups(catCur, state.polyCategoryLessons);
-      if (sgOpts.length) {
-        const sgCur = state.polySubgroup ? state.polySubgroup.value : "";
-        html += sel("ctx-poly-subgroup",
-          (aCfg || {}).label || "Subgroup", sgOpts, sgCur);
-        const sgVal = state.polySubgroup ? state.polySubgroup.value : "";
-        const qOpts = computeAbsPolyQualities(catCur, sgVal, state.polyCategoryLessons);
-        if (qOpts.length) {
-          const qCur = state.polyQuality ? state.polyQuality.value : "";
-          html += sel("ctx-poly-quality",
-            (ABS_POLY_QUALITIES[catCur] || {}).label || "Quality", qOpts, qCur);
-        }
-        let phaseSrc = state.polyCategoryLessons.filter((l) => (l[aCfg.field] || "") === sgVal);
-        if (state.polyQuality) phaseSrc = phaseSrc.filter((l) => (l.quality || "") === state.polyQuality.value);
-        const phases = Array.from(new Set(phaseSrc.map((l) => l.phase || 0)))
-          .filter((p) => p).sort()
-          .map((p) => ({ value: String(p), label: p === 1 ? "I (melodic)" : "II (harmonic)" }));
-        if (phases.length) {
-          html += sel("ctx-poly-phase", "Phase", phases, String(state.polyPhase || ""));
-        }
-      }
-    }
-    html += sel("ctx-poly-part", "Part", state.polyParts, state.polyPart || "");
-    return html;
-  }
+/** The combination selectors, when the open category is a combinations one. */
+function comboPanelHTML() {
+  const cat = state.polyCategory ? state.polyCategory.value : "";
   if (state.system === "absolute") {
-    const families = ABS_FAMILIES.map((f, i) => ({ value: String(i), label: f.label }));
-    const famCur = ABS_FAMILIES.indexOf(state.absFamily);
-    return sel("ctx-family", "Family", families, String(famCur)) + sel("ctx-part", "Part", state.absParts, state.absPart || "");
+    return absComboSelectorsHTML("ctx") +
+      '<label>Part<select id="ctx-poly-part">' + state.polyParts.map((o) =>
+        '<option value="' + o.value + '"' + (o.value === state.polyPart ? " selected" : "") + ">" + o.label + "</option>"
+      ).join("") + '</select></label>';
   }
-  const keys = state.keys.map((k) => ({ value: String(k.id), label: k.name + " (" + k.mode + ")" }));
-  const keyCur = state.contextKey ? String(state.contextKey.id) : "";
-  const formulas = FORMULAS.map((f) => ({ value: f, label: f }));
-  return sel("ctx-key", "Key", keys, keyCur) + sel("ctx-formula", "Formula", formulas, state.contextFormula);
+  return comboSelectorsHTML("ctx");
 }
 
 function renderTopbar() {
-  const c = state.activeChapter;
-  if (!c) return;
+  const comboOpen = state.category && kindOf(state.category) === "combo";
   sessionTopbar.innerHTML =
-    '<button id="back-map" class="back-btn">' + glyph("back", 16) + '<span>Chapters</span></button>' +
-    '<div class="topbar-chapter" style="--cc:' + c.color + '">' +
-      '<span class="tc-ico">' + glyph(c.glyph, 20) + '</span>' +
-      '<div class="tc-text"><span class="tc-num">Chapter ' + c.num + '</span><span class="tc-title">' + c.title + '</span></div>' +
-    '</div>' +
-    '<div class="topbar-spacer"></div>' +
-    '<div class="topbar-ctx">' +
-      '<label>Texture<select id="ctx-texture">' + TEXTURES.map((t) =>
-        '<option value="' + t.id + '"' + (state.texture === t.id ? " selected" : "") + ">" + t.label + "</option>"
-      ).join("") + '</select></label>' +
-      '<label>System<select id="ctx-system">' + SYSTEMS.map((s) =>
-        '<option value="' + s.id + '"' + (state.system === s.id ? " selected" : "") + ">" + s.label + "</option>"
-      ).join("") + '</select></label>' +
-      topbarContextHTML() +
-    '</div>';
-  const back = sessionTopbar.querySelector("#back-map");
-  if (back) back.addEventListener("click", showMap);
+    '<nav class="path" id="path-bar" aria-label="Curriculum path"></nav>' +
+    '<div class="path-key" id="path-key"></div>' +
+    // Combination categories keep their multi-select panel: they merge many
+    // leaves into one lesson, so they are a selection, not a single path.
+    (comboOpen ? '<div class="topbar-ctx combo-ctx">' + comboPanelHTML() + '</div>' : "");
   const reopen = () => {
     const absPolyCombo = state.texture === "poly" && state.system === "absolute" &&
       isComboCategory(state.polyCategory ? state.polyCategory.value : "");
@@ -1982,72 +1789,6 @@ function renderTopbar() {
     setStatus("Ready");
     return true;
   };
-  const ctxTexture = sessionTopbar.querySelector("#ctx-texture");
-  if (ctxTexture) ctxTexture.addEventListener("change", async () => {
-    setStatus("Loading…");
-    await setTexture(ctxTexture.value);
-    renderTopbar();
-    reopen();
-  });
-  const ctxSystem = sessionTopbar.querySelector("#ctx-system");
-  if (ctxSystem) ctxSystem.addEventListener("change", async () => {
-    setStatus("Loading system…");
-    await setSystem(ctxSystem.value);
-    renderTopbar();
-    reopen();
-  });
-  const ctxKey = sessionTopbar.querySelector("#ctx-key");
-  if (ctxKey) ctxKey.addEventListener("change", async () => {
-    setStatus("Loading key…");
-    await setKey(ctxKey.value);
-    renderTopbar();
-    reopen();
-  });
-  const ctxFormula = sessionTopbar.querySelector("#ctx-formula");
-  if (ctxFormula) ctxFormula.addEventListener("change", async () => {
-    setStatus("Loading formula…");
-    await setFormula(ctxFormula.value);
-    renderTopbar();
-    reopen();
-  });
-  const ctxFamily = sessionTopbar.querySelector("#ctx-family");
-  if (ctxFamily) ctxFamily.addEventListener("change", async () => {
-    setStatus("Loading family…");
-    await setAbsFamily(parseInt(ctxFamily.value, 10));
-    renderTopbar();
-    reopen();
-  });
-  const ctxPart = sessionTopbar.querySelector("#ctx-part");
-  if (ctxPart) ctxPart.addEventListener("change", () => {
-    setAbsPart(ctxPart.value);
-    renderTopbar();
-    reopen();
-  });
-  const ctxPolyCat = sessionTopbar.querySelector("#ctx-poly-category");
-  if (ctxPolyCat) ctxPolyCat.addEventListener("change", async () => {
-    setStatus("Loading category…");
-    await setPolyCategory(ctxPolyCat.value);
-    renderTopbar();
-    reopen();
-  });
-  const ctxPolySub = sessionTopbar.querySelector("#ctx-poly-subgroup");
-  if (ctxPolySub) ctxPolySub.addEventListener("change", async () => {
-    await setPolySubgroup(ctxPolySub.value);
-    renderTopbar();
-    reopen();
-  });
-  const ctxPolyQual = sessionTopbar.querySelector("#ctx-poly-quality");
-  if (ctxPolyQual) ctxPolyQual.addEventListener("change", async () => {
-    await setPolyQuality(ctxPolyQual.value);
-    renderTopbar();
-    reopen();
-  });
-  const ctxPolyPhase = sessionTopbar.querySelector("#ctx-poly-phase");
-  if (ctxPolyPhase) ctxPolyPhase.addEventListener("change", async () => {
-    await setPolyPhase(ctxPolyPhase.value);
-    renderTopbar();
-    reopen();
-  });
   const ctxPolyPart = sessionTopbar.querySelector("#ctx-poly-part");
   if (ctxPolyPart) ctxPolyPart.addEventListener("change", () => {
     setPolyPart(ctxPolyPart.value);
@@ -2122,7 +1863,49 @@ function renderTopbar() {
     all: async () => { await setAllAbsComboPhases(true); },
     none: async () => { await setAllAbsComboPhases(false); },
   });
+
+  // The path line, the tonality chip and Previous/Next all render from the
+  // curriculum position, which is also what gets remembered for next visit.
+  if (state.category) {
+    nav.render(state.category);
+    placeTopbar();
+    renderAppTitle();
+    savePosition();
+  }
 }
+
+// On a phone the path line lives inside the hamburger with the rest of the
+// app's controls, so the only thing above the staff is one bar saying where
+// you are.  The row is moved rather than duplicated: it is the same controls,
+// with the same listeners, in a different place.
+const NARROW_MQ = window.matchMedia("(max-width: 720px)");
+
+function placeTopbar() {
+  const panel = document.getElementById("app-menu-panel");
+  if (!panel || !sessionTopbar) return;
+  if (NARROW_MQ.matches) {
+    if (sessionTopbar.parentElement !== panel) panel.insertBefore(sessionTopbar, panel.firstChild);
+  } else if (sessionTopbar.parentElement === panel) {
+    viewSession.insertBefore(sessionTopbar, viewSession.firstChild);
+  }
+}
+
+/** The app bar's own line: where you are, for when the path is put away. */
+function renderAppTitle() {
+  const el = document.getElementById("app-title");
+  if (!el) return;
+  if (!state.category) { el.hidden = true; return; }
+  const path = pathOf(state.category);
+  const where = path.slice(-2).map((n) => n.name).join(" · ");
+  const list = exerciseList();
+  const now = list.length ? list[exerciseIndex()] : null;
+  el.hidden = false;
+  el.innerHTML =
+    '<span class="at-where">' + where + "</span>" +
+    (now ? '<span class="at-what">' + now.title + "</span>" : "");
+}
+
+NARROW_MQ.addEventListener("change", () => { placeTopbar(); renderAppTitle(); });
 
 function onSessionComplete(chapter, avg) {
   // Local progress first: it is what the map and header read, and it must
@@ -2157,25 +1940,77 @@ function lessonContextLabel() {
 // Audio unlock
 // ---------------------------------------------------------------------------
 
+// 64 samples of silence.  Playing one HTMLMediaElement inside the unlocking
+// gesture promotes iOS to its "playback" audio session; without it WebAudio
+// is routed to the ringer channel, where the hardware silent switch mutes the
+// app even though the AudioContext reports itself as running — the usual
+// reason a phone shows the score playing but makes no sound.
+const SILENT_WAV =
+  "data:audio/wav;base64,UklGRmQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YUAAAACA" +
+  "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA";
+
+function _primeAudioSession() {
+  try {
+    const a = new Audio(SILENT_WAV);
+    a.setAttribute("playsinline", "");
+    a.volume = 0.01;
+    const p = a.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) { /* nothing to promote on this platform */ }
+}
+
 const _unlockAudio = () => {
   player._ensureCtx();
+  _primeAudioSession();
   window.removeEventListener("pointerdown", _unlockAudio);
+  window.removeEventListener("touchend", _unlockAudio);
   window.removeEventListener("keydown", _unlockAudio);
 };
 window.addEventListener("pointerdown", _unlockAudio);
+// Older iOS delivers a usable gesture on touchend but not pointerdown.
+window.addEventListener("touchend", _unlockAudio);
 window.addEventListener("keydown", _unlockAudio);
 
+// On a phone the app's own chrome — the area switcher, the editor link, who
+// is signed in — lives behind one hamburger, so the top of the screen belongs
+// to where you are in the method rather than to the app around it.
+const menuBtn = document.getElementById("app-menu");
+if (menuBtn) {
+  menuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = document.body.classList.toggle("menu-open");
+    menuBtn.setAttribute("aria-expanded", open ? "true" : "false");
+  });
+  const closeMenu = () => {
+    if (!document.body.classList.contains("menu-open")) return;
+    document.body.classList.remove("menu-open");
+    menuBtn.setAttribute("aria-expanded", "false");
+  };
+  document.addEventListener("click", closeMenu);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+  const panel = document.getElementById("app-menu-panel");
+  // A tap inside the drawer that isn't on a control shouldn't dismiss it; one
+  // that *is* should, since every control in there navigates somewhere.
+  if (panel) panel.addEventListener("click", (e) => {
+    if (e.target.closest("a, button")) closeMenu(); else e.stopPropagation();
+  });
+}
+
+// There is no chapter map to go back to any more, so the brand opens the
+// curriculum sheet — the one place the whole method is visible.
 brand.addEventListener("click", () => {
   if (state.app !== "intonation") { showApp("intonation"); return; }
-  if (state.view !== "map") showMap();
+  nav.openSheet();
 });
 
+// Finishing an exercise advances within the category, then rolls into the
+// next one — the same walk as the Next button.
 viewSession.addEventListener("rea:next-chapter", (e) => {
   const fromId = e.detail && e.detail.from;
   const idx = CHAPTERS.findIndex((c) => c.id === fromId);
-  const next = idx >= 0 && idx < CHAPTERS.length - 1 ? CHAPTERS[idx + 1] : null;
-  if (next && isUnlocked(state.progress, next)) openChapter(next.id);
-  else showMap();
+  if (idx >= 0 && idx < CHAPTERS.length - 1) { openChapter(CHAPTERS[idx + 1].id); return; }
+  const next = state.category ? CATEGORIES[state.category.pos + 1] : null;
+  if (next) applyCategory(next, null, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -2185,15 +2020,21 @@ viewSession.addEventListener("rea:next-chapter", (e) => {
 (async () => {
   renderNav();
   renderHeader();
-  renderMap();
   setStatus("Loading…");
   // Who (if anyone) is signed in.  Practising does not depend on this, so it
   // is awaited only so the first completed session can be attributed.
   await loadAccount();
   footerHint.textContent = "Use headphones for the best intonation practice.";
   await loadKeys();
-  await ensureLesson();
+
+  // Straight into an exercise — where the student left off, or the method's
+  // first playable one.  Position zero is the Introduction document and the
+  // first Intonation leaf is the Numeric placeholder, so neither opens well.
+  const saved = loadPosition();
+  const start = (saved && categoryByUid(saved.uid)) || defaultCategory();
+  await applyCategory(start,
+    saved && start === categoryByUid(saved.uid) ? saved.part : null,
+    saved && start === categoryByUid(saved.uid) ? saved.exercise : 0);
   renderHeader();
-  renderMap();
   setStatus("Ready");
 })().catch((e) => setStatus("Boot error: " + e.message));

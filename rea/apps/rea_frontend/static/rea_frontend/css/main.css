@@ -107,17 +107,17 @@ body {
    as it gets larger, which is all the separation a heading needs.  Sizes here
    run smaller than their serif equivalents would — a grotesque at 600 carries
    far more weight per pixel than a 400 serif. */
-.brand-name, .hero-left h2, .sc-hero h2, .acc-title, .di-title, .sum-verdict, .tc-title, .card-title {
+.brand-name, .sc-hero h2, .acc-title, .sum-verdict {
   font-weight: 600;
   letter-spacing: -0.02em;
 }
 /* The largest sizes need the most negative tracking to stay optically even. */
-.hero-left h2, .sc-hero h2, .acc-title { letter-spacing: -0.032em; }
+.sc-hero h2, .acc-title { letter-spacing: -0.032em; }
 
 /* The small uppercase label used above every control and stat. */
-.hstat-lbl, .filters-group-lbl, .ctx-lbl, .combo-pop-group-lbl, .card-num, .card-best,
-.tc-num, .g-text small, .cfg-title, .sc-panel-lbl, .sc-setup-lbl, .acc-h2, .acc-stat-lbl,
-.acc-field label, .acc-table th, .topbar-ctx label, .cfg label, .sc-meter-scale, .acc-chip-role,
+.hstat-lbl, .ctx-lbl, .combo-pop-group-lbl, .dh-avg small,
+.cfg-title, .sc-panel-lbl, .sc-setup-lbl, .acc-h2, .acc-stat-lbl,
+.acc-field label, .acc-table th, .topbar-ctx > label, .cfg label, .sc-meter-scale, .acc-chip-role,
 .sc-input-head, .sc-input-scale {
   font-size: 10.5px;
   text-transform: uppercase;
@@ -200,143 +200,27 @@ body {
 .view[hidden] { display: none; }
 
 /* ==========================================================================
-   Chapter map
+   Shared controls
    ========================================================================== */
-.map-wrap { max-width: 1040px; margin: 0 auto; padding: 44px 24px 72px; }
 
-/* The hero is type on paper — no tinted panel.  A rule underneath separates
-   it from the grid without drawing another box. */
-.map-hero {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 40px;
-  padding-bottom: 28px;
-  margin-bottom: 32px;
-  border-bottom: 1px solid var(--border);
-}
-.hero-left h2 { margin: 0 0 10px; font-size: 34px; line-height: 1.12; }
-.hero-left p { margin: 0; color: var(--ink-2); font-size: 15px; max-width: 54ch; line-height: 1.6; }
-
-.hero-progress { display: flex; flex-direction: column; align-items: center; gap: 12px; flex: none; }
-.hero-ring { position: relative; width: 104px; height: 104px; }
-.hero-ring svg { transform: rotate(-90deg); }
-.hero-ring circle { fill: none; stroke-width: 6; }
-.hr-bg { stroke: var(--surface-3); }
-/* A progress arc is a dashed stroke whose dash is the whole circumference and
-   whose offset the JS sets per value.  Without the dasharray the offset does
-   nothing and the ring reads as a full circle at every score, so the length
-   belongs here next to the radius it depends on (2*pi*52). */
-.hr-fg {
-  stroke: var(--accent); stroke-linecap: butt;
-  stroke-dasharray: 326.726;
-  transition: stroke-dashoffset .6s cubic-bezier(.4,0,.2,1);
-}
-.hr-text { position: absolute; inset: 0; display: grid; place-items: center; font-family: var(--font-num); }
-.hr-text b { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }
-.hr-text span { font-size: 13px; color: var(--muted); }
-.hero-meta { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
-.hero-meta b { color: var(--ink); font-weight: 600; }
-
-.chapter-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
-  gap: 14px;
-}
-
-.chapter-card {
-  position: relative; overflow: hidden;
-  display: flex; flex-direction: column; gap: 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--r-lg);
-  padding: 18px;
-  cursor: pointer; text-align: left; color: var(--ink); font-family: var(--font-sans);
-  transition: border-color .15s, box-shadow .2s, transform .15s;
-}
-/* The chapter's hue appears as one hairline at the top edge — enough to code
-   the skill, not enough to tint the card. */
-.chapter-card::before {
-  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px;
-  background: var(--cc); opacity: 0; transition: opacity .15s;
-}
-.chapter-card:hover { border-color: var(--border-strong); box-shadow: var(--shadow-2); transform: translateY(-2px); }
-.chapter-card:hover::before { opacity: 1; }
-.chapter-card.completed::before { opacity: 1; }
-.chapter-card.locked { cursor: not-allowed; opacity: 0.5; }
-.chapter-card.locked:hover { transform: none; box-shadow: none; border-color: var(--border); }
-
-.card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; position: relative; }
-.card-ico {
-  width: 38px; height: 38px; display: grid; place-items: center;
-  border-radius: 10px; color: var(--cc);
-  background: color-mix(in srgb, var(--cc) 9%, var(--surface));
-  flex: none;
-}
-.card-num { color: var(--muted-2); }
-.card-title { font-size: 16px; line-height: 1.3; position: relative; }
-.card-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 12px; position: relative; flex-wrap: wrap; }
-
-.card-score { display: flex; align-items: center; justify-content: flex-end; }
-.card-score.empty .ring-val { color: var(--muted-2); font-weight: 500; }
-.card-score .ring { position: relative; width: 40px; height: 40px; }
-.card-score .ring svg { transform: rotate(-90deg); width: 100%; height: 100%; }
-.card-score .ring circle { fill: none; stroke-width: 3; }
-.card-score .ring-bg { stroke: var(--surface-3); }
-.card-score .ring-fg { stroke: var(--cc); stroke-linecap: butt; stroke-dasharray: 97.389; transition: stroke-dashoffset .5s; }
-.card-score .ring-val { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; font-weight: 600; font-family: var(--font-num); }
-.card-best { color: var(--muted-2); }
-
-.card-dots { display: flex; gap: 3px; }
-.card-dots .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--surface-3); }
-.card-dots .dot.on { background: var(--cc); }
-
-/* One tag treatment, tinted per meaning. */
-.card-tag, .tag {
+/* One tag treatment, tinted per meaning.  Used by the practice deck to mark
+   an exercise as needing the mic or running against a clock. */
+.tag {
   font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em;
   padding: 3px 8px; border-radius: 999px;
   background: var(--surface-2); color: var(--muted);
   display: inline-flex; align-items: center; gap: 4px;
 }
-.card-tag.mic, .tag.mic { color: var(--accent-ink); background: var(--accent-tint); }
-.card-tag.timed, .tag.timed { color: var(--warn); background: var(--warn-tint); }
+.tag.mic { color: var(--accent-ink); background: var(--accent-tint); }
+.tag.timed { color: var(--warn); background: var(--warn-tint); }
 
-.card-tag.done { color: var(--good); background: var(--good-tint); }
-.card-tag.done svg { margin-right: -1px; }
 
-/* The card footer holds the difficulty dots on the left and any tags on the
-   right, however many there are. */
-.card-foot .card-dots { margin-right: auto; }
-
-/* Filters panel — sits between the hero and the chapter grid (never below
-   the grid: its contents change shape as category/system change, so it
-   needs to read as a stable settings panel, not part of the card layout).
-   Grouped into rows of controls that belong together (Mode: texture/system;
-   Practice: category + whatever selectors that category needs) so the
-   layout doesn't visually reshuffle when the group's content changes. */
-.map-filters {
-  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 20px 36px;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg);
-  padding: 18px 22px; margin-bottom: 24px;
-}
-.filters-group { display: flex; flex-direction: column; gap: 10px; }
-/* Two levels of label sit in this panel — the group ("Mode") and the control
-   ("Texture").  Same size and colour made them read as one flat list. */
-.filters-group-lbl { font-size: 11.5px; color: var(--ink); letter-spacing: 0.12em; }
-.filter-item .ctx-lbl, .combo-col .ctx-lbl { color: var(--muted); }
-.filters-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 18px; }
-.filters-practice { flex: 1; min-width: 240px; }
-.map-filters .link-btn { margin-left: auto; align-self: center; }
-.link-btn {
-  background: none; border: none; color: var(--muted); cursor: pointer;
-  font-size: 12.5px; font-family: var(--font-sans); text-decoration: underline;
-  text-underline-offset: 3px; text-decoration-color: var(--border-strong);
-}
-.link-btn:hover { color: var(--ink); text-decoration-color: currentColor; }
-
-/* One filter control: small uppercase label above a pill-styled <select>,
-   sized to match the combo dropdowns' trigger pill (see .combo-trigger)
-   so every control in a filters row lines up the same way. */
-.filter-item { display: flex; flex-direction: column; gap: 6px; }
+/* Inside a combinations dropdown the column labels sit one level below the
+   control's own label, so they take the quieter ink. */
+.combo-col .ctx-lbl { color: var(--muted); }
 
 /* Every compact control — <select>, dropdown trigger — shares one shape. */
-.filter-item select, .combo-trigger, .topbar-ctx select, .sc-sound-select {
+.combo-trigger, .topbar-ctx select, .sc-sound-select {
   appearance: none; -webkit-appearance: none;
   background-color: var(--surface); color: var(--ink);
   border: 1px solid var(--border-strong); border-radius: 999px;
@@ -346,7 +230,7 @@ body {
   background-repeat: no-repeat; background-position: right 12px center;
   transition: border-color .15s;
 }
-.filter-item select:hover, .combo-trigger:hover, .topbar-ctx select:hover, .sc-sound-select:hover { border-color: var(--ink-2); }
+.combo-trigger:hover, .topbar-ctx select:hover, .sc-sound-select:hover { border-color: var(--ink-2); }
 
 /* Combinations multi-select (subgroups, qualities, phase, tonalities, ...) —
    every dimension is a dropdown: compact trigger + checkbox popover panel. */
@@ -363,7 +247,6 @@ body {
   box-shadow: var(--shadow-2); padding: 10px;
 }
 /* Filters panel anchors left; align the popover to the trigger's left edge. */
-.map-filters .combo-pop-panel { right: auto; left: 0; }
 /* Session topbar anchors right; flip the popover left so it never overflows. */
 .topbar-ctx .combo-pop-panel { right: 0; left: auto; }
 .combo-pop-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
@@ -401,32 +284,17 @@ body {
   border-bottom: 1px solid var(--border);
   flex: none;
 }
-.back-btn {
-  background: none; color: var(--muted); border: 1px solid var(--border-strong);
-  padding: 7px 14px; border-radius: 999px; cursor: pointer;
-  font-size: 13px; font-weight: 600; font-family: var(--font-sans);
-  display: inline-flex; align-items: center; gap: 6px;
-}
-.back-btn:hover { color: var(--ink); border-color: var(--ink-2); }
 
-.topbar-chapter { display: flex; align-items: center; gap: 12px; }
-.topbar-chapter .tc-ico {
-  width: 38px; height: 38px; display: grid; place-items: center; color: var(--cc); border-radius: 10px;
-  background: color-mix(in srgb, var(--cc) 10%, var(--surface));
-}
-.tc-text { display: flex; flex-direction: column; gap: 1px; line-height: 1.15; }
-.tc-title { font-size: 15px; }
 
-.topbar-spacer { flex: 1; }
 .topbar-ctx { display: flex; gap: 14px; align-items: flex-end; }
-.topbar-ctx label { display: flex; flex-direction: column; gap: 5px; }
+.topbar-ctx > label { display: flex; flex-direction: column; gap: 5px; }
 .ctx-formula { display: flex; flex-direction: column; gap: 5px; }
 .ctx-formula b {
   font-size: 13px; color: var(--ink); text-transform: none;
   letter-spacing: 0; font-weight: 600; font-family: var(--font-num);
 }
 
-.session-stage { padding: 24px 24px 4px; flex: none; max-width: 1100px; width: 100%; margin: 0 auto; }
+.session-stage { padding: 24px 24px 4px; max-width: 1100px; width: 100%; margin: 0 auto; }
 
 /* The score is the one true "paper" in the app; on a paper-coloured page it
    needs only a hairline to sit apart from the canvas. */
@@ -506,37 +374,65 @@ svg.rea-score .vf-beam { display: none !important; }
 .notation .vf-sung-off { fill: #b23a2f; }
 
 /* info / deck container */
-.info { padding: 0 24px 32px; max-width: 1100px; width: 100%; margin: 0 auto; }
+.info { padding: 16px 24px 12px; max-width: 1100px; width: 100%; margin: 0 auto; }
 
 /* ==========================================================================
    Session deck
+   --------------------------------------------------------------------------
+   The staff is the exercise, so it takes the middle and everything else is
+   pressed into two thin bands: what you're doing and how far in (above), how
+   to drive it (below).  The bands are fixed height and the staff takes the
+   rest, so the score is never pushed off-screen by its own chrome.
    ========================================================================== */
-.deck { display: flex; flex-direction: column; gap: 18px; }
 
-/* The exercise's own header: type and one hue-coded icon, on the page. */
-.deck-intro {
-  display: flex; align-items: center; gap: 16px;
-  padding: 20px 0 18px;
-  border-bottom: 1px solid var(--border);
-}
-.di-ico {
-  width: 46px; height: 46px; flex: none; display: grid; place-items: center;
-  color: var(--cc); border-radius: 12px;
-  background: color-mix(in srgb, var(--cc) 10%, var(--surface));
-}
-.di-body { min-width: 0; }
-.di-title { font-size: 19px; line-height: 1.25; }
-.di-desc { font-size: 14px; color: var(--ink-2); margin: 3px 0 9px; line-height: 1.5; }
-.di-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.deck { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 
-/* stats: progress + gauge */
-.deck-stats {
-  display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center;
-  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 18px 22px;
+/* --- the band above: title, progress, score ------------------------------ */
+
+.deck-head {
+  display: flex; align-items: center; gap: 20px; flex: none;
+  padding-bottom: 12px; border-bottom: 1px solid var(--border);
 }
-.ds-progress { display: flex; flex-direction: column; gap: 10px; }
-.dsp-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); }
-.dsp-top b { color: var(--ink); font-weight: 600; font-family: var(--font-num); }
+.dh-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: wrap; }
+.dh-name {
+  font-size: 17px; font-weight: 600; letter-spacing: -0.02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dh-tags { display: inline-flex; gap: 5px; flex-wrap: wrap; }
+
+/* Progress takes the slack: the bar is the one element here that benefits
+   from every pixel it can get. */
+.dh-progress { flex: 1; min-width: 120px; display: flex; flex-direction: column; gap: 6px; }
+.dhp-line {
+  display: flex; justify-content: space-between; gap: 10px;
+  font-size: 12.5px; color: var(--muted);
+}
+.dhp-line b { color: var(--ink); font-weight: 600; font-family: var(--font-num); }
+
+/* The 84px score ring became a number: at a glance it says the same thing in
+   a tenth of the height, and the height is what the staff needed. */
+.dh-avg { flex: none; display: flex; align-items: baseline; gap: 5px; }
+.dh-avg b {
+  font-size: 20px; font-weight: 600; font-family: var(--font-num);
+  line-height: 1; letter-spacing: -0.02em;
+}
+.dh-avg b.empty { color: var(--muted-2); }
+
+/* --- the staff ------------------------------------------------------------ */
+
+/* Takes every pixel the bands don't.  A score taller than the space scrolls
+   inside here rather than pushing the transport off the bottom of the page. */
+.deck-stage { flex: 1; min-height: 0; overflow-y: auto; }
+.deck-stage .session-stage { padding: 16px 0 4px; max-width: none; }
+
+/* --- the band below: transport, then the instruction --------------------- */
+
+.deck-foot {
+  flex: none; display: flex; flex-direction: column; gap: 8px;
+  padding-top: 12px; border-top: 1px solid var(--border);
+}
+
+/* stats: progress track + pips */
 .dsp-track { height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; }
 .dsp-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 999px; transition: width .4s cubic-bezier(.4,0,.2,1); }
 .dsp-pips { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -545,16 +441,6 @@ svg.rea-score .vf-beam { display: none !important; }
 .pip.ok { background: var(--warn); }
 .pip.weak { background: var(--bad); }
 
-.ds-gauge { flex: none; }
-.gauge { position: relative; width: 84px; height: 84px; }
-.gauge svg { transform: rotate(-90deg); }
-.gauge circle { fill: none; stroke-width: 6; }
-.g-bg { stroke: var(--surface-3); }
-.g-fg { stroke: var(--accent); stroke-linecap: butt; stroke-dasharray: 326.726; stroke-dashoffset: 326.726; transition: stroke-dashoffset .5s, stroke .3s; }
-.g-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.g-text span { font-size: 24px; font-weight: 600; font-family: var(--font-num); line-height: 1; letter-spacing: -0.02em; }
-.g-text span.empty { color: var(--muted-2); }
-.g-text small { margin-top: 3px; }
 
 /* controls */
 .deck-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
@@ -577,10 +463,9 @@ svg.rea-score .vf-beam { display: none !important; }
 .i-play, .i-stop { display: none; }
 
 /* live report */
-.deck-report { min-height: 60px; }
 .fb-prompt {
-  display: flex; align-items: center; gap: 10px; font-size: 14.5px; color: var(--ink-2);
-  padding: 14px 18px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  display: block; font-size: 14.5px; line-height: 1.5; color: var(--ink-2);
+  padding: 12px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
 }
 .fb-prompt b { color: var(--ink); font-weight: 600; }
 .cd { margin-left: auto; font-family: var(--font-num); font-weight: 600; color: var(--warn); font-size: 14px; }
@@ -645,10 +530,11 @@ svg.rea-score .vf-beam { display: none !important; }
 .summary.try { background: var(--warn-tint); border-color: color-mix(in srgb, var(--warn) 20%, transparent); }
 .sum-ring { position: relative; width: 120px; height: 120px; }
 .sum-ring svg { transform: rotate(-90deg); }
-/* The summary reuses .g-bg for its track, but the fill:none and stroke-width
-   that class relies on live on `.gauge circle` — outside the gauge the circle
-   fell back to a solid black disc behind the score. */
+/* The summary ring's track.  It used to inherit fill/stroke-width from the
+   deck's gauge; that gauge is gone, so both live here now — without them the
+   circle falls back to a solid black disc behind the score. */
 .sum-ring circle { fill: none; stroke-width: 8; }
+.sum-ring .g-bg { stroke: var(--surface-3); }
 .sum-score {
   position: absolute; inset: 0; display: grid; place-items: center;
   font-size: 38px; font-weight: 600; font-family: var(--font-num); line-height: 1; letter-spacing: -0.03em;
@@ -839,14 +725,8 @@ svg.rea-score .vf-beam { display: none !important; }
   .app-nav-btn { flex: 1; text-align: center; justify-content: center; }
   .header-right { gap: 12px; min-width: 0; }
   .brand-name { font-size: 16px; }
-  .map-wrap, .sc-wrap { padding: 28px 16px 56px; }
-  .map-hero { flex-direction: column; align-items: flex-start; gap: 24px; }
-  .hero-left h2 { font-size: 26px; }
+  .sc-wrap { padding: 28px 16px 56px; }
   .sc-hero h2 { font-size: 23px; }
-  .map-filters { flex-direction: column; align-items: stretch; padding: 16px; }
-  .map-filters .link-btn { margin-left: 0; align-self: flex-start; }
-  .deck-stats { grid-template-columns: 1fr; }
-  .ds-gauge { justify-self: center; }
   .session-topbar { flex-wrap: wrap; padding: 12px 16px; }
   .topbar-ctx { flex-basis: 100%; }
   .session-stage, .info { padding-left: 16px; padding-right: 16px; }
@@ -864,8 +744,7 @@ svg.rea-score .vf-beam { display: none !important; }
 @media (max-width: 480px) {
   .acc-chip-text { display: none; }
   .app-header { padding: 10px 14px; }
-  .map-wrap, .sc-wrap, .acc-wrap { padding-left: 14px; padding-right: 14px; }
-  .chapter-grid { grid-template-columns: 1fr; }
+  .sc-wrap, .acc-wrap { padding-left: 14px; padding-right: 14px; }
   .acc-wrap-narrow .acc-card { padding: 24px 20px; }
 }
 
@@ -1047,3 +926,551 @@ svg.rea-score .vf-beam { display: none !important; }
 .acc-placeholder-title { font-size: 14px; font-weight: 600; color: var(--ink); margin-bottom: 6px; }
 .acc-placeholder p { margin: 0; font-size: 13px; color: var(--muted); line-height: 1.65; }
 .acc-placeholder a { color: var(--accent-ink); }
+
+/* ==========================================================================
+   Curriculum navigation
+   --------------------------------------------------------------------------
+   The method's outline is the app's only structure, and it is presented as a
+   single line of text.  Three surfaces, and nothing else on screen:
+
+     .path          the one menu — every level a segment opening its siblings
+     .session-nav   Previous / Next through the ten exercises of a category
+     .curriculum-*  the whole tree, behind ⌘K, for jumping rather than working
+
+   Following house rule 4: hierarchy from space and weight, not nested boxes.
+   ========================================================================== */
+
+.session-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* --- the path line ------------------------------------------------------- */
+
+.path {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.seg { position: relative; }
+
+.seg-sep {
+  color: var(--muted-2);
+  padding: 0 2px;
+  font-size: 13px;
+  user-select: none;
+}
+
+.seg-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.seg-btn:hover { background: var(--accent-tint); color: var(--accent-ink); }
+.seg-btn.static { cursor: default; }
+.seg-btn.static:hover { background: none; color: var(--muted); }
+
+/* The last segment is where you are, so it carries the emphasis. */
+.path .seg:last-child .seg-btn { color: var(--ink); font-weight: 600; }
+
+.seg-caret { width: 9px; height: 9px; opacity: 0.5; flex: none; }
+
+.seg-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  min-width: 190px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-2);
+  display: none;
+}
+.seg-pop.align-right { left: auto; right: 0; }
+.seg.open .seg-pop { display: block; }
+
+.seg-opt {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.seg-opt:hover { background: var(--accent-tint); color: var(--accent-ink); }
+.seg-opt[aria-current="true"] { color: var(--ink); font-weight: 600; }
+
+.seg-tick { width: 13px; flex: none; color: var(--accent); opacity: 0; display: inline-flex; }
+.seg-tick svg { width: 11px; height: 11px; }
+.seg-opt[aria-current="true"] .seg-tick { opacity: 1; }
+
+/* The tonality chip sits apart from the path: a key applies across the whole
+   relative system rather than to any one node of it. */
+.path-key {
+  display: flex;
+  align-items: center;
+  flex: none;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+}
+.path-key[hidden] { display: none; }
+.path-key .seg-btn {
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Previous / Next ------------------------------------------------------ */
+
+.session-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--border);
+}
+
+.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 46%;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.nav-btn:hover:not(:disabled) { background: var(--accent-tint); color: var(--accent-ink); }
+.nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.nav-next { margin-left: auto; color: var(--accent-ink); }
+
+.nav-label { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.nav-next .nav-label { text-align: right; }
+
+/* Crossing out of the current category is named, so Next never silently
+   slides the student into another part of the method. */
+.nav-cross {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+.nav-name {
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- placeholder views ---------------------------------------------------- */
+
+.placeholder { padding: 48px 24px; display: flex; justify-content: center; }
+.placeholder[hidden] { display: none; }
+
+.ph-card {
+  max-width: 46ch;
+  padding: 36px 32px;
+  text-align: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.ph-kind {
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--accent-ink);
+  margin-bottom: 10px;
+}
+.ph-card h2 { font-size: 22px; margin: 0 0 8px; }
+.ph-card p { margin: 0; color: var(--ink-2); font-size: 14px; }
+
+/* --- the curriculum sheet -------------------------------------------------- */
+
+.curriculum-btn { display: inline-flex; align-items: center; gap: 7px; }
+.curriculum-btn kbd {
+  font: inherit;
+  font-size: 10.5px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted-2);
+}
+
+.curriculum-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  padding: 6vh 18px;
+  background: rgba(22, 23, 26, 0.45);
+}
+.curriculum-scrim[hidden] { display: none; }
+
+.curriculum-sheet {
+  max-width: 620px;
+  margin: 0 auto;
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-2);
+}
+
+.curriculum-head {
+  display: flex;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.curriculum-head h2 { font-size: 14px; font-weight: 600; margin: 0; }
+.curriculum-close {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.curriculum-close:hover { color: var(--ink); }
+
+.curriculum-tree { overflow-y: auto; padding: 10px; }
+
+.tree-node {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.tree-node:hover { background: var(--accent-tint); color: var(--accent-ink); }
+.tree-node.branch { font-weight: 600; color: var(--ink); }
+.tree-node[aria-current="true"] { background: var(--accent); color: #fff; }
+.tree-twist {
+  display: inline-block;
+  width: 14px;
+  color: var(--muted-2);
+  font-size: 10px;
+}
+.tree-kids {
+  margin-left: 14px;
+  padding-left: 6px;
+  border-left: 1px solid var(--border);
+}
+.tree-kids[hidden] { display: none; }
+
+@media (max-width: 720px) {
+  .nav-btn { max-width: none; flex: 1; }
+  .path-key { padding-left: 0; border-left: 0; }
+  .session-nav { padding: 12px 16px; }
+}
+
+/* The session scrolls, its navigation does not: Previous/Next stay reachable
+   however long the score runs. */
+.view-session { overflow: hidden; }
+.view-session .session-topbar { flex: none; }
+.view-session .session-nav { flex: none; }
+/* The deck owns the space between the path line and the navigation, and
+   divides it itself — head, staff, foot. */
+.view-session .info { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* A class rule beats the UA's [hidden] { display: none }, so the deck has to
+   opt back out explicitly — otherwise the document and numeric pages render
+   an empty deck underneath their placeholder. */
+.view-session .info[hidden] { display: none; }
+.view-session .placeholder { flex: 1; align-items: flex-start; }
+
+/* ==========================================================================
+   Small screens
+   --------------------------------------------------------------------------
+   On a phone the chrome was eating the whole viewport: the path line wrapped
+   to three rows, the combinations panel added two more, and the staff and
+   transport ended up below a fold that could not be scrolled to.  Here the
+   path collapses to one button, the bands shrink, and the staff keeps the
+   remaining height.
+   ========================================================================== */
+
+@media (max-width: 720px) {
+  /* The path becomes one button naming where you are; it opens the sheet. */
+  .path-here {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 7px 12px; border: 1px solid var(--border-strong);
+    border-radius: 999px; background: var(--surface); color: var(--ink);
+    font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer;
+    max-width: 100%; min-width: 0;
+  }
+  .path-here span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .path-here svg { flex: none; color: var(--muted); }
+
+  /* The path button already opens the sheet, so the header's Curriculum
+     button is a second door to the same room — and the one that was
+     colliding with the brand on a narrow header. */
+  .curriculum-btn { display: none; }
+
+  .session-topbar { gap: 8px; padding: 10px 16px; }
+  .path { flex: 1 1 auto; min-width: 0; }
+  .path-key { padding-left: 0; border-left: 0; }
+
+  /* The combinations panel is a settings surface, not something to read while
+     practising: it scrolls sideways on its own row rather than stacking. */
+  .topbar-ctx.combo-ctx {
+    flex-basis: 100%; gap: 10px; overflow-x: auto; padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+  .topbar-ctx.combo-ctx::-webkit-scrollbar { display: none; }
+  .topbar-ctx.combo-ctx > label { flex: none; }
+
+  /* Bands: tighter, and the title drops to one line so the staff gains it. */
+  .info { padding: 12px 16px 10px; }
+  .deck-head { gap: 12px; flex-wrap: wrap; padding-bottom: 10px; }
+  .dh-title { flex: 1 1 100%; }
+  .dh-name { font-size: 15px; }
+  .dh-progress { flex: 1 1 auto; }
+  .dh-avg b { font-size: 17px; }
+
+  /* A phone cannot hold the whole frame at once: a 9-bar score wraps to five
+     rows of 132px, which is taller than the viewport on its own.  Squeezing
+     the staff into what's left of a fixed frame left a sliver, so here the
+     page scrolls instead and the staff is drawn at full height. */
+  #app { overflow-y: auto; }
+  .view-session { overflow: visible; }
+  .view-session .info { display: block; flex: none; min-height: 0; }
+  .deck { height: auto; min-height: 0; }
+  .deck-stage { flex: none; min-height: 0; overflow: visible; }
+
+  /* Start has to stay in reach however far down the score you have scrolled. */
+  .deck-foot {
+    position: sticky; bottom: 0; z-index: 5;
+    background: var(--canvas); padding-bottom: 10px;
+    box-shadow: 0 -8px 16px -12px rgba(24, 22, 16, 0.4);
+  }
+
+  .deck-stage .session-stage { padding: 10px 0 2px; }
+  .notation { padding: 12px; }
+
+  .deck-foot { gap: 6px; padding-top: 10px; }
+  .deck-controls { gap: 8px; }
+  .btn { padding: 9px 14px; }
+  .fb-prompt { font-size: 12.5px; }
+
+  /* Previous/Next keep their labels but give up the crossing note, which is
+     the first thing that stops fitting. */
+  .session-nav { padding: 10px 16px; gap: 8px; }
+  .nav-cross { display: none; }
+  .nav-name { font-size: 13px; }
+}
+
+/* Phones proper: the transport is what you reach for, so it stays legible
+   even as the title gives up its tags. */
+@media (max-width: 480px) {
+  .dh-tags { display: none; }
+  .btn span { font-size: 13px; }
+  .curriculum-btn kbd { display: none; }
+}
+
+/* --- the phone's app drawer ----------------------------------------------
+   On a wide screen the wrapper is transparent to layout, so the nav and the
+   account block stay direct children of the header's grid.  On a phone they
+   fold into one panel behind the hamburger, which hands the top of the
+   screen back to the exercise. */
+.app-menu-panel { display: contents; }
+.app-menu-btn { display: none; }
+
+@media (max-width: 720px) {
+  .app-header { grid-template-columns: auto 1fr; position: sticky; }
+
+  .app-menu-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 38px; height: 38px; padding: 0;
+    border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+    background: var(--surface); color: var(--ink); cursor: pointer;
+  }
+  .app-menu-btn:hover { border-color: var(--ink-2); }
+
+  .app-menu-panel {
+    display: none;
+    position: absolute; top: calc(100% + 6px); left: 12px; right: 12px; z-index: 40;
+    flex-direction: column; align-items: stretch; gap: 10px;
+    padding: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-md); box-shadow: var(--shadow-2);
+  }
+  body.menu-open .app-menu-panel { display: flex; }
+
+  /* Inside the drawer the two groups stack and fill the width. */
+  body.menu-open .app-nav { grid-row: auto; grid-column: auto; display: flex; }
+  .app-menu-panel .header-right {
+    justify-self: stretch; flex-direction: row; flex-wrap: wrap;
+    align-items: center; gap: 12px;
+  }
+  /* The curriculum has its own door in the path line; in here it would be a
+     second one. */
+  .app-menu-panel .curriculum-btn { display: none; }
+
+  /* --- less between the top of the screen and the staff ------------------ */
+
+  /* The exercise's name is already the path line's last control, so the deck
+     head repeats it.  Drop it and keep the one thing it adds: how far in. */
+  .dh-title { display: none; }
+  .deck-head { gap: 12px; padding-bottom: 8px; flex-wrap: nowrap; }
+  .dh-progress { gap: 4px; }
+  .info { padding: 10px 16px 8px; }
+
+  /* --- a transport that doesn't take half the screen -------------------- */
+
+  .deck-foot { gap: 6px; padding-top: 8px; padding-bottom: 8px; }
+  .deck-controls { gap: 6px; flex-wrap: nowrap; }
+  .btn { padding: 9px 12px; }
+
+  /* The listen-mode toggles keep their icon only — they are set once and then
+     left alone, unlike Start, which has to stay unmistakable. */
+  .ctrl-extras { margin-left: 0; gap: 6px; }
+  .ctrl-extras .btn { padding: 9px; }
+  .ctrl-extras .btn span { display: none; }
+
+  /* The instruction is the last thing in the priority order, so on a phone it
+     gives up its card and sits as one quiet line under the buttons. */
+  .fb-prompt {
+    padding: 0 2px; background: none; border: 0; font-size: 12.5px;
+    line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical; overflow: hidden;
+  }
+}
+
+/* The staff must never be the element that gets squeezed out.  In the fixed
+   frame the bands are `flex: none` and the staff takes the slack, so on a
+   short window the slack runs out and the staff — the one thing the screen is
+   for — collapses to nothing.  Below this height the page scrolls instead,
+   the same trade the phone layout makes. */
+@media (max-height: 640px) {
+  #app { overflow-y: auto; }
+  .view-session { overflow: visible; }
+  .view-session .info { display: block; flex: none; min-height: 0; }
+  .deck { height: auto; min-height: 0; }
+  .deck-stage { flex: none; min-height: 0; overflow: visible; }
+  .deck-foot {
+    position: sticky; bottom: 0; z-index: 5;
+    background: var(--canvas); padding-bottom: 10px;
+    box-shadow: 0 -8px 16px -12px rgba(24, 22, 16, 0.4);
+  }
+}
+
+/* Even in the frame, keep a floor under the score so a merely tight window
+   shows some staff rather than a hairline. */
+.deck-stage { min-height: 140px; }
+
+/* A sticky band may never grow without limit: `.deck-foot` holds the report
+   as well as the transport, and the end-of-session summary made it 272px in a
+   318px scrollport — the transport filling the screen and the staff reduced to
+   a sliver.  Cap it and let its own content scroll, with the buttons pinned to
+   the top of that scroll so Start is always the first thing in the band. */
+@media (max-width: 720px), (max-height: 640px) {
+  .deck-foot { max-height: 42vh; overflow-y: auto; }
+  .deck-controls {
+    position: sticky; top: 0; z-index: 1;
+    background: var(--canvas); padding-bottom: 6px;
+  }
+}
+
+/* --- the app bar's own line ----------------------------------------------
+   With the path line put away in the drawer, this is the only thing on a
+   phone that says where you are: the branch above, the exercise below. */
+.app-title { display: none; min-width: 0; }
+
+@media (max-width: 720px) {
+  .app-title {
+    display: flex; flex-direction: column; justify-content: center;
+    min-width: 0; line-height: 1.2;
+  }
+  .at-where {
+    font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .at-what {
+    font-size: 14px; font-weight: 600; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* The wordmark gives up its text to the title; the mark alone still says
+     whose app this is. */
+  .app-header { grid-template-columns: auto auto 1fr; }
+  .brand-text { display: none; }
+
+  /* The path row, now a child of the drawer, stacks like everything else in
+     there instead of trying to be a single line across the top. */
+  .app-menu-panel .session-topbar {
+    flex-wrap: wrap; padding: 0 0 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .app-menu-panel .path { flex: 1 1 100%; }
+  .app-menu-panel .path-key { flex: none; }
+
+  /* The status line and the headphone tip are a permanent footer for two
+     pieces of one-off advice; on a phone that is a row of screen the staff
+     should have. */
+  .app-footer { display: none; }
+}
+
+/* The headphone tip is advice for the first session, not a caption the app
+   needs to carry forever next to the status. */
+.footer-hint { display: none; }
+
+/* The legend restated the chapter's one-line instruction directly under the
+   staff, where the transport's own prompt already says what to do — two
+   instructions competing for the same job, and the one nobody reads was
+   sitting in the space the score wanted. */
+.legend { display: none; }
+
+/* The idle instruction is the lowest-priority thing on the screen, and on a
+   phone it was two lines under the transport.  There it folds behind an info
+   button; the live round readout that replaces it during a session is status,
+   not instruction, and is never hidden. */
+.btn-info { display: none; }
+
+@media (max-width: 720px) {
+  .btn-info { display: inline-flex; padding: 9px; }
+  .fb-prompt.is-hint { display: none; }
+  .deck-foot.hint-open .fb-prompt.is-hint { display: block; }
+}

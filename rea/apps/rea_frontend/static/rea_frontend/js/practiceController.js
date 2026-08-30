@@ -26,20 +26,24 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=83";
+import { AudioPlayer } from "./audioPlayer.js?v=107";
 import {
   PitchDetector, midiToName, getVoiceVibratoCents, getVoiceOnsetFloor,
-} from "./pitchDetector.js?v=83";
-import { API } from "./api.js?v=83";
+} from "./pitchDetector.js?v=107";
+import { API } from "./api.js?v=107";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt,
-} from "./practiceData.js?v=83";
+} from "./practiceData.js?v=107";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=83";
+} from "./practiceScore.js?v=107";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
+// Above this many rounds the per-round pips stop being readable (a 39-bar
+// combination wrapped to three rows of dots) — the bar and the counter carry
+// progress on their own from there.
+const PIP_LIMIT = 20;
 const SING_TAIL_MS = 600;  // extra recording tail so the user can finish
 // A sung note has to be *held*, not merely touched.  The old 130 ms minimum
 // let brief "seeking" stabs — the few frames a singer lingers on a
@@ -117,6 +121,7 @@ function glyph(name, size) {
     case "seq": return '<svg ' + common + '><circle cx="6" cy="18" r="2.2"/><circle cx="12" cy="16" r="2.2"/><circle cx="18" cy="14" r="2.2"/><path d="M8 18V8M14 16V6M20 14V4"/></svg>';
     case "mic": return '<svg ' + common + '><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></svg>';
     case "clock": return '<svg ' + common + '><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>';
+    case "info": return '<svg ' + common + '><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 8h.01"/></svg>';
     case "bars": return '<svg ' + common + '><path d="M4 12h2M8 7v10M12 4v16M16 7v10M20 12h-2"/></svg>';
     case "rounds": return '<svg ' + common + '><circle cx="6" cy="12" r="2.4"/><circle cx="12" cy="12" r="2.4"/><circle cx="18" cy="12" r="2.4"/></svg>';
     case "flame": return '<svg ' + common + '><path d="M12 3c4 4 5 7 3 11-1 2-3 3-3 3s-2-1-3-3c-2-4-1-7 3-11z"/><path d="M12 21c-3 0-5-2-5-5 0-1 1-2 2-2"/></svg>';
@@ -270,6 +275,17 @@ export class PracticeController {
   _stopMic() { if (this.detector) this.detector.stop(); }
 
   async _ensureMic() {
+    // Browsers only expose the microphone to secure origins.  Over plain HTTP
+    // — which is how a phone usually reaches a dev server on the LAN —
+    // `navigator.mediaDevices` is not merely blocked but absent, so say that
+    // plainly instead of failing on an undefined property.
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error(
+        window.isSecureContext === false
+          ? "The microphone needs a secure connection. Open this page over HTTPS (or on localhost) to sing."
+          : "This browser does not offer microphone access."
+      );
+    }
     if (!this.detector) this.detector = new PitchDetector();
     if (!this.detector.isRunning) await this.detector.start(() => {});
   }
@@ -283,55 +299,72 @@ export class PracticeController {
     const bars = (source && source.bars || []).length;
     const total = this._sessionTotal();
 
+    // The staff is the exercise, so it owns the middle of the screen and the
+    // chrome is pushed to two thin bands: what you are doing and how far in
+    // (above), how to drive it (below).  Everything that used to sit under
+    // the staff in tall blocks — the icon banner, the 84px score ring, the
+    // duplicated instruction line — is gone or folded into those bands.
+    const pips = total <= PIP_LIMIT ? '<div class="dsp-pips" id="d-pips"></div>' : "";
+
     this.info.innerHTML =
       '<div class="deck">' +
-        // intro / status banner
-        '<div class="deck-intro" style="--cc:' + c.color + '">' +
-          '<div class="di-ico">' + glyph(c.glyph, 26) + "</div>" +
-          '<div class="di-body">' +
-            '<div class="di-title">' + c.title + "</div>" +
-            '<div class="di-desc">' + c.instruct + "</div>" +
-            '<div class="di-meta">' +
+        '<div class="deck-head">' +
+          '<div class="dh-title">' +
+            '<span class="dh-name">' + c.title + "</span>" +
+            '<span class="dh-tags">' +
               (m && m.needsMic ? '<span class="tag mic">' + glyph("mic", 12) + " mic</span>" : "") +
               (m && m.timed ? '<span class="tag timed">' + glyph("clock", 12) + " " + TIMED_DEFAULT + "s</span>" : "") +
               '<span class="tag">' + glyph("bars", 12) + " " + bars + "</span>" +
-              '<span class="tag">' + glyph("rounds", 12) + " " + total + "</span>" +
-            "</div>" +
+            "</span>" +
           "</div>" +
-        "</div>" +
-        // progress + score
-        '<div class="deck-stats">' +
-          '<div class="ds-progress">' +
-            '<div class="dsp-top"><span>Round <b id="d-round">0</b> / <b id="d-total">' + total + '</b></span><span id="d-streak"></span></div>' +
+          '<div class="dh-progress">' +
+            '<div class="dhp-line">' +
+              '<span>Round <b id="d-round">0</b>/<b id="d-total">' + total + "</b></span>" +
+              '<span id="d-streak"></span>' +
+            "</div>" +
             '<div class="dsp-track"><div class="dsp-fill" id="d-fill"></div></div>' +
-            '<div class="dsp-pips" id="d-pips"></div>' +
+            pips +
           "</div>" +
-          '<div class="ds-gauge">' +
-            '<div class="gauge" id="d-gauge">' +
-              '<svg viewBox="0 0 120 120">' +
-                '<circle class="g-bg" cx="60" cy="60" r="52"></circle>' +
-                '<circle class="g-fg" cx="60" cy="60" r="52" id="d-gauge-arc"></circle>' +
-              "</svg>" +
-              '<div class="g-text"><span id="d-avg" class="empty">–</span><small>avg</small></div>' +
-            "</div>" +
+          '<div class="dh-avg"><b id="d-avg" class="empty">–</b><small>avg</small></div>' +
+        "</div>" +
+
+        // The staff itself is moved in below — it is a long-lived node the
+        // renderer draws into, not markup we can rebuild here.
+        '<div class="deck-stage" id="deck-stage"></div>' +
+
+        '<div class="deck-foot">' +
+          '<div class="deck-controls">' +
+            '<button id="d-start" class="btn btn-primary">' + glyph("play", 14) + '<span>Start</span></button>' +
+            '<button id="d-stop" class="btn" disabled>' + glyph("stop", 14) + '<span>Stop</span></button>' +
+            '<button id="d-replay" class="btn" disabled>' + glyph("replay", 14) + '<span>Replay</span></button>' +
+            this._controlsExtras() +
+            '<button id="d-info" type="button" class="btn btn-info" aria-label="How this exercise works" aria-expanded="false">' +
+              glyph("info", 14) + "</button>" +
           "</div>" +
+          '<div id="d-report" class="deck-report">' +
+            '<div class="fb-prompt is-hint" id="d-prompt">' + this._readyHint() + "</div>" +
+          "</div>" +
+          '<div id="d-config"></div>' +
         "</div>" +
-        // controls
-        '<div class="deck-controls">' +
-          '<button id="d-start" class="btn btn-primary">' + glyph("play", 14) + '<span>Start</span></button>' +
-          '<button id="d-stop" class="btn" disabled>' + glyph("stop", 14) + '<span>Stop</span></button>' +
-          '<button id="d-replay" class="btn" disabled>' + glyph("replay", 14) + '<span>Replay</span></button>' +
-          this._controlsExtras() +
-        "</div>" +
-        // live feedback
-        '<div id="d-report" class="deck-report">' +
-          '<div class="fb-prompt" id="d-prompt">' + this._readyHint() + "</div>" +
-        "</div>" +
-        // mode-10 config
-        '<div id="d-config"></div>' +
       "</div>";
 
+    // Re-home the staff between the two bands.  innerHTML above detached it,
+    // but the node survives on `this.stage`, so the renderer's reference and
+    // every listener on it stay valid.
+    const slot = this.info.querySelector("#deck-stage");
+    const stageWrap = this.stage.closest(".session-stage");
+    if (slot && stageWrap) slot.appendChild(stageWrap);
+
     this.info.querySelector("#d-start").addEventListener("click", () => this.start());
+    // On a narrow screen the idle instruction is folded behind this; on a wide
+    // one there is room for the sentence itself and the button is not shown.
+    const info = this.info.querySelector("#d-info");
+    if (info) info.addEventListener("click", () => {
+      const foot = this.info.querySelector(".deck-foot");
+      if (!foot) return;
+      const open = foot.classList.toggle("hint-open");
+      info.setAttribute("aria-expanded", open ? "true" : "false");
+    });
     this.info.querySelector("#d-stop").addEventListener("click", () => this.stopSession());
     const replay = this.info.querySelector("#d-replay");
     if (replay) replay.addEventListener("click", () => this._replayAnswer());
@@ -537,18 +570,49 @@ export class PracticeController {
     // A fresh run starts from a clean stave — accuracy colours accumulate
     // across the rounds of one session, not across sessions.
     if (this.renderer && this.renderer.clearNoteAccuracy) this.renderer.clearNoteAccuracy();
+    // The renderer redraws itself when its panel changes width (rotation, a
+    // resize, the first paint before layout has settled).  That rebuilds the
+    // SVG, so the hidden-notes state has to be put back afterwards.
+    if (this.renderer) {
+      this.renderer.onRelayout = () => {
+        if (this._notesHidden) this._hideNotes(); else this._showNotes();
+      };
+    }
     this._lastAnswerBar = null;
   }
 
-  _showNotes() { if (this.stage) this.stage.classList.remove("hidden-notes"); }
-  _hideNotes() { if (this.stage) this.stage.classList.add("hidden-notes"); }
+  _showNotes() {
+    this._notesHidden = false;
+    if (this.stage) this.stage.classList.remove("hidden-notes");
+  }
+
+  _hideNotes() {
+    this._notesHidden = true;
+    if (this.stage) this.stage.classList.add("hidden-notes");
+  }
 
   // ---- session -------------------------------------------------------------
 
-  start() {
+  async start() {
     if (!this.mode) { this.setStatus("No mode."); return; }
     if (!this.barSteps || !this.barSteps.length) { this.setStatus("No bars to practice."); return; }
     this.stop();
+
+    // Ask for the mic here, while we are still inside the Start click.
+    // Requesting it later — lazily, from inside the first singing round — is
+    // outside any user gesture, which browsers refuse: the round then got no
+    // frames, scored zero and advanced, so a singing chapter played through
+    // like a listening one without ever recording the student.
+    if (this.mode.needsMic) {
+      this.setStatus("Enabling microphone…");
+      try { await this._ensureMic(); }
+      catch (e) {
+        this.setStatus("Microphone unavailable.");
+        this._feedback({ score: 0, verdict: "—", head: "Mic unavailable", detail: e.message });
+        return;
+      }
+    }
+
     this.running = true;
     this._singleRun = false;
     this.round = 0;
@@ -1583,8 +1647,10 @@ export class PracticeController {
     if (!this.detector || !this.detector.isRunning) {
       this._ensureMic().then(() => this._recordNotes(ms, onDone, onPitch)).catch((e) => {
         if (token !== this._roundToken) return;
+        // Don't hand back an empty take: that scores zero and advances, which
+        // walks the whole exercise without the student singing a note.
         this._feedback({ score: 0, verdict: "—", head: "Mic unavailable", detail: e.message });
-        onDone([]);
+        this.stopSession();
       });
       return;
     }
@@ -1637,7 +1703,7 @@ export class PracticeController {
       this._ensureMic().then(() => { this._recordNotesUntilDone(maxMs, onDone, onPitch); }).catch((e) => {
         if (token !== this._roundToken) return;
         this._feedback({ score: 0, verdict: "—", head: "Mic unavailable", detail: e.message });
-        onDone([]);
+        this.stopSession();
       });
       return;
     }
