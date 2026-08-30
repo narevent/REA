@@ -26,11 +26,23 @@
  * `profile.mjs`  the voice profile the soundcheck measures — vibrato width and
  *                articulation floor — and what having one does for a singer
  *                whose voice is nothing like the default.
+ * `learner.mjs`  the singer who does not know the note yet: hunting for an
+ *                interval, hesitating, wobbling, getting it wrong.  Every
+ *                other file here sings the exercise correctly; this is the
+ *                case the app exists for, and the one it used to score worst.
+ * `articulation.mjs`  whether the singer *began* a note or the tracker merely
+ *                found them elsewhere — the level cue that tells a slide from
+ *                an attack, with the figures its threshold is set from.
+ * `singlenote.mjs`  chapters 8 and 9, which had no coverage at all until the
+ *                capture they run on called a helper that no longer existed.
  *
  * `measure.mjs` and `strength.mjs` print the figures the onset thresholds are
- * set from — run them if you change those constants.
+ * set from — run them if you change those constants.  `inspect.mjs` is a
+ * diagnostic: it prints the notes the segmenter finds in a phrase, with why
+ * each one began and whether it settled, which is the first thing to look at
+ * when a learner case fails.
  */
-const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs", "./lastnote.mjs", "./profile.mjs"];
+const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs", "./lastnote.mjs", "./profile.mjs", "./learner.mjs", "./articulation.mjs", "./singlenote.mjs"];
 let failed = false;
 for (const m of mods) {
   const before = process.exitCode;

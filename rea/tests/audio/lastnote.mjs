@@ -29,7 +29,7 @@ function T(name, notes, refs, writtenMs) {
     onNoteDone: (i, n) => { finalScore[i] = n.midi; },
     onComplete: () => { if (completeAt == null) completeAt = t; },
   });
-  for (const f of frames) { t = f.t; handler({ midi: f.midi, onsetStrength: f.onsetStrength, t: f.t }); }
+  for (const f of frames) { t = f.t; handler({ midi: f.midi, onsetStrength: f.onsetStrength, onsetAttack: f.onsetAttack, t: f.t }); }
 
   const LOOK = ((2048 - 512) / SR) * 1000;
   const lastIdx = notes.length - 1;

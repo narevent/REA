@@ -29,7 +29,7 @@ export function runSlots(name, refs, notes, noteMs) {
     onComplete: () => {},
   });
 
-  for (const f of frames) handler({ midi: f.midi, onsetStrength: f.onsetStrength, t: f.t });
+  for (const f of frames) handler({ midi: f.midi, onsetStrength: f.onsetStrength, onsetAttack: f.onsetAttack, t: f.t });
   handler({ midi: null, onsetStrength: 0, t: frames[frames.length - 1].t + 300 });
 
   const got = refs.map((_, i) => (scored[i] == null ? null : Number(scored[i].toFixed(2))));

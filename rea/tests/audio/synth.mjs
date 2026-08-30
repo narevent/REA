@@ -35,7 +35,12 @@ export function sing(notes, opts = {}) {
   reseed(opts.seed || 12345);
   const sr = opts.sampleRate || SR;
   const total = notes.reduce((n, x) => n + Math.ceil(((x.ms || 0) + (x.gapMs || 0)) * sr / 1000), 0);
-  const out = new Float32Array(total + Math.ceil(0.2 * sr));
+  // Half a second of silence after the last note.  A singer's release plus the
+  // recorder's own tail is at least that, and the exercise is entitled to use
+  // silence to know a phrase has ended — at 0.2 s the tail was shorter than
+  // the gap a held note is allowed before it counts as over, so the last note
+  // of a case never closed and the bar never ended.
+  const out = new Float32Array(total + Math.ceil(0.5 * sr));
   const marks = [];
   let phase = 0;
   let i = 0;
@@ -125,6 +130,7 @@ export function analyse(signal, sampleRate, Mpm, makeOnsetDetector, opts = {}) {
     });
     frames.push({
       t, rms, db, flux: mpm.flux, onsetStrength: strength, onset: strength >= 1,
+      onsetAttack: onset.attackDb(),
       midi: res ? 69 + 12 * Math.log2(res.freq / 440) : null,
       clarity: res ? res.clarity : 0,
       sampleAt: start,

@@ -275,6 +275,23 @@ const ONSET_ENV_MIN_DB = 1.5;     // below this the level tells us nothing
 // sustained collapse.  Below this, nothing is starting.
 const ONSET_RELEASE_DB = -4;
 const ONSET_REFRACTORY_MS = 70;   // strength ramps back in over this, rather than being gated off
+// How long the input must actually be quiet before sound returning counts as a
+// new note.
+//
+// "Sound after silence is a note start beyond argument" is true of silence and
+// false of a dip.  A breath in the middle of a held note, an unvoiced
+// consonant, a moment where the level ducks under the gate — each of those put
+// the input below the gate for a tenth of a second, and each was answered with
+// the maximum possible onset strength, which no amount of resistance further
+// down the chain can argue with.  From the singer's side that is a note cut in
+// half: the exercise decided they had moved on because they took a breath.
+//
+// So a dip shorter than this is not silence.  The envelopes are held across it
+// rather than reset, and the refractory ramp is re-armed on the way out, so the
+// transient of the voice coming back does not score either.  A real rest, a
+// real detachment, a real new phrase all last longer than this and are
+// unaffected.
+const ONSET_SILENCE_MS = 200;
 const ONSET_HISTORY = 24;         // ~400 ms of flux at 60 fps
 
 function median(sorted) { return sorted[(sorted.length - 1) >> 1]; }
@@ -324,15 +341,33 @@ export function makeOnsetDetector(opts) {
   let envFast = null, envSlow = null;
   let lastOnsetT = -1e9;
   let wasSounding = false;
+  let quietMs = 0;
+  let attackDb = 0;
+  const silenceMs = o.silenceMs != null ? o.silenceMs : ONSET_SILENCE_MS;
 
   const reset = () => {
     hist = []; prevFlux = 0; prevAttack = 0;
     envFast = null; envSlow = null; wasSounding = false;
+    quietMs = 0;
     lastOnsetT = -1e9;
   };
 
   return {
     reset,
+    /**
+     * How much *louder* the input just got, in dB of fast envelope over slow.
+     *
+     * The strength below answers "did a note just start"; this answers "was it
+     * the singer's voice that said so".  They come apart on exactly one thing,
+     * and it is the thing that matters most to a sight-singing exercise: a
+     * pitch on the move sweeps every harmonic across the spectrum and produces
+     * as much flux as a consonant does, so on spectral evidence alone a legato
+     * slide is indistinguishable from an articulation.  Level is not fooled —
+     * a slide happens at a steady level, and a note being started does not.  A
+     * caller that needs to know whether the singer *began* something, rather
+     * than whether something changed, should ask this as well.
+     */
+    attackDb: () => attackDb,
     /**
      * @param {object} f  { flux, db, sounding, t, dt }
      * @returns {number}  strength; 0 for "nothing happened", 1.0 for "this is a
@@ -343,17 +378,38 @@ export function makeOnsetDetector(opts) {
       const dt = f.dt > 0 && f.dt < 500 ? f.dt : 0;
 
       if (!f.sounding) {
+        attackDb = 0;
+        quietMs += dt;
+        // Only a dip so far.  Leave the envelopes where they were: feeding them
+        // the quiet would make the voice's return look like an attack, which is
+        // the very thing being avoided here.
+        if (quietMs < silenceMs) return 0;
         wasSounding = false;
         envFast = null; envSlow = null; prevAttack = 0; prevFlux = 0;
         return 0;
       }
 
-      // Sound after silence is a note start beyond argument.
+      // Sound after real silence is a note start beyond argument.
       if (!wasSounding) {
         wasSounding = true;
+        quietMs = 0;
         envFast = f.db; envSlow = f.db; prevAttack = 0; prevFlux = f.flux || 0;
         lastOnsetT = t;
+        attackDb = ONSET_ENV_STRONG_DB;   // starting to sing is as plain as it gets
         return 2;
+      }
+
+      // The voice coming back from a dip.  Nothing began: re-arm the refractory
+      // ramp so the transient of the sound returning is discounted, and take
+      // this frame's flux as the baseline so the step up from quiet is not read
+      // as a rising edge.
+      if (quietMs > 0) {
+        quietMs = 0;
+        lastOnsetT = t;
+        prevFlux = f.flux || 0;
+        prevAttack = 0;
+        attackDb = 0;
+        return 0;
       }
 
       const db = f.db;
@@ -363,6 +419,7 @@ export function makeOnsetDetector(opts) {
         envSlow += (db - envSlow) * Math.min(1, dt / 180);
       }
       const attack = envFast - envSlow;
+      attackDb = attack;
       const flux = f.flux || 0;
 
       let thresh = fluxFloor;
@@ -933,7 +990,8 @@ export class PitchDetector {
     this._emit({
       freq: null, midi: null, midiRound: null, cents: 0, clarity: 0, t,
       rms: rms || 0, db: rmsToDb(rms), gated: !this._gateOpen,
-      onset: this._lastOnset, onsetStrength: this._onsetStrength || 0, flux: this._flux || 0,
+      onset: this._lastOnset, onsetStrength: this._onsetStrength || 0,
+      onsetAttack: this._onset ? this._onset.attackDb() : 0, flux: this._flux || 0,
     });
   }
 
@@ -1035,7 +1093,8 @@ export class PitchDetector {
     if (this._last) {
       this._emit(Object.assign({}, this._last, {
         t, rms, db: rmsToDb(rms), gated: false,
-        onset: this._lastOnset, onsetStrength: this._onsetStrength, flux: this._flux,
+        onset: this._lastOnset, onsetStrength: this._onsetStrength,
+        onsetAttack: this._onset.attackDb(), flux: this._flux,
       }));
     }
     else this._emitUnvoiced(t, rms);
