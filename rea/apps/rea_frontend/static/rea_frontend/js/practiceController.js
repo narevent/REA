@@ -26,16 +26,16 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=76";
-import { PitchDetector, midiToName } from "./pitchDetector.js?v=76";
-import { API } from "./api.js?v=76";
+import { AudioPlayer } from "./audioPlayer.js?v=78";
+import { PitchDetector, midiToName } from "./pitchDetector.js?v=78";
+import { API } from "./api.js?v=78";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt,
-} from "./practiceData.js?v=76";
+} from "./practiceData.js?v=78";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=76";
+} from "./practiceScore.js?v=78";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 const SING_TAIL_MS = 600;  // extra recording tail so the user can finish
@@ -72,95 +72,32 @@ const NOTE_CONFIRM_MS = 100;           // how long a new pitch must persist befo
 // ---------------------------------------------------------------------------
 //
 // The exercise does NOT wait for the *correct* note.  As soon as the singer
-// settles on **any** pitch and holds it steadily, that pitch is committed as
-// the attempt for the current reference note, scored against it, and the
-// marker moves on to the next reference note.  Singing a wrong note therefore
-// costs points but never stalls the exercise — which is the whole point of a
-// sight-singing drill: you keep going.
+// settles on **any** pitch, that pitch is committed as the attempt for the
+// current reference note, scored against it, and the marker moves on.  Singing
+// a wrong note therefore costs points but never stalls the exercise — which is
+// the whole point of a sight-singing drill: you keep going.
 //
-// "Settled" is decided by `makePitchLock` below; these are the numbers it runs
-// on.  Each one exists to defeat a specific way singing fools a naive detector:
+// Where a note begins and ends is decided by `makeNoteSegmenter` below, from
+// three cues — an articulation (an onset from the detector), a confirmed change
+// of pitch, and a gap.  The constants live with it.
 //
-//   HYST      A held note is never dead still, so the lock keeps a deadband
-//             around its running centre.  It has to stay comfortably under a
-//             semitone, or a wrong note one semitone away reads as "still the
-//             same note" and is never captured — which is precisely the
-//             failure that leaves the singer stuck.
-//   DRIFT     A deadband around a *moving* centre is not enough on its own: a
-//             steady slide moves little per frame, so it creeps along inside
-//             the band the whole way and banks a note it never held.  Each
-//             lock therefore also remembers where it started.  Set above HYST
-//             so an ordinary scoop into a note still counts as that note.
-//   CONFIRM   Real vibrato is wider than HYST, so leaving the band only starts
-//             a candidate.  A vibrato peak crosses and comes straight back, so
-//             it never confirms; a genuine move to another pitch stays out and
-//             does.  (Same trick as the offline segmenter above.)
-//   HOLD      How long the lock must be held before the note is banked.
-//   GAP       Silence that releases the note — this is how a repeated pitch is
-//             re-articulated into two notes rather than read as one long one.
-//
-// Once a note is banked, the next one only opens when the lock reports a
-// different note or a release; otherwise one long held note would fill every
-// remaining slot in the bar at once.
-const CAPTURE_HOLD_MS = 240;     // stable hold required before a pitch is banked as a sung note
-const CAPTURE_HYST_CENTS = 60;   // deadband around the lock's running centre that still counts as "the same note"
-const CAPTURE_DRIFT_CENTS = 90;  // how far the pitch may wander from where the lock started before it is a different note
-const CAPTURE_CONFIRM_MS = 100;  // how long a pitch outside the lock must persist to count as a new note
-const CAPTURE_GAP_MS = 120;      // unvoiced time that releases the note (this is how a repeated note is re-articulated)
-// A note is also banked when the singer *leaves* it, provided it was held for
-// a viable fraction of the note's own written length — even if it never
-// reached CAPTURE_HOLD_MS.
-//
-// CAPTURE_HOLD_MS alone cannot work as an absolute threshold, because the
-// exercises are not all one speed: the lesson library runs to tempo 119, where
-// an eighth note lasts 252 ms.  Sing along at the written tempo and a note may
-// never accumulate the full hold, so it would never score, the marker would
-// never advance, and every note after it would be matched against the wrong
-// reference — the bar stalls.  Banking on release fixes that without changing
-// how the exercise feels at a slower pace: hold a note and it still banks at
-// CAPTURE_HOLD_MS with the marker leading you; sing at tempo and it banks the
-// moment you move on.
-//
-// The floor separates a short *sung* note from a glance across a pitch on the
-// way somewhere else, so it has to scale with the music: 150 ms is a real note
-// in a fast exercise and obvious hunting in a slow one.  Half the written note
-// is the rule, bounded at both ends — never so low that seeking survives it,
-// never above CAPTURE_HOLD_MS (past which the ordinary hold has already fired
-// and the release path is moot).
-const CAPTURE_MIN_HOLD_FRACTION = 0.5;
-const CAPTURE_MIN_HOLD_FLOOR_MS = 110;
-// Once a note has been scored, how far the voice must move to count as having
-// gone on to the *next* note — measured in cents from the pitch that was
-// scored, and held for CAPTURE_CONFIRM_MS.
-//
-// This is judged against the scored pitch rather than against the pitch lock's
-// own state, and that distinction matters more than it sounds.  The lock
-// re-anchors whenever the voice strays past its drift bound, and on a note
-// sung with a scooped attack that happens *while the singer is still holding
-// the same note*: the scoop leaves the anchor low, and ordinary vibrato around
-// the settled pitch then reads as drift.  Treating a re-anchor as "a new note
-// was sung" therefore let one held note bank itself two or three times over,
-// consuming the reference notes after it.  Scooping into a note is exactly
-// what an unsure singer does, so this has to be robust to it.
-//
-// 70 cents sits above vibrato and settling drift, and comfortably below the
-// semitone that separates any two notes in an exercise.
-const CAPTURE_NEW_NOTE_CENTS = 70;
-// While the singer stays on the scored note, that reference pitch follows the
-// voice with this time constant.  A note is rarely where it started: a scooped
-// attack means the pitch banked at CAPTURE_HOLD_MS sits below where the note
-// actually settles, and measuring "have they moved on" from that stale value
-// let ordinary drift and vibrato add up past the threshold.  Following is slow
-// enough that a real move to another note (~100 ms) outruns it easily, and
-// fast enough that settling never does.
-const CAPTURE_BANKED_FOLLOW_MS = 500;
-// There is deliberately no *level* requirement for banking a note here.  One
-// was tried (a note had to sit some margin above the calibrated gate) and it
-// can only ever cause the exercise to stall: soft singing that the detector
-// tracks perfectly well would fail it, the note would never bank, and the
-// marker would sit there.  Level belongs in one place — the calibrated noise
-// gate in pitchDetector, which decides what counts as sound at all.
+// There is deliberately no *level* requirement for scoring a note.  One was
+// tried (a note had to sit some margin above the calibrated gate) and it can
+// only ever cause the exercise to stall: soft singing that the detector tracks
+// perfectly well would fail it, the note would never score, and the marker
+// would sit there.  Level belongs in one place — the calibrated noise gate in
+// pitchDetector, which decides what counts as sound at all.
 
+// Pitch-lock constants.  These now serve one caller only —
+// `_captureFirstStablePitch`, which the soundcheck uses to read a single sung
+// note for calibration.  The exercise's own note capture does not use the lock;
+// it segments notes with `makeNoteSegmenter` (below), which knows about
+// articulation onsets and so can tell two notes at the same pitch apart.
+const CAPTURE_HOLD_MS = 240;     // stable hold required before a pitch is taken
+const CAPTURE_HYST_CENTS = 60;   // deadband around the lock's running centre
+const CAPTURE_DRIFT_CENTS = 90;  // how far the pitch may wander from where the lock started
+const CAPTURE_CONFIRM_MS = 100;  // how long a pitch outside the lock must persist
+const CAPTURE_GAP_MS = 120;      // unvoiced time that releases the note
 
 // The 10 modes, keyed by chapter key.  Each carries enough metadata to render
 // the session deck.  The `key` must match the chapter keys in chapters.js.
@@ -1353,14 +1290,19 @@ export class PracticeController {
   /**
    * Build the live capture callback for a bar.
    *
-   * The marker starts on the bar's first reference note.  Every time the
-   * singer settles on a pitch — *any* pitch, right or wrong — and holds it for
-   * CAPTURE_HOLD_MS, that pitch is committed as the attempt for the current
-   * reference note and the marker moves to the next one.  Nothing here
+   * The marker starts on the bar's first reference note.  `makeNoteSegmenter`
+   * decides where each sung note begins and ends; every note it reports is
+   * committed as the attempt for the current reference note — *any* pitch,
+   * right or wrong — and the marker moves to the next one.  Nothing here
    * compares the sung pitch to the target in order to decide whether to
    * advance; the target is used only to colour the marker and, later, to
-   * score.  That is the difference from the old behaviour, where the exercise
-   * stalled on a note until it was sung correctly.
+   * score.  Singing the wrong note costs points, never alignment.
+   *
+   * A note is scored twice: provisionally the moment it settles, so the marker
+   * leads rather than follows, and again when the singer leaves it, from the
+   * note's body with the attack and the slide out trimmed off.  The second
+   * measurement is the one that stands, which is why a scooped attack is
+   * scored where the singer landed rather than where they came in.
    *
    * The marker's vertical position is a light one-pole smoothing of the
    * incoming fractional pitch, so vibrato reads as a gentle wobble rather
@@ -1388,27 +1330,13 @@ export class PracticeController {
     };
     showTarget(0);
 
-    // How long a note must be held to count when the singer moves off it,
-    // derived from this exercise's own tempo (see CAPTURE_MIN_HOLD_FRACTION).
-    const minHoldMs = Math.max(
-      CAPTURE_MIN_HOLD_FLOOR_MS,
-      Math.min(CAPTURE_HOLD_MS, CAPTURE_MIN_HOLD_FRACTION * (noteMs || 0)),
-    );
-
-    const lock = makePitchLock();
-    // Whether the note currently being sung has already been scored, so a
-    // sustained note fills one reference slot rather than every remaining one.
-    let banked = false;
-    let bankedMidi = null;   // the pitch that was scored, for "have they moved on?"
-    let bankedIndex = -1;    // which reference note that was, for refining its score
-    let bankedSince = 0;     // when it was scored, so its duration keeps growing
-    let awayMs = 0;          // time spent clear of it (decays, so vibrato never adds up)
+    const seg = makeNoteSegmenter({ paceMs: noteMs });
+    // Which reference slot the note currently being sung was scored into, so a
+    // sustained note fills one slot rather than every remaining one, and so the
+    // slot can be refined and then settled when the singer moves on.
+    let scoredIndex = -1;
+    let scoredAt = 0;
     let lastRefine = 0;
-    // Snapshot of the *un-banked* note under the lock, carried one frame so the
-    // frame that ends it can still bank it — by then the lock has moved on or
-    // been cleared.  Null whenever `banked`, so a scored note can never be
-    // banked a second time by the release path.
-    let prev = null;
 
     let smoothMidi = targets[0];
     let lastT = null;
@@ -1463,89 +1391,66 @@ export class PracticeController {
         }
       }
 
-      const state = lock.feed(midi, usableDt, now);
+      const note = seg.feed({
+        midi,
+        onsetStrength: (info && info.onsetStrength) || 0,
+        t: now,
+        dt: usableDt,
+      });
 
-      // --- Still on the note we just scored? -------------------------------
-      // Judged against the scored pitch (see CAPTURE_NEW_NOTE_CENTS), not
-      // against the lock, which re-anchors on its own for reasons that have
-      // nothing to do with the singer having moved on.
-      if (banked) {
-        if (state === "released") {
-          banked = false; awayMs = 0;          // a breath ends the note outright
-        } else if (midi != null) {
-          const awayCents = Math.abs(midi - bankedMidi) * 100;
-          if (awayCents >= CAPTURE_NEW_NOTE_CENTS) {
-            awayMs += usableDt;
-          } else {
-            awayMs = Math.max(0, awayMs - usableDt);      // vibrato never accumulates
-            // Still on the note: let the reference settle onto where the voice
-            // actually is, and improve the note's score as it steadies — a
-            // singer who scoops in and then lands the pitch should be scored on
-            // where they landed, not on the way in.
-            if (usableDt) {
-              bankedMidi += (midi - bankedMidi) * Math.min(1, usableDt / CAPTURE_BANKED_FOLLOW_MS);
-            }
-            if (onNote && bankedIndex >= 0 && now - lastRefine > 80) {
-              lastRefine = now;
-              onNote(bankedIndex, { midi: bankedMidi, durMs: now - bankedSince });
-            }
-          }
-          if (awayMs >= CAPTURE_CONFIRM_MS) { banked = false; awayMs = 0; }
-        }
-        if (banked) { prev = null; return; }
-        // They have moved on, so that note's accuracy is settled: this is the
-        // moment its colour goes onto the stave.
-        if (bankedIndex >= 0 && onNoteDone) {
-          onNoteDone(bankedIndex, { midi: bankedMidi, durMs: now - bankedSince });
-        }
-        bankedIndex = -1;
-        // If the lock is somehow still sitting on the note we scored, drop it
-        // so its held time can't be credited to the new one.
-        if (lock.centre() != null &&
-            Math.abs(lock.centre() - bankedMidi) * 100 < CAPTURE_NEW_NOTE_CENTS) {
-          lock.clear();
-        }
-        bankedMidi = null;
-        prev = null;
-        return;
-      }
-
-      // The note under the lock has ended (a breath, or a different pitch).
-      if (state === "released" || state === "new") {
-        // If it was a real note that simply never reached the full hold —
-        // which is the normal case when singing at the exercise's own tempo —
-        // bank it now instead of losing it.  Losing it is not a small matter:
-        // the marker would stay put, so the singer's *next* note would be
-        // scored against this reference note and every one after it would be
-        // out by one, which is what "gets stuck" looks like from the outside.
-        if (prev && prev.held >= minHoldMs) {
-          if (bank(prev.midi, prev.held, true)) return;   // bar finished
-          prev = null;
+      // --- a note finished -------------------------------------------------
+      if (note.ended) {
+        if (scoredIndex >= 0) {
+          // Settle the slot it was scored into.  Its pitch is measured over the
+          // note's body — the attack and the slide out are both trimmed — so a
+          // singer is scored on the note they sang, not on the way into it.
+          if (onNote) onNote(scoredIndex, { midi: note.ended.midi, durMs: note.ended.durMs });
+          if (onNoteDone) onNoteDone(scoredIndex, { midi: note.ended.midi, durMs: note.ended.durMs });
+          scoredIndex = -1;
+        } else if (note.ended.durMs >= seg.minNoteMs()) {
+          // A real note that ended before it ever settled — which is the normal
+          // case when singing at the exercise's own tempo.  Score it now rather
+          // than lose it: losing it would leave the marker behind, and every
+          // note after it would be matched against the wrong reference, which
+          // is what "it gets stuck" looks like from the outside.
+          if (bank(note.ended.midi, note.ended.durMs, true)) return;
         }
       }
 
-      // Held long enough to bank while still singing it.  This is the path
-      // that makes the marker *lead* at a comfortable pace: scoring the note
-      // and moving the marker on are deliberately the same moment.  Splitting
-      // them (marker waits until the singer leaves the note) was tried and
-      // felt markedly worse — the moving marker is the cue that says "got it,
-      // next", and without it the exercise follows the singer instead of
-      // leading them, so every note drags.
-      if (lock.held() >= CAPTURE_HOLD_MS) {
-        bankedMidi = lock.centre();
-        bankedIndex = step;
-        bankedSince = now - lock.held();
-        banked = true;
-        awayMs = 0;
+      // --- the open note has locked: score it and let the marker lead -------
+      // Locked, not merely stable: a hundred milliseconds of steadiness is a
+      // singer arriving at a note, not a singer having sung one, and scoring
+      // there is what made the marker run ahead of the voice.
+      if (scoredIndex < 0 && note.locked && note.pitch != null) {
+        scoredIndex = step;
+        scoredAt = now - note.heldMs;
         lastRefine = now;
-        prev = null;
-        bank(bankedMidi, lock.held(), false);
+        if (bank(note.pitch, note.heldMs, false)) return;
         return;
       }
 
-      // Remember the note under the lock, so the frame that ends it can still
-      // bank it (by then the lock has already moved on or been cleared).
-      prev = lock.centre() != null ? { midi: lock.centre(), held: lock.held() } : null;
+      // --- still on the note we scored: keep refining it ---------------------
+      if (scoredIndex >= 0 && note.pitch != null && now - lastRefine > 80) {
+        lastRefine = now;
+        if (onNote) onNote(scoredIndex, { midi: note.pitch, durMs: now - scoredAt });
+        return;
+      }
+
+      // --- stall guard -------------------------------------------------------
+      // A voice that never holds still enough to lock must not freeze the
+      // exercise.  After a couple of the singer's own note-lengths of unbroken
+      // sound, the best estimate we have is scored and the marker moves on:
+      // they are audibly on something, and scoring where they actually are
+      // beats stopping the bar dead — a stall costs every later note too.
+      // Measured on the *open note*, not on continuous voicing: a legato phrase
+      // never goes quiet, so a voicing timer would keep counting across notes
+      // and fire in the middle of a perfectly good one.
+      if (scoredIndex < 0 && note.rough != null && note.heldMs >= 2.4 * seg.paceMs()) {
+        scoredIndex = step;
+        scoredAt = now - note.heldMs;
+        lastRefine = now;
+        if (bank(note.rough, note.heldMs, false)) return;
+      }
     };
   }
 
@@ -1812,74 +1717,316 @@ export class PracticeController {
  * note is released, which is what lets a repeated pitch be re-articulated as
  * two separate notes.
  */
-function makePitchLock() {
-  let sum = 0, count = 0, heldMs = 0, anchor = null;
-  let candSum = 0, candCount = 0, candSince = null, candAnchor = null;
-  let silentMs = 0;
+// ---------------------------------------------------------------------------
+// Note segmentation
+// ---------------------------------------------------------------------------
+//
+// Turns a stream of pitch frames into sung notes.  Three ideas carry it:
+//
+// 1. EVIDENCE, NOT VERDICTS.  A note boundary is not one test passing.  The
+//    detector reports how strongly the audio was articulated (a number, not a
+//    yes), the pitch reports how far it has moved beyond what this note's own
+//    vibrato explains, and the two accumulate.  A boundary happens when the
+//    evidence adds up.  A single frame's opinion decides nothing, which is what
+//    stops one loud consonant — or one wide vibrato peak — from cutting a note
+//    in half.
+//
+// 2. A LOCK RESISTS.  The longer and more consistently a pitch has been held,
+//    the more evidence it takes to end it.  This is the deliberate coupling
+//    between locking, vibrato and onset strength: inside a firmly held note we
+//    are entitled to be sceptical of a weak articulation, because we know what
+//    we are listening to.  Inside an unsettled one we should believe it
+//    quickly, because we do not.
+//
+// 3. THE SINGER SETS THE TEMPO, NOT THE SCORE.  Every duration here scales
+//    with `pace` — a running median of the notes this singer has actually sung.
+//    The written note length only seeds it.  Sight-singing is not a rhythm
+//    test: singing the phrase half as fast must work exactly as well, and when
+//    the thresholds came from the written tempo it did not.
+const SEG_TOL_BASE_CENTS = 42;      // how far a steady note may wander and still be itself
+const SEG_TOL_MAX_CENTS = 95;       // never as far as a semitone, or a wrong note reads as the right one
+const SEG_TOL_VIB_MARGIN = 18;      // headroom above measured vibrato width
+const SEG_FOLLOW_LIMIT_CENTS = 35;  // how far a locked pitch may track the voice
+// How much extra evidence it takes to end a note, on top of the base 1.0.
+// Both are measured, not guessed — rea/tests/audio/strength.mjs reports the
+// accumulated evidence at real boundaries against the worst false peak:
+//
+//                       real boundary   worst false
+//   steady voice ......... 1.32 - 2.09      0.49
+//   voice in vibrato ..... 2.26             0.92
+//
+// So a steady note can be broken at 1.0 with room on both sides, while a voice
+// in vibrato needs a higher bar — vibrato is a genuine spectral disturbance and
+// it is the only thing that comes close to looking like an articulation.  This
+// is the coupling that matters: the pitch tells us whether to believe the
+// spectrum.
+const SEG_LOCK_RESISTANCE = 0.2;    // ...per unit of lock confidence
+const SEG_VIB_RESISTANCE = 0.35;    // ...while the voice is in vibrato
+// Short, because an articulation is a burst and vibrato is a stream.  Summing
+// over a longer window gathers more of the burst but proportionally more of the
+// stream too, and past ~70 ms vibrato overtakes real onsets outright.
+const SEG_ONSET_DECAY_MS = 55;      // an articulation's evidence fades over this
+const SEG_RELEASE_TRIM_MS = 60;     // drop the slide *out* of a note before scoring it
+const SEG_VIB_WINDOW_MS = 450;      // window the vibrato estimate is made over
+const SEG_VIB_MIN_HZ = 3.5;         // slower than this is drift, not vibrato
+const SEG_VIB_MAX_HZ = 9;           // faster is jitter
+const SEG_VIB_MIN_CENTS = 12;       // narrower than this needs no allowance
+const SEG_VIB_MAX_CENTS = 130;      // wider than this is not vibrato, it is two notes
+const SEG_VIB_DEADBAND_CENTS = 4;   // ignore crossings this small when counting rate
+const SEG_PACE_MIN_MS = 180;
+const SEG_PACE_MAX_MS = 1600;
 
-  const centre = () => (count ? sum / count : null);
-  const dropCandidate = () => { candSum = 0; candCount = 0; candSince = null; candAnchor = null; };
-  const clear = () => {
-    sum = 0; count = 0; heldMs = 0; anchor = null;
-    dropCandidate(); silentMs = 0;
+/** Median of an array of numbers (copies; the caller's order is preserved). */
+function medianOf(values) {
+  if (!values.length) return null;
+  const v = values.slice().sort((a, b) => a - b);
+  return v[(v.length - 1) >> 1];
+}
+
+/** Value at a percentile of an already-sorted array. */
+function percentileOf(sorted, q) {
+  if (!sorted.length) return null;
+  const i = Math.min(sorted.length - 1, Math.max(0, Math.round(q * (sorted.length - 1))));
+  return sorted[i];
+}
+
+const segClamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+/**
+ * Segment a stream of pitch frames into sung notes.
+ *
+ * Exported for testing: pure state over a frame stream, so it can be driven
+ * from synthesised singing without a microphone (see rea/tests/audio).
+ *
+ * `feed({ midi, onsetStrength, t, dt })` returns what happened this frame:
+ *   ended   — the note that just finished: { midi, durMs, startT }.  Its pitch
+ *             is measured over the note's *body*, with the attack and the slide
+ *             out trimmed off, so a singer is scored on the note they sang.
+ *   started — a new note began on this frame.
+ *   pitch   — the open note's locked pitch, or null before it locks.
+ *   locked  — the pitch has been held long enough to be trusted.  Nothing
+ *             should be scored before this.
+ *   rough   — best estimate regardless of lock, for the caller's stall guard.
+ */
+export function makeNoteSegmenter(opts) {
+  const o = opts || {};
+  // Seeded from the written tempo, then overtaken by what the singer does.
+  let pace = segClamp(o.paceMs || 450, SEG_PACE_MIN_MS, SEG_PACE_MAX_MS);
+  const durations = [];
+
+  let startT = null;
+  let samples = [];          // { t, midi } after the attack window
+  let centre = null;         // the locked pitch
+  let locked = false;
+  let lockedAt = 0;
+  let onsetEvidence = 0;     // decaying sum of articulation strength
+  let departureMs = 0;       // time spent beyond what vibrato explains
+  let silentMs = 0;
+  let lastVoicedT = null;
+  let rough = null;          // best pitch estimate even before the note locks
+  let vib = { present: false, halfWidth: 0, rateHz: 0 };
+
+  // --- timings, all derived from the singer's own pace ---------------------
+  const attackSkipMs = () => segClamp(0.12 * pace, 45, 120);
+  const settleWindowMs = () => segClamp(0.5 * pace, 180, 420);
+  const lockMs = () => segClamp(0.30 * pace, 90, 320);
+  const minSegmentMs = () => segClamp(0.42 * pace, 130, 600);
+  const confirmMs = () => segClamp(0.22 * pace, 80, 220);
+  const gapMs = () => segClamp(0.25 * pace, 90, 220);
+  const minNoteMs = () => segClamp(0.40 * pace, 120, 500);
+
+  /** Vibrato over the tail of the open note: how wide, and how fast. */
+  const estimateVibrato = (t) => {
+    const win = samples.filter((x) => x.t >= t - SEG_VIB_WINDOW_MS);
+    if (win.length < 6) return { present: false, halfWidth: 0, rateHz: 0 };
+    const spanMs = win[win.length - 1].t - win[0].t;
+    if (spanMs < 120) return { present: false, halfWidth: 0, rateHz: 0 };
+    const mid = medianOf(win.map((x) => x.midi));
+    const devs = win.map((x) => (x.midi - mid) * 100);
+    const sorted = devs.slice().sort((a, b) => a - b);
+    const halfWidth = (percentileOf(sorted, 0.9) - percentileOf(sorted, 0.1)) / 2;
+    // Rate from sign changes, with a deadband so noise around the centre does
+    // not read as a very fast wobble.
+    let crossings = 0, last = 0;
+    for (const d of devs) {
+      const sign = d > SEG_VIB_DEADBAND_CENTS ? 1 : d < -SEG_VIB_DEADBAND_CENTS ? -1 : 0;
+      if (sign !== 0) { if (last !== 0 && sign !== last) crossings++; last = sign; }
+    }
+    const rateHz = (crossings / 2) / (spanMs / 1000);
+    const present = rateHz >= SEG_VIB_MIN_HZ && rateHz <= SEG_VIB_MAX_HZ &&
+                    halfWidth >= SEG_VIB_MIN_CENTS && halfWidth <= SEG_VIB_MAX_CENTS;
+    return { present, halfWidth, rateHz };
   };
-  // A frame belongs to a lock when it is both near the lock's running centre
-  // and still near where that lock began.
-  const belongs = (midi, c, a) =>
-    Math.abs(midi - c) * 100 <= CAPTURE_HYST_CENTS &&
-    Math.abs(midi - a) * 100 <= CAPTURE_DRIFT_CENTS;
+
+  /** How far the voice may sit from the locked pitch and still be this note. */
+  const tolerance = () => {
+    const base = SEG_TOL_BASE_CENTS;
+    if (!vib.present) return base;
+    return Math.min(SEG_TOL_MAX_CENTS, Math.max(base, vib.halfWidth * 1.35 + SEG_TOL_VIB_MARGIN));
+  };
+
+  /** 0..1 — how much this note has earned the benefit of the doubt. */
+  const lockConfidence = (t) => {
+    if (!locked) return 0;
+    return segClamp((t - lockedAt) / (2 * lockMs()), 0, 1);
+  };
+
+  /**
+   * The note's pitch: the median of the part where the voice was actually on
+   * the note.
+   *
+   * Trimming a fixed number of milliseconds off each end is not enough — a
+   * legato slide into a note can run 120 ms, and whatever of it survives the
+   * trim drags the median toward the note before.  So once the note has a
+   * locked centre, the body is the samples sitting within tolerance of it: the
+   * slide in and the slide out exclude themselves, at whatever speed the singer
+   * took them.  A singer is scored on the note they sang, not on the way into
+   * or out of it.
+   */
+  const bodyPitch = () => {
+    if (!samples.length) return centre;
+    const last = samples[samples.length - 1].t;
+    let use = samples.filter((x) => x.t <= last - SEG_RELEASE_TRIM_MS);
+    if (use.length < 3) use = samples;
+    if (centre != null) {
+      const tol = tolerance();
+      const onNote = use.filter((x) => Math.abs(x.midi - centre) * 100 <= tol);
+      if (onNote.length >= 3) use = onNote;
+    }
+    return medianOf(use.map((x) => x.midi));
+  };
+
+  const close = (t) => {
+    if (startT == null) return null;
+    const midi = bodyPitch();
+    const durMs = (lastVoicedT != null ? lastVoicedT : t) - startT;
+    startT = null; samples = []; centre = null; locked = false; rough = null;
+    onsetEvidence = 0; departureMs = 0;
+    vib = { present: false, halfWidth: 0, rateHz: 0 };
+    if (midi == null) return null;
+    // Only a note long enough to be a note teaches us about the singer's pace;
+    // a clipped fragment would drag the estimate down and make everything after
+    // it more trigger-happy.
+    if (durMs >= minNoteMs()) {
+      durations.push(durMs);
+      if (durations.length > 5) durations.shift();
+      if (durations.length >= 2) {
+        pace = segClamp(medianOf(durations), SEG_PACE_MIN_MS, SEG_PACE_MAX_MS);
+      }
+    }
+    return { midi, durMs, startT: t - durMs };
+  };
+
+  const open = (t) => {
+    startT = t; samples = []; centre = null; locked = false; rough = null;
+    onsetEvidence = 0; departureMs = 0;
+    vib = { present: false, halfWidth: 0, rateHz: 0 };
+  };
 
   return {
-    centre,
-    held: () => heldMs,
-    clear,
-    /**
-     * Feed one frame; `midi` is null for an unvoiced one.  Returns:
-     *   "idle"     nothing locked (silence before the first note)
-     *   "new"      a different pitch was confirmed — the lock now tracks it
-     *   "holding"  the same note continues
-     *   "released" a silence gap ended the note
-     */
-    feed(midi, dt, now) {
+    pitch: () => centre,
+    paceMs: () => pace,
+    minNoteMs,
+    reset: () => {
+      startT = null; samples = []; centre = null; locked = false;
+      onsetEvidence = 0; departureMs = 0; silentMs = 0; lastVoicedT = null;
+      durations.length = 0;
+    },
+
+    feed(f) {
+      const t = f.t;
+      const dt = f.dt > 0 && f.dt < 500 ? f.dt : 0;
+      const midi = f.midi;
+      const strength = f.onsetStrength || 0;
+      const out = {
+        ended: null, started: false, pitch: centre, rough: null,
+        locked: false, stable: false, heldMs: 0, vibrato: vib.present,
+      };
+
       if (midi == null) {
         silentMs += dt;
-        if (silentMs >= CAPTURE_GAP_MS && count) { clear(); return "released"; }
-        return count ? "holding" : "idle";
+        if (silentMs >= gapMs() && startT != null) out.ended = close(t);
+        out.pitch = centre;
+        return out;
       }
       silentMs = 0;
+      lastVoicedT = t;
 
-      const c = centre();
-      if (c == null) { sum = midi; count = 1; heldMs = 0; anchor = midi; dropCandidate(); return "new"; }
+      // --- accumulate the evidence for ending the open note ----------------
+      let begin = startT == null;
+      if (!begin) {
+        const age = t - startT;
+        // Articulation evidence decays, so a burst smeared across two or three
+        // frames adds up to one onset while two unrelated flickers a beat apart
+        // do not.
+        onsetEvidence *= Math.exp(-(dt || 0) / SEG_ONSET_DECAY_MS);
+        if (age >= minSegmentMs()) onsetEvidence += strength;
 
-      if (belongs(midi, c, anchor)) {
-        sum += midi; count += 1; heldMs += dt;
-        dropCandidate();
-        return "holding";
+        // Pitch evidence: distance beyond what this note's own vibrato explains.
+        //
+        // The reference falls back to the running median, not to this frame's
+        // own pitch.  Comparing the pitch against itself can never register a
+        // move, so a note that never locked — a fast one, where there is barely
+        // time to — could be left open indefinitely while the singer moved on
+        // through two more.
+        const tol = tolerance();
+        const ref = centre != null ? centre : (rough != null ? rough : midi);
+        const away = Math.abs(midi - ref) * 100 - tol;
+        if (away > 0) {
+          // A bigger move is worth more per unit time than a marginal one.
+          departureMs += (dt || 0) * segClamp(away / tol, 0.5, 2.5);
+        } else {
+          departureMs = Math.max(0, departureMs - (dt || 0) * 2);
+        }
+
+        const evidence = onsetEvidence + departureMs / confirmMs();
+        // A firmly locked note demands more before it will be broken, and a
+        // voice in vibrato more again.
+        const needed = 1
+          + SEG_LOCK_RESISTANCE * lockConfidence(t)
+          + (vib.present ? SEG_VIB_RESISTANCE : 0);
+        if (evidence >= needed && age >= minSegmentMs()) begin = true;
       }
 
-      // Outside the lock: a candidate for a new note.  It has to persist — and
-      // hold still on its own terms — before the lock moves, which is what
-      // keeps a wobble from becoming a note and a sweep from becoming several.
-      const cc = candCount ? candSum / candCount : null;
-      if (cc == null || !belongs(midi, cc, candAnchor)) {
-        candSum = midi; candCount = 1; candSince = now; candAnchor = midi;
-      } else {
-        candSum += midi; candCount += 1;
+      if (begin) {
+        out.ended = close(t);
+        open(t);
+        out.started = true;
       }
-      if (candSince != null && now - candSince >= CAPTURE_CONFIRM_MS) {
-        // Confirmed.  Carry the candidate's own frames over so the time already
-        // spent on the new note counts towards its hold.
-        heldMs = now - candSince;
-        sum = candSum; count = candCount; anchor = candAnchor;
-        dropCandidate();
-        return "new";
+
+      // --- measure the open note -------------------------------------------
+      if (t - startT >= attackSkipMs()) samples.push({ t, midi });
+      const winStart = t - settleWindowMs();
+      const win = samples.filter((x) => x.t >= winStart);
+      if (win.length >= 3) {
+        const span = win[win.length - 1].t - win[0].t;
+        const med = medianOf(win.map((x) => x.midi));
+        out.rough = med;
+        rough = med;
+        vib = estimateVibrato(t);
+        const spread = medianOf(win.map((x) => Math.abs(x.midi - med) * 100));
+        const tol = tolerance();
+        if (span >= lockMs() && spread <= tol) {
+          out.stable = true;
+          if (!locked) { locked = true; lockedAt = t; centre = med; }
+          else {
+            // Bounded follow.  It has to follow a little — a scooped attack
+            // means the pitch at the start of a note is not the note — but an
+            // unbounded follow tracks a slow glide all the way to the next
+            // note, so "have they moved on" never becomes true and the marker
+            // sits still while the singer sings on.
+            const lim = SEG_FOLLOW_LIMIT_CENTS / 100;
+            const delta = segClamp(med - centre, -lim, lim);
+            centre += delta * Math.min(1, (dt || 16) / 260);
+          }
+        }
       }
-      // Not confirmed: treat it as a wobble — the lock survives, but time spent
-      // off it earns no hold credit.  That matters when the excursion is not a
-      // wobble at all but a sweep whose candidate keeps restarting: crediting
-      // those frames would let the stale lock reach its hold time and bank a
-      // pitch the singer had already left.
-      return "holding";
+
+      out.pitch = centre;
+      out.locked = locked;
+      out.vibrato = vib.present;
+      out.heldMs = t - startT;
+      return out;
     },
   };
 }
