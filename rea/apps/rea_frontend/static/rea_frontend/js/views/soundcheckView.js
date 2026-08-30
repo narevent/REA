@@ -23,16 +23,17 @@
  *   sc.leave()  - release the microphone when navigating away.
  */
 
-import { NotationRenderer } from "../components/notationRenderer.js?v=79";
+import { NotationRenderer } from "../components/notationRenderer.js?v=80";
 import {
   PitchDetector, midiToName, hzToMidi, rmsToDb,
   getVoiceOctaveOffset, setVoiceOctaveOffset,
   getInputGain, setInputGain, setNoiseGate, getNoiseGate, hasCalibratedInput,
+  setVoiceVibratoCents, setVoiceOnsetFloor,
   INPUT_GAIN_MIN, INPUT_GAIN_MAX,
-} from "../pitchDetector.js?v=79";
+} from "../pitchDetector.js?v=80";
 import {
   SOUND_PRESETS, getCurrentSoundPreset, setSoundPresetById, soundPresetGroups,
-} from "../soundPresets.js?v=79";
+} from "../soundPresets.js?v=80";
 
 // ---------------------------------------------------------------------------
 // The soundcheck run
@@ -153,6 +154,52 @@ export function computeInputCalibration({ noiseRms, voiceRms }) {
 }
 
 /** Human label for an octave offset value. */
+// How much of the sung note to skip before measuring the *sustain*: the attack,
+// the scoop into the note, and the moment or two it takes to settle.
+const PROFILE_SETTLE_MS = 350;
+const PROFILE_MIN_SAMPLES = 12;
+
+/**
+ * Measure this singer's vibrato width and their articulation floor from the
+ * note the soundcheck already asks them to hold.
+ *
+ * Deliberately taken from that same note rather than from a step of its own:
+ * the soundcheck is one button on purpose, and everything needed is already in
+ * the recording.  Both measurements come from the sustain only — the attack is
+ * skipped, since the question in each case is what the voice does once it has
+ * arrived, not how it gets there.
+ *
+ * Exported for testing.
+ */
+export function measureVoiceProfile(run) {
+  const from = (run.singStartT || 0) + PROFILE_SETTLE_MS;
+  const held = (run.pitchSeries || []).filter((x) => x.t >= from);
+  const quiet = (run.strengths || []).filter((x) => x.t >= from);
+
+  let vibratoCents = 0, vibratoOk = false;
+  if (held.length >= PROFILE_MIN_SAMPLES) {
+    const midis = held.map((x) => x.midi).sort((a, b) => a - b);
+    const med = midis[(midis.length - 1) >> 1];
+    const devs = held.map((x) => (x.midi - med) * 100).sort((a, b) => a - b);
+    const at = (q) => devs[Math.min(devs.length - 1, Math.max(0, Math.round(q * (devs.length - 1))))];
+    // The 10th-to-90th spread, halved: robust to a single stray frame in a way
+    // the full range is not, and it is a half-width the segmenter can use as a
+    // tolerance directly.
+    vibratoCents = Math.max(0, (at(0.9) - at(0.1)) / 2);
+    vibratoOk = true;
+  }
+
+  let onsetFloor = 0, floorOk = false;
+  if (quiet.length >= PROFILE_MIN_SAMPLES) {
+    const vals = quiet.map((x) => x.v).sort((a, b) => a - b);
+    // The 90th percentile, not the maximum: one throat-clear should not define
+    // this voice's floor for good.
+    onsetFloor = vals[Math.min(vals.length - 1, Math.round(0.9 * (vals.length - 1)))];
+    floorOk = true;
+  }
+  return { vibratoCents, vibratoOk, onsetFloor, floorOk };
+}
+
 function offsetLabel(oct) {
   if (oct === 0) return "In pitch";
   return (oct > 0 ? "+" : "−") + Math.abs(oct) + " octave" + (Math.abs(oct) === 1 ? "" : "s");
@@ -438,6 +485,7 @@ export class SoundcheckView {
     const previousGain = getInputGain();
     this._run = {
       phase: "room", noise: [], voice: [], pitches: [],
+      pitchSeries: [], strengths: [], singStartT: null,
       voicedMs: 0, lastT: null, previousGain,
     };
     this.els.runBtn.disabled = true;
@@ -458,6 +506,7 @@ export class SoundcheckView {
       this._runTimers.push(setTimeout(() => {
         if (!this._run) return;
         this._run.phase = "sing";
+        this._run.singStartT = performance.now();
         this._setResult(this.els.runResult, "busy", "Now sing it back…",
           "Hold a steady note at the volume you'd actually practise at — whatever octave is comfortable.");
         this._runTimers.push(setTimeout(() => this._finishSoundcheck(), SC_SING_MAX_MS));
@@ -517,11 +566,16 @@ export class SoundcheckView {
       this._setOffset(Math.round((REFERENCE.midi - medianTrueMidi) / 12));
     }
 
-    this._reportSoundcheck({ gainOk, octaveOk, cal, sungName });
+    // --- vibrato width and articulation floor ---
+    const profile = measureVoiceProfile(run);
+    if (profile.vibratoOk) setVoiceVibratoCents(profile.vibratoCents);
+    if (profile.floorOk) setVoiceOnsetFloor(profile.onsetFloor);
+
+    this._reportSoundcheck({ gainOk, octaveOk, cal, sungName, profile });
   }
 
   /** Turn the run's outcome into one combined result card. */
-  _reportSoundcheck({ gainOk, octaveOk, cal, sungName }) {
+  _reportSoundcheck({ gainOk, octaveOk, cal, sungName, profile }) {
     if (!gainOk && !octaveOk) {
       this._setResult(this.els.runResult, "warn", "Didn't hear enough singing",
         "Run the soundcheck again, and sing a steady note right through the " +
@@ -541,10 +595,18 @@ export class SoundcheckView {
         (20 * Math.log10(cal.gain)).toFixed(1)) + " dB, putting your voice at " +
         cal.targetDb.toFixed(0) + " dBFS.";
 
+    // What was learned about the voice itself, said in terms of what it does
+    // for the singer rather than in cents of vibrato.
+    const vibLine = !(profile && profile.vibratoOk) ? null
+      : profile.vibratoCents >= 20
+        ? "Your voice moves about <b>" + Math.round(profile.vibratoCents) +
+          " cents</b> on a held note, so the exercises will take that as one steady note rather than several."
+        : "Your held notes are very steady, so the exercises can follow them closely.";
+
     // Everything found and nothing to warn about: the plain success case.
     if (gainOk && octaveOk && cal.verdict === "ok") {
       this._setResult(this.els.runResult, "good", "Soundcheck complete — you're set",
-        levelLine + " " + voiceLine);
+        [levelLine, voiceLine, vibLine].filter(Boolean).join(" "));
       return;
     }
     // Otherwise say exactly which half landed and what still needs attention.
@@ -685,7 +747,13 @@ export class SoundcheckView {
     if (run.phase !== "sing") return;    // "listen": REA's own tone is playing
 
     run.voice.push(info.rms || 0);
+    // Articulation-like activity while a note is merely being held.  Sampled
+    // from the sustain only (the note's own attack is skipped below), because
+    // the question is what this voice and room throw off when nothing is
+    // happening.
+    run.strengths.push({ t: now, v: info.onsetStrength || 0 });
     if (info.freq != null) {
+      run.pitchSeries.push({ t: now, midi: hzToMidi(info.freq) });
       run.pitches.push(hzToMidi(info.freq));
       if (dt > 0 && dt < 500) run.voicedMs += dt;
       // Steady enough to trust — finish now rather than running the clock out.

@@ -33,11 +33,14 @@ export function pacingOf(notes, refs, writtenMs) {
   // Where each note really began, in the same clock the frames use.
   const LOOK = ((2048 - 512) / SR) * 1000;
   const starts = marks.map((m) => (m.startSample / sampleRate) * 1000 - LOOK);
-  const fracs = [];
-  notes.forEach((n, i) => {
-    if (firstCommit[i] == null) { fracs.push(null); return; }
-    fracs.push((firstCommit[i] - starts[i]) / n.ms);
-  });
-  return fracs;
+  // Reported in milliseconds from each note's start, alongside how long that
+  // note actually sounded and the gap after it.  A percentage of the beat is
+  // the wrong yardstick: a staccato note is over a third of the way through
+  // its beat, and committing then is right, not early.
+  return notes.map((n, i) => ({
+    commitMs: firstCommit[i] == null ? null : firstCommit[i] - starts[i],
+    soundingMs: n.ms,
+    gapMs: n.gapMs || 0,
+  }));
 }
 

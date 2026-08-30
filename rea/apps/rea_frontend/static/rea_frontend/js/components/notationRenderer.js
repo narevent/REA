@@ -12,7 +12,7 @@
  *  - per-note SVG references so the UI can highlight notes during playback.
  */
 
-import { modeChordToVexKey, noteNameToVexflow, parseNoteToken } from "../notation.js?v=79";
+import { modeChordToVexKey, noteNameToVexflow, parseNoteToken } from "../notation.js?v=80";
 
 const PX_PER_WHOLE = 260;
 const STAVE_PADDING = 26;
