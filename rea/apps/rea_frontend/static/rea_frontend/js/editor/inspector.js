@@ -16,7 +16,7 @@
  * actually edits.
  */
 
-import { DURATIONS, MODIFIERS, MODIFIER_LABELS, describeNote, splitToken, buildToken } from "./scoreDoc.js?v=107";
+import { DURATIONS, MODIFIERS, MODIFIER_LABELS, describeNote, splitToken, buildToken } from "./scoreDoc.js?v=114";
 
 const MIXED = "—"; // em dash: several selected items, several values
 

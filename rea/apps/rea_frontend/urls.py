@@ -1,7 +1,7 @@
 from django.urls import path
 from django.http import HttpResponse
 
-from .views import EditorView, IndexView
+from .views import AboutView, EditorView, IndexView
 
 app_name = "rea_frontend"
 
@@ -19,6 +19,7 @@ def favicon(request):
 
 urlpatterns = [
     path("", IndexView.as_view(), name="index"),
+    path("about/", AboutView.as_view(), name="about"),
     path("editor/", EditorView.as_view(), name="editor"),
     path("favicon.ico", favicon, name="favicon"),
 ]

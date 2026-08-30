@@ -11,7 +11,7 @@
  * in `staveLayout.js`, which the score editor draws with too.
  */
 
-import { drawScore, durationToType, resolveVexFlow } from "./staveLayout.js?v=107";
+import { drawScore, durationToType, resolveVexFlow } from "./staveLayout.js?v=114";
 
 /** Accuracy bands for `setNoteAccuracy`.  The thresholds match the per-note
  *  chips in the feedback row, so the stave and the report agree. */

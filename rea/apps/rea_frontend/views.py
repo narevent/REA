@@ -24,6 +24,19 @@ class IndexView(LoginRequiredMixin, TemplateView):
     template_name = "rea_frontend/index.html"
 
 
+class AboutView(LoginRequiredMixin, TemplateView):
+    """
+    Introduction, the REA method, and theory.
+
+    These three chapters are prose, not exercises: they have no lessons, no
+    parts and no ten practice modes, so sitting them in the curriculum meant
+    Next walked out of practice and into reading.  They live here instead,
+    one page away from the app.
+    """
+
+    template_name = "rea_frontend/about.html"
+
+
 @method_decorator(ensure_csrf_cookie, name="dispatch")
 class EditorView(UserPassesTestMixin, TemplateView):
     """
