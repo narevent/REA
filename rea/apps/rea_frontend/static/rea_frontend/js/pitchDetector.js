@@ -190,6 +190,37 @@ const DEFAULT_NOISE_GATE = 0.0025;
  *  threshold, so a note whose sustain decays near the gate doesn't stutter. */
 const GATE_RELEASE_RATIO = 0.7;
 
+// ---------------------------------------------------------------------------
+// The gate follows the room, not just the setting.
+//
+// A fixed gate cannot be right for every microphone in every room, and the one
+// number that has to serve everybody who has not run the calibration is the
+// default — which sits at about -52 dBFS.  On a recording of a real session
+// the room's own floor was -48 dB, comfortably *above* it, and the consequence
+// was not subtle: the tracker found a periodicity in the rumble at around 65 Hz
+// and reported it, frame after frame, steady enough that the segmenter called
+// it a held note.  Every silence in the exercise became a note at B1, and the
+// references the singer had not reached yet were answered by it before they
+// opened their mouth.  Measured on that recording: ninety-nine per cent of the
+// room-tone frames cleared the fixed gate; none clear this one, and every
+// frame of actual singing still does.
+//
+// So the gate has a second term that watches the input.  `floor` is a leaky
+// minimum — it drops to whatever quiet it hears and creeps back up — and the
+// gate sits a few times above it.  This is not automatic *gain*, which is off
+// for good reason (AGC pumps, and pumping distorts pitch); nothing here
+// touches the signal.  It only decides what counts as silence, and it decides
+// it from what silence in this room actually sounds like.
+//
+// The peak term is the safety catch.  A singer who never stops would let the
+// floor creep up towards their own voice and eventually gate themselves out,
+// so the adaptive term is capped at a fraction of the loudest recent input:
+// however wrong the floor estimate gets, the gate stays below the singing.
+const NOISE_FLOOR_MARGIN = 4;      // how far above the room's floor the gate sits
+const NOISE_FLOOR_RISE_MS = 9000;  // how fast the floor estimate creeps back up
+const NOISE_PEAK_FRACTION = 0.25;  // the adaptive gate never exceeds this much of the peak
+const NOISE_PEAK_FALL_MS = 4000;   // how fast the peak estimate decays
+
 let _inputGain = 1;
 let _noiseGate = DEFAULT_NOISE_GATE;
 try {
@@ -288,9 +319,10 @@ const ONSET_REFRACTORY_MS = 70;   // strength ramps back in over this, rather th
 //
 // So a dip shorter than this is not silence.  The envelopes are held across it
 // rather than reset, and the refractory ramp is re-armed on the way out, so the
-// transient of the voice coming back does not score either.  A real rest, a
-// real detachment, a real new phrase all last longer than this and are
-// unaffected.
+// transient of the voice coming back does not score either.
+//
+// A real rest, a real detachment, a real new phrase all last longer than this
+// and are unaffected.
 const ONSET_SILENCE_MS = 200;
 const ONSET_HISTORY = 24;         // ~400 ms of flux at 60 fps
 
@@ -885,6 +917,8 @@ export class PitchDetector {
     this._offCount = 0;
     this._belowCount = 0; // consecutive frames under the noise gate
     this._gateOpen = false;
+    this._floor = null;   // leaky-minimum estimate of this room's quiet
+    this._peak = null;    // decaying estimate of the loudest recent input
     this._ema = null;     // smoothed MIDI
     this._last = null;    // last emitted voiced info (held through short dropouts)
   }
@@ -995,21 +1029,52 @@ export class PitchDetector {
     });
   }
 
+  /**
+   * The level below which this frame is silence, for this microphone in this
+   * room right now.
+   *
+   * Never below the configured gate — a calibration the user ran is a floor
+   * under this, not a suggestion — and never above a fraction of the loudest
+   * recent input, so a singer who does not pause cannot be gated out by their
+   * own voice creeping into the floor estimate.
+   */
+  _updateGate(rms, dt) {
+    const step = dt > 0 && dt < 500 ? dt : 0;
+    if (this._floor == null) { this._floor = rms; this._peak = rms; }
+    // Falls at once to any quiet it hears; creeps back up, so a room that gets
+    // noisier is followed rather than fought.
+    if (rms < this._floor) this._floor = rms;
+    else if (step) this._floor *= Math.exp(step / NOISE_FLOOR_RISE_MS);
+    if (rms > this._peak) this._peak = rms;
+    else if (step) this._peak *= Math.exp(-step / NOISE_PEAK_FALL_MS);
+
+    let adaptive = this._floor * NOISE_FLOOR_MARGIN;
+    // The peak is only a cap, and only once it means something.  Before the
+    // singer has made a sound the loudest thing heard is the room itself, and
+    // a cap derived from that would hold the gate down at the very moment the
+    // room is all there is — which is exactly when it needs to be up.
+    const cap = this._peak * NOISE_PEAK_FRACTION;
+    if (cap > getNoiseGate()) adaptive = Math.min(adaptive, cap);
+    return Math.max(getNoiseGate(), adaptive);
+  }
+
   /** Turn a raw per-frame MPM result into a stable, de-jittered reading. */
   _process(res, t, rms) {
     const clarity = res ? res.clarity : 0;
     rms = rms || 0;
     this._flux = this.mpm ? this.mpm.flux : 0;
 
+    const dt = this._lastT == null ? 0 : t - this._lastT;
+    this._lastT = t;
+    const gate = this._updateGate(rms, dt);
+
     // Onset runs on every frame, ahead of the voicing machine and independent
     // of whether this frame yielded a pitch.  A consonant carries no pitch at
     // all, and it is exactly the cue that a new note has begun.
-    const dt = this._lastT == null ? 0 : t - this._lastT;
-    this._lastT = t;
     this._onsetStrength = this._onset.feed({
       flux: this._flux,
       db: rmsToDb(rms),
-      sounding: rms >= getNoiseGate() * GATE_RELEASE_RATIO,
+      sounding: rms >= gate * GATE_RELEASE_RATIO,
       t, dt,
     });
     // `onset` stays for anything that just wants a verdict; the exercise's
@@ -1022,8 +1087,8 @@ export class PitchDetector {
     // `offFrames` hold keeps a note from chattering when a sustain dips near
     // the threshold.
     const open = this._gateOpen
-      ? rms >= getNoiseGate() * GATE_RELEASE_RATIO
-      : rms >= getNoiseGate();
+      ? rms >= gate * GATE_RELEASE_RATIO
+      : rms >= gate;
     this._gateOpen = open;
     this._belowCount = open ? 0 : this._belowCount + 1;
     // A below-gate frame may never *start* a note — otherwise clear-but-quiet

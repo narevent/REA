@@ -19,10 +19,10 @@ export function runCase(name, notes, expect) {
   const seg = pc.makeNoteSegmenter();
   const got = [];
   for (const f of frames) {
-    const r = seg.feed({ midi: f.midi, onsetStrength: f.onsetStrength, t: f.t, dt: 16.7 });
+    const r = seg.feed({ midi: f.midi, onsetStrength: f.onsetStrength, onsetAttack: f.onsetAttack, t: f.t, dt: 16.7 });
     if (r.ended) got.push({ midi: r.ended.midi, durMs: r.ended.durMs, at: r.ended.startT });
   }
-  const tail = seg.feed({ midi: null, onsetStrength: 0, t: frames[frames.length - 1].t + 200, dt: 200 });
+  const tail = seg.feed({ midi: null, onsetStrength: 0, onsetAttack: 0, t: frames[frames.length - 1].t + 200, dt: 200 });
   if (tail.ended) got.push({ midi: tail.ended.midi, durMs: tail.ended.durMs, at: tail.ended.startT });
 
   const sungMidis = marks.map((m) => m.midi);

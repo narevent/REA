@@ -38,6 +38,20 @@
  * `scoring.mjs`  what a sung note is worth at each difficulty — the table is
  *                printed, so what the settings actually promise can be read
  *                rather than inferred from the constants.
+ * `voice.mjs`    a voice that is not sure of the note — the singing that broke
+ *                the exercise on a real recording, put back in terms the
+ *                synthesiser can produce: a pitch that wanders further inside
+ *                one note than the tolerance a note is allowed, notes detached
+ *                by gaps too short to be silences, and a tempo half of what
+ *                was written.  Nothing else here sings badly enough to have
+ *                caught any of it.
+ *
+ * `roomtone.mjs`  silence, in a room that is not silent.  The only file that
+ *                drives the *whole* detector — the gate, the voicing machine,
+ *                the median, the smoother — which everything else skips, and
+ *                which is where the worst bug in the singing exercises lived:
+ *                the room's own rumble reported as a held note, answering
+ *                references before the singer had sung anything.
  *
  * `REA_DIFFICULTY=medium node rea/tests/audio/run.mjs` runs the whole suite at
  * another setting.  Segmentation must not depend on it — difficulty moves
@@ -50,7 +64,7 @@
  * each one began and whether it settled, which is the first thing to look at
  * when a learner case fails.
  */
-const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs", "./lastnote.mjs", "./profile.mjs", "./learner.mjs", "./articulation.mjs", "./singlenote.mjs", "./scoring.mjs"];
+const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs", "./lastnote.mjs", "./profile.mjs", "./learner.mjs", "./articulation.mjs", "./singlenote.mjs", "./scoring.mjs", "./roomtone.mjs", "./voice.mjs"];
 let failed = false;
 for (const m of mods) {
   const before = process.exitCode;
