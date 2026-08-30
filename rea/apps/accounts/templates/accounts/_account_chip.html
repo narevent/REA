@@ -1,0 +1,24 @@
+{% comment %}
+Who is signed in, for the header.  Included by both the account pages and the
+practice app's own template, so the two never disagree about session state.
+{% endcomment %}
+{% if user.is_authenticated %}
+  <div class="acc-chip">
+    <a class="acc-chip-name" href="{% url 'accounts:dashboard' %}" title="Your profile">
+      <span class="acc-chip-avatar">{{ user.profile.name|slice:":1"|upper }}</span>
+      <span class="acc-chip-text">
+        <span class="acc-chip-label">{{ user.profile.name }}</span>
+        <span class="acc-chip-role">{{ user.profile.get_role_display }}</span>
+      </span>
+    </a>
+    <form method="post" action="{% url 'accounts:logout' %}" class="acc-chip-out">
+      {% csrf_token %}
+      <button type="submit" class="acc-link-btn" title="Sign out">Sign out</button>
+    </form>
+  </div>
+{% else %}
+  <div class="acc-chip">
+    <a class="acc-link-btn" href="{% url 'accounts:login' %}">Sign in</a>
+    <a class="acc-btn acc-btn-sm" href="{% url 'accounts:signup' %}">Sign up</a>
+  </div>
+{% endif %}

@@ -11,16 +11,17 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=63";
-import { renderLessonNotation } from "./views/lessonView.js?v=63";
-import { renderScaleNotation } from "./views/scaleView.js?v=63";
-import { SoundcheckView } from "./views/soundcheckView.js?v=63";
-import { AudioPlayer } from "./audioPlayer.js?v=63";
-import { PracticeController } from "./practiceController.js?v=63";
+import { API } from "./api.js?v=64";
+import { renderLessonNotation } from "./views/lessonView.js?v=64";
+import { renderScaleNotation } from "./views/scaleView.js?v=64";
+import { SoundcheckView } from "./views/soundcheckView.js?v=64";
+import { AudioPlayer } from "./audioPlayer.js?v=64";
+import { PracticeController } from "./practiceController.js?v=64";
+import { loadAccount, recordServerSession } from "./account.js?v=64";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=63";
+} from "./chapters.js?v=64";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -2113,8 +2114,32 @@ function renderTopbar() {
 }
 
 function onSessionComplete(chapter, avg) {
+  // Local progress first: it is what the map and header read, and it must
+  // update whether or not anyone is signed in.
   state.progress = recordSession(state.progress, chapter.id, avg);
   renderHeader();
+  // Then, for a signed-in student, the durable record behind the profile
+  // dashboard.  Fire-and-forget — a failed sync must never interrupt practice.
+  recordServerSession({
+    chapterId: chapter.id,
+    chapterKey: chapter.key,
+    chapterTitle: chapter.title,
+    score: avg,
+    rounds: (state.contextLesson && (state.contextLesson.bars || []).length) || 0,
+    context: {
+      system: state.system,
+      texture: state.texture,
+      keyName: state.contextKey ? (state.contextKey.name || "") : "",
+      formula: lessonContextLabel(),
+    },
+  });
+}
+
+/** A short human label for what was being practised, stored with the session. */
+function lessonContextLabel() {
+  const l = state.contextLesson;
+  if (!l) return "";
+  return l.formula_name || l.name || "";
 }
 
 // ---------------------------------------------------------------------------
@@ -2151,6 +2176,9 @@ viewSession.addEventListener("rea:next-chapter", (e) => {
   renderHeader();
   renderMap();
   setStatus("Loading…");
+  // Who (if anyone) is signed in.  Practising does not depend on this, so it
+  // is awaited only so the first completed session can be attributed.
+  await loadAccount();
   footerHint.textContent = "Use headphones for the best intonation practice.";
   await loadKeys();
   await ensureLesson();

@@ -26,16 +26,16 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=63";
-import { PitchDetector, midiToName } from "./pitchDetector.js?v=63";
-import { API } from "./api.js?v=63";
+import { AudioPlayer } from "./audioPlayer.js?v=64";
+import { PitchDetector, midiToName } from "./pitchDetector.js?v=64";
+import { API } from "./api.js?v=64";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt,
-} from "./practiceData.js?v=63";
+} from "./practiceData.js?v=64";
 import {
   scoreSungBar, scoreGuessBar, scoreGuessNote, scoreLabel,
-} from "./practiceScore.js?v=63";
+} from "./practiceScore.js?v=64";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 const SING_TAIL_MS = 600;  // extra recording tail so the user can finish

@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     "django_filters",
     "corsheaders",
     # local apps
+    "rea.apps.accounts",
     "rea.apps.rea_api",
     "rea.apps.rea_api.intonation.relative",
     "rea.apps.rea_api.intonation.absolute",
@@ -102,6 +103,28 @@ REST_FRAMEWORK = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = True
+
+# ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
+LOGIN_URL = "accounts:login"
+LOGIN_REDIRECT_URL = "accounts:dashboard"
+LOGOUT_REDIRECT_URL = "rea_frontend:index"
+
+# Whether the signup form lets someone choose the teacher role for themselves.
+# Teachers will be able to create and delete exercises, so on any deployment
+# where that matters, set this to False and promote teachers from the admin
+# instead (Accounts -> Profiles -> role).
+REA_ALLOW_TEACHER_SELF_SIGNUP = True
+
+# The session and CSRF cookies now carry a real login, so outside DEBUG they
+# are restricted to HTTPS.  CSRF_COOKIE_HTTPONLY is deliberately left False:
+# the practice app reads the token from JavaScript to POST completed sessions.
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
 
 # Path to the relative data (key_models / exercises) living next to the project.
 REA_DATA_DIR = BASE_DIR / "relative"

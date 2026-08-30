@@ -1,0 +1,156 @@
+{% extends "accounts/base.html" %}
+{% block title %}{{ profile.name }} — REA{% endblock %}
+{% block brand_sub %}Profile{% endblock %}
+{% block footer_status %}{{ profile.name }} · {{ profile.get_role_display }}{% endblock %}
+
+{% block content %}
+<div class="acc-wrap">
+
+  {# ---- Identity ------------------------------------------------------- #}
+  <div class="acc-card acc-hero">
+    <div class="acc-hero-avatar">{{ profile.name|slice:":1"|upper }}</div>
+    <div class="acc-hero-body">
+      <h1 class="acc-title">{{ profile.name }}</h1>
+      <p class="acc-sub">
+        <span class="acc-role-tag acc-role-{{ profile.role }}">{{ profile.get_role_display }}</span>
+        <span>@{{ user.username }}</span>
+        <span>Joined {{ profile.created_at|date:"j M Y" }}</span>
+      </p>
+    </div>
+    <a class="acc-btn" href="{% url 'rea_frontend:index' %}">Go practise</a>
+  </div>
+
+  {% if is_teacher %}
+    {# ---- Teacher ------------------------------------------------------ #}
+    <div class="acc-card">
+      <h2 class="acc-h2">Exercises</h2>
+      <div class="acc-placeholder">
+        <div class="acc-placeholder-title">The score editor isn't built yet</div>
+        <p>
+          Your account already has the teacher role, and the permission checks that
+          will guard exercise creation, editing and deletion are in place. The
+          editing interface itself is still to come — until then, exercises are
+          managed through the
+          {% if user.is_staff %}<a href="/admin/">Django admin</a>{% else %}Django admin{% endif %}.
+        </p>
+      </div>
+    </div>
+  {% else %}
+    {# ---- Student: headline figures ------------------------------------ #}
+    <div class="acc-stats">
+      <div class="acc-stat">
+        <span class="acc-stat-val">{{ overview.total_sessions }}</span>
+        <span class="acc-stat-lbl">Sessions</span>
+      </div>
+      <div class="acc-stat">
+        <span class="acc-stat-val">{% if overview.average_score is not None %}{{ overview.average_score }}{% else %}–{% endif %}</span>
+        <span class="acc-stat-lbl">Average</span>
+      </div>
+      <div class="acc-stat">
+        <span class="acc-stat-val">{% if overview.best_score is not None %}{{ overview.best_score }}{% else %}–{% endif %}</span>
+        <span class="acc-stat-lbl">Best</span>
+      </div>
+      <div class="acc-stat">
+        <span class="acc-stat-val">{{ overview.chapters_completed }}<small>/{{ overview.chapters_total }}</small></span>
+        <span class="acc-stat-lbl">Chapters</span>
+      </div>
+      <div class="acc-stat">
+        <span class="acc-stat-val">{{ overview.streak_days }}</span>
+        <span class="acc-stat-lbl">Day streak</span>
+      </div>
+    </div>
+
+    {# ---- Progress over time ------------------------------------------- #}
+    <div class="acc-card">
+      <div class="acc-card-head">
+        <h2 class="acc-h2">Progress</h2>
+        <span class="acc-card-note">Average score per day, last {{ trend_days }} days</span>
+      </div>
+      {% if trend_points %}
+        <svg class="acc-chart" viewBox="0 0 520 90" preserveAspectRatio="none" role="img"
+             aria-label="Average score per day over the last {{ trend_days }} days">
+          <line x1="6" y1="33.6" x2="514" y2="33.6" class="acc-chart-pass" />
+          <polyline class="acc-chart-line" points="{{ trend_points }}" />
+        </svg>
+        <div class="acc-chart-scale">
+          <span>{{ trend|first|stringformat:"s"|slice:"0:0" }}{{ trend.0.date|date:"j M" }}</span>
+          <span class="acc-chart-passlbl">pass {{ pass_threshold }}</span>
+          <span>today</span>
+        </div>
+      {% else %}
+        <p class="acc-empty">
+          Not enough practice yet to draw a trend — finish a run on two different
+          days and it will appear here.
+        </p>
+      {% endif %}
+    </div>
+
+    {# ---- Per chapter --------------------------------------------------- #}
+    <div class="acc-card">
+      <h2 class="acc-h2">Chapters</h2>
+      <table class="acc-table">
+        <thead>
+          <tr><th>Chapter</th><th class="num">Attempts</th><th class="num">Best</th><th class="num">Average</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for c in chapters %}
+            <tr class="{% if not c.attempts %}is-untouched{% endif %}">
+              <td><span class="acc-ch-num">{{ c.number }}</span> {{ c.title }}</td>
+              <td class="num">{{ c.attempts }}</td>
+              <td class="num">{% if c.best is not None %}{{ c.best }}{% else %}–{% endif %}</td>
+              <td class="num">{% if c.average is not None %}{{ c.average }}{% else %}–{% endif %}</td>
+              <td class="num">
+                {% if c.completed %}<span class="acc-pill good">Passed</span>
+                {% elif c.attempts %}<span class="acc-pill">In progress</span>
+                {% else %}<span class="acc-pill quiet">Not started</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# ---- Recent runs --------------------------------------------------- #}
+    <div class="acc-card">
+      <h2 class="acc-h2">Recent sessions</h2>
+      {% if recent %}
+        <ul class="acc-runs">
+          {% for r in recent %}
+            <li class="acc-run">
+              <span class="acc-run-score {% if r.passed %}good{% else %}weak{% endif %}">{{ r.session.score }}</span>
+              <span class="acc-run-body">
+                <span class="acc-run-title">{{ r.title }}</span>
+                <span class="acc-run-meta">
+                  {% if r.session.key_name %}{{ r.session.key_name }}{% endif %}
+                  {% if r.session.formula %} · {{ r.session.formula }}{% endif %}
+                  {% if r.session.system %} · {{ r.session.system }}{% endif %}
+                </span>
+              </span>
+              <span class="acc-run-when">{{ r.session.created_at|date:"j M, H:i" }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="acc-empty">
+          No sessions recorded yet. <a href="{% url 'rea_frontend:index' %}">Practise a chapter</a>
+          and it will show up here.
+        </p>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {# ---- Settings ------------------------------------------------------- #}
+  <div class="acc-card">
+    <h2 class="acc-h2">Account</h2>
+    <form method="post" action="{% url 'accounts:profile-update' %}" class="acc-inline-form" novalidate>
+      {% csrf_token %}
+      {% for field in profile_form %}{% include "accounts/_form_field.html" %}{% endfor %}
+      <button type="submit" class="acc-btn">Save</button>
+    </form>
+    <p class="acc-help">
+      Your role is {{ profile.get_role_display|lower }} and can only be changed by an administrator.
+    </p>
+  </div>
+
+</div>
+{% endblock %}
