@@ -11,11 +11,22 @@
  * in `staveLayout.js`, which the score editor draws with too.
  */
 
-import { drawScore, durationToType, resolveVexFlow } from "./staveLayout.js?v=83";
+import { drawScore, durationToType, resolveVexFlow } from "./staveLayout.js?v=107";
 
 /** Accuracy bands for `setNoteAccuracy`.  The thresholds match the per-note
  *  chips in the feedback row, so the stave and the report agree. */
 const ACCURACY_CLASSES = ["vf-acc-good", "vf-acc-ok", "vf-acc-weak", "vf-acc-miss"];
+
+/** The nearest ancestor that actually scrolls — the score panel on a wide
+ *  screen, the page on a phone.  Falls back to the document scroller. */
+function scrollParentOf(node) {
+  for (let p = node.parentElement; p; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY;
+    if ((oy === "auto" || oy === "scroll") && p.scrollHeight > p.clientHeight + 1) return p;
+  }
+  const doc = document.scrollingElement;
+  return doc && doc.scrollHeight > doc.clientHeight + 1 ? doc : null;
+}
 
 function accuracyClass(score) {
   if (score == null) return "vf-acc-miss";
@@ -36,12 +47,47 @@ export class NotationRenderer {
     this.notes = [];
     this.bars = []; // [{ staveEl, noteStart, noteEnd, barIndex }]
     this.onBarClick = null;
+
+    // A score is laid out against the width it is drawn into, so it has to be
+    // redrawn whenever that width changes — on rotation, on a resize, and on
+    // the very first paint, where the container can still measure 0 and the
+    // layout falls back to its 320px floor (which drew a phone-width score in
+    // a 1000px panel).  Called back through `onRelayout` so the owner can
+    // re-apply whatever it had highlighted.
+    this.onRelayout = null;
+    this._lastDraw = null;
+    this._drawnFor = 0;
+    this._relayouts = 0;
+    if (typeof ResizeObserver !== "undefined") {
+      this._ro = new ResizeObserver(() => this._maybeRelayout());
+      this._ro.observe(this.container);
+    }
+  }
+
+  /** Redraw if the panel's width has moved away from what we drew for.  The
+   *  8px deadband and the attempt cap stop a redraw that adds or removes a
+   *  scrollbar from oscillating with the one that follows it. */
+  _maybeRelayout() {
+    if (!this._lastDraw || this._relayoutQueued) return;
+    const avail = this.container.clientWidth;
+    if (!avail || Math.abs(avail - this._drawnFor) <= 8) return;
+    if (this._relayouts >= 3) return;
+    this._relayoutQueued = true;
+    requestAnimationFrame(() => {
+      this._relayoutQueued = false;
+      if (!this._lastDraw) return;
+      this._relayouts += 1;
+      const { bars, opts } = this._lastDraw;
+      this.render(bars, opts, true);
+      if (this.onRelayout) this.onRelayout();
+    });
   }
 
   clear() {
     this.container.innerHTML = "";
     this.notes = [];
     this.bars = [];
+    this._revealed = null;
     this._outlineEl = null;
     this._sungEl = null;
     this._sungGlobal = null;
@@ -73,8 +119,11 @@ export class NotationRenderer {
    * same picture.  What stays here is what only a *reading* view needs: bars
    * that answer to a click, and the highlighting the practice session drives.
    */
-  render(bars, { clef = "treble", title = "", onBarClick = null } = {}) {
+  render(bars, opts = {}, isRelayout = false) {
+    const { clef = "treble", title = "", onBarClick = null } = opts;
     this.clear();
+    if (!isRelayout) this._relayouts = 0;
+    this._lastDraw = { bars, opts };
     if (!this._ensureVexflow()) return [];
     if (!bars || bars.length === 0) {
       this.container.innerHTML = '<div class="empty">No notes to display.</div>';
@@ -84,6 +133,7 @@ export class NotationRenderer {
 
     const drawn = drawScore(this.container, bars);
     if (!drawn) return [];
+    this._drawnFor = this.container.clientWidth;
 
     this.notes = drawn.notes.map((entry) => ({
       note: entry.note, el: entry.el, globalIndex: entry.globalIndex, barIndex: entry.barIndex,
@@ -164,6 +214,58 @@ export class NotationRenderer {
     this.highlightBarBox(barIndex);
   }
 
+  /**
+   * Keep the bar in play inside the visible part of the score.
+   *
+   * A wrapped score is taller than the panel it sits in — on a phone by
+   * several screens — so without this the highlight walks off the bottom and
+   * the student is left watching a stave that isn't the one sounding.
+   * `block: "nearest"` scrolls only when the bar is actually out of view, so
+   * a score that already fits never twitches, and it walks whichever ancestor
+   * is the scroller: the score panel on a wide screen, the page on a phone.
+   */
+  _revealBar(barIndex) {
+    if (barIndex == null || barIndex === this._revealed) return;
+    const b = this.bars.find((x) => x.barIndex === barIndex);
+    const el = b && b.staveEl;
+    if (!el || !el.scrollIntoView) return;
+    this._revealed = barIndex;
+
+    const scroller = scrollParentOf(el);
+    if (!scroller) return;
+    const sr = scroller === document.scrollingElement
+      ? { top: 0, bottom: window.innerHeight }
+      : scroller.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+
+    // The transport is sticky over the bottom of the scroller on a phone, so
+    // a bar can be inside the scroller and still be behind it.  Inset by
+    // however much the two actually overlap — on a wide screen the transport
+    // sits below the score panel and the overlap is zero.
+    let bottomInset = 0;
+    const foot = document.querySelector(".deck-foot");
+    if (foot) {
+      const fr = foot.getBoundingClientRect();
+      if (fr.height && fr.top < sr.bottom) bottomInset = Math.max(0, sr.bottom - fr.top);
+    }
+
+    const pad = 12;
+    const visTop = sr.top + pad;
+    const visBottom = sr.bottom - bottomInset - pad;
+    if (visBottom <= visTop) return;
+
+    let delta = 0;
+    if (er.bottom > visBottom) delta = er.bottom - visBottom;
+    else if (er.top < visTop) delta = er.top - visTop;
+    if (!delta) return;
+
+    // Instant, not smoothed.  A bar is highlighted for as long as it sounds,
+    // and an animated scroll spends much of that time still travelling — the
+    // eye arrives after the note has gone.  It also degrades badly: a smooth
+    // scroll that the browser declines to animate simply never happens.
+    scroller.scrollTop += delta;
+  }
+
   /** Visually frame a bar's stave box (e.g. the bar to sing). */
   highlightBarBox(barIndex) {
     this.bars.forEach((b) => {
@@ -172,6 +274,7 @@ export class NotationRenderer {
       else b.staveEl.classList.remove("vf-bar-sing");
     });
     this._drawBarOutline(barIndex);
+    this._revealBar(barIndex);
   }
 
   /**

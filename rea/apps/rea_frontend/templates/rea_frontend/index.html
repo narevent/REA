@@ -7,34 +7,43 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=83" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=107" />
 </head>
 <body>
   <header class="app-header">
-    <button id="brand" class="brand" title="Back to chapter map">
+    <button type="button" class="app-menu-btn" id="app-menu" aria-label="Menu" aria-expanded="false" aria-controls="app-menu-panel">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <button id="brand" class="brand" title="Open the curriculum">
       <span class="brand-mark"><svg width="22" height="26" viewBox="0 0 22 26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2v10a5 5 0 0 0 10 0V2"/><path d="M11 17v7"/><path d="M8 24h6"/></svg></span>
       <span class="brand-text">
         <span class="brand-name">REA</span>
         <span class="brand-sub">Intonation</span>
       </span>
     </button>
+    <div class="app-title" id="app-title" hidden></div>
+    {% comment %}On a phone these two collapse into the drawer behind the
+    hamburger; on a wide screen the wrapper is display:contents, so they stay
+    direct grid children of the header exactly as before.{% endcomment %}
+    <div class="app-menu-panel" id="app-menu-panel">
     <nav class="app-nav" id="app-nav"></nav>
     <div class="header-right">
       {% comment %}Teachers reach their editor from wherever they are; the
       practice nav itself is built in JS and only lists practice areas.{% endcomment %}
+      <button type="button" class="app-nav-btn curriculum-btn" id="curriculum-open">Curriculum <kbd>&#8984;K</kbd></button>
       {% if user.profile.is_teacher or user.is_staff %}
         <a class="app-nav-btn" href="{% url 'rea_frontend:editor' %}">Editor</a>
       {% endif %}
       <div class="header-stats" id="header-stats"></div>
       {% include "accounts/_account_chip.html" %}
     </div>
+    </div>
   </header>
 
   <main id="app">
-    <!-- Chapter map (landing) -->
-    <section id="view-map" class="view view-map"></section>
-
-    <!-- Chapter session -->
+    {% comment %}The app opens straight into an exercise: the curriculum path
+    line replaces the old chapter map, and Previous/Next walk the exercises of
+    the category the student is in.{% endcomment %}
     <section id="view-session" class="view view-session" hidden>
       <div class="session-topbar" id="session-topbar"></div>
       <div class="session-stage">
@@ -43,18 +52,39 @@
         <div id="legend" class="legend"></div>
       </div>
       <div id="info" class="info"></div>
+      <div id="placeholder" class="placeholder" hidden></div>
+      <footer class="session-nav" id="session-nav">
+        <button type="button" class="nav-btn nav-prev" id="nav-prev">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+          <span class="nav-label" id="nav-prev-label"></span>
+        </button>
+        <button type="button" class="nav-btn nav-next" id="nav-next">
+          <span class="nav-label" id="nav-next-label"></span>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+      </footer>
     </section>
 
     <!-- Soundcheck (mic + pitch-tracker calibration) -->
     <section id="view-soundcheck" class="view view-soundcheck" hidden></section>
   </main>
 
+  <div class="curriculum-scrim" id="curriculum-scrim" hidden>
+    <div class="curriculum-sheet" role="dialog" aria-modal="true" aria-label="Curriculum">
+      <div class="curriculum-head">
+        <h2>Curriculum</h2>
+        <button type="button" class="curriculum-close" id="curriculum-close" aria-label="Close">&times;</button>
+      </div>
+      <div class="curriculum-tree" id="curriculum-tree"></div>
+    </div>
+  </div>
+
   <footer class="app-footer">
     <span id="status">Ready</span>
     <span class="footer-hint" id="footer-hint"></span>
   </footer>
 
-  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=83"></script>
-  <script type="module" src="{% static 'rea_frontend/js/app.js' %}?v=83"></script>
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=107"></script>
+  <script type="module" src="{% static 'rea_frontend/js/app.js' %}?v=107"></script>
 </body>
 </html>

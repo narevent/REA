@@ -27,7 +27,7 @@
  * editor's inspector names the sounding pitch for the teacher.
  */
 
-import { noteNameToVexflow, parseNoteToken } from "../notation.js?v=83";
+import { noteNameToVexflow, parseNoteToken } from "../notation.js?v=107";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
 export const METRICS = {
@@ -35,13 +35,29 @@ export const METRICS = {
   STAVE_PADDING: 26,
   MIN_BAR_WIDTH: 120,
   BAR_GAP: 22,       // whitespace between adjacent bars
-  STAVE_Y: 30,       // y offset of the stave within its row
-  ROW_HEIGHT: 132,   // vertical pitch of each wrapped row
+  STAVE_Y: 26,       // y of the stave's first line within its row
+  ROW_HEIGHT: 100,   // vertical pitch of each wrapped row
   MARGIN: 10,        // left margin inside the SVG
   NOTE_SLOT: 26,     // horizontal room reserved per notehead
 };
 
 const MOD_TO_ACC = { "#": "#", b: "b", x: "##", r: "n" };
+
+/**
+ * VexFlow reserves four line-spaces above every stave for text and ornaments
+ * it might add, and draws its first line that far below the y it is given.
+ * This library draws none of that — no clef, no key or time signature, no
+ * dynamics — so it was 40px of guaranteed blank per row, and a wrapped score
+ * spent more height on nothing than on notes.
+ *
+ * The `space_above_staff_ln` option is not honoured by the vendored build, so
+ * the reservation is cancelled by construction instead: a stave is created
+ * 40px above where its lines should land.  `STAVE_Y` therefore means the y of
+ * the stave's *first line* within its row, which is what the callers actually
+ * reason about, and what a row needs below the staff — ledger lines and their
+ * noteheads — is held by ROW_HEIGHT.
+ */
+const VF_SPACE_ABOVE_PX = 40;
 
 /** VexFlow, however the vendored build exposed itself. */
 export function resolveVexFlow() {
@@ -160,7 +176,7 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
   const allBeams = [];
 
   bars.forEach((bar, i) => {
-    const stave = new VF.Stave(placement[i].x, placement[i].y, barWidths[i]);
+    const stave = new VF.Stave(placement[i].x, placement[i].y - VF_SPACE_ABOVE_PX, barWidths[i]);
     stave.setContext(context).draw();
     const noteStart = globalIndex;
 
