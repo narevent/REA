@@ -11,16 +11,17 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=75";
-import { renderLessonNotation } from "./views/lessonView.js?v=75";
-import { renderScaleNotation } from "./views/scaleView.js?v=75";
-import { SoundcheckView } from "./views/soundcheckView.js?v=75";
-import { AudioPlayer } from "./audioPlayer.js?v=75";
-import { PracticeController } from "./practiceController.js?v=75";
+import { API } from "./api.js?v=76";
+import { renderLessonNotation } from "./views/lessonView.js?v=76";
+import { renderScaleNotation } from "./views/scaleView.js?v=76";
+import { SoundcheckView } from "./views/soundcheckView.js?v=76";
+import { AudioPlayer } from "./audioPlayer.js?v=76";
+import { PracticeController } from "./practiceController.js?v=76";
+import { loadAccount, recordServerSession } from "./account.js?v=76";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=75";
+} from "./chapters.js?v=76";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -1273,7 +1274,16 @@ function renderMap() {
     const completed = entry && entry.completed;
     const attempts = entry ? entry.attempts : 0;
 
-    const scoreRing = best == null ? '<div class="card-score empty">' + glyph("dot", 18) + '</div>' :
+    // Unplayed chapters show the same ring, empty, rather than a lone dot: the
+    // card then keeps its shape as scores arrive, and the blank ring reads as
+    // "no score yet" instead of as a stray bullet.
+    const scoreRing = best == null ?
+      '<div class="card-score empty">' +
+        '<div class="ring">' +
+          '<svg viewBox="0 0 36 36"><circle class="ring-bg" cx="18" cy="18" r="15.5"></circle></svg>' +
+          '<span class="ring-val">–</span>' +
+        '</div>' +
+      '</div>' :
       '<div class="card-score">' +
         '<div class="ring">' +
           '<svg viewBox="0 0 36 36"><circle class="ring-bg" cx="18" cy="18" r="15.5"></circle>' +
@@ -1282,15 +1292,16 @@ function renderMap() {
         '</div>' +
       '</div>';
 
+    // Completion reads in the footer next to the other tags, not as a floating
+    // badge over the card corner — that corner belongs to the score ring, and
+    // the two collided.  An attempt with no pass needs no marker of its own:
+    // the ring is already showing the score.
     const badge = completed
-      ? '<span class="card-badge done">' + glyph("check", 14) + '</span>'
-      : attempts
-        ? '<span class="card-badge try"></span>'
-        : "";
+      ? '<span class="card-tag done">' + glyph("check", 12) + 'passed</span>'
+      : "";
 
     return '<button class="chapter-card' + (completed ? " completed" : "") + '" ' +
       'style="--cc:' + c.color + '" data-chapter="' + c.id + '">' +
-      badge +
       '<div class="card-head">' +
         '<span class="card-ico">' + glyph(c.glyph, 24) + '</span>' +
         scoreRing +
@@ -1298,6 +1309,7 @@ function renderMap() {
       '<div class="card-title">' + c.title + '</div>' +
       '<div class="card-foot">' +
         '<div class="card-dots">' + dots(c.difficulty) + '</div>' +
+        badge +
         (c.tags.includes("mic") ? '<span class="card-tag mic">mic</span>' : '') +
         (c.tags.includes("timed") ? '<span class="card-tag timed">timed</span>' : '') +
       '</div>' +
@@ -2113,8 +2125,32 @@ function renderTopbar() {
 }
 
 function onSessionComplete(chapter, avg) {
+  // Local progress first: it is what the map and header read, and it must
+  // update whether or not anyone is signed in.
   state.progress = recordSession(state.progress, chapter.id, avg);
   renderHeader();
+  // Then, for a signed-in student, the durable record behind the profile
+  // dashboard.  Fire-and-forget — a failed sync must never interrupt practice.
+  recordServerSession({
+    chapterId: chapter.id,
+    chapterKey: chapter.key,
+    chapterTitle: chapter.title,
+    score: avg,
+    rounds: (state.contextLesson && (state.contextLesson.bars || []).length) || 0,
+    context: {
+      system: state.system,
+      texture: state.texture,
+      keyName: state.contextKey ? (state.contextKey.name || "") : "",
+      formula: lessonContextLabel(),
+    },
+  });
+}
+
+/** A short human label for what was being practised, stored with the session. */
+function lessonContextLabel() {
+  const l = state.contextLesson;
+  if (!l) return "";
+  return l.formula_name || l.name || "";
 }
 
 // ---------------------------------------------------------------------------
@@ -2151,6 +2187,9 @@ viewSession.addEventListener("rea:next-chapter", (e) => {
   renderHeader();
   renderMap();
   setStatus("Loading…");
+  // Who (if anyone) is signed in.  Practising does not depend on this, so it
+  // is awaited only so the first completed session can be attributed.
+  await loadAccount();
   footerHint.textContent = "Use headphones for the best intonation practice.";
   await loadKeys();
   await ensureLesson();

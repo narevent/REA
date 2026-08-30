@@ -1,0 +1,56 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}REA{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=76" />
+</head>
+<body>
+  <header class="app-header">
+    <a href="{% url 'rea_frontend:index' %}" class="brand" title="Back to the practice app">
+      <span class="brand-mark"><svg width="22" height="26" viewBox="0 0 22 26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2v10a5 5 0 0 0 10 0V2"/><path d="M11 17v7"/><path d="M8 24h6"/></svg></span>
+      <span class="brand-text">
+        <span class="brand-name">REA</span>
+        <span class="brand-sub">{% block brand_sub %}Account{% endblock %}</span>
+      </span>
+    </a>
+    {# Signed out there is nothing to switch between, and an empty nav still paints its pill. #}
+    {% if user.is_authenticated %}
+      <nav class="app-nav">
+        <a class="app-nav-btn" href="{% url 'rea_frontend:index' %}">Practice</a>
+        <a class="app-nav-btn{% if request.resolver_match.url_name == 'dashboard' %} active{% endif %}" href="{% url 'accounts:dashboard' %}">Profile</a>
+      </nav>
+    {% else %}
+      <span></span>
+    {% endif %}
+    <div class="header-right">
+      {# The chip's "Sign in" button is pointless on the sign-in page itself. #}
+      {% with here=request.resolver_match.url_name %}
+      {% if user.is_authenticated or here != 'login' and here != 'signup' %}
+        {% include "accounts/_account_chip.html" %}
+      {% endif %}
+      {% endwith %}
+    </div>
+  </header>
+
+  <main id="app" class="acc-main">
+    {% if messages %}
+      <div class="acc-messages">
+        {% for message in messages %}
+          <div class="acc-message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="app-footer">
+    <span>{% block footer_status %}REA{% endblock %}</span>
+    <span class="footer-hint">Use headphones for the best intonation practice.</span>
+  </footer>
+</body>
+</html>

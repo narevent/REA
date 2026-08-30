@@ -1,0 +1,29 @@
+{% extends "accounts/base.html" %}
+{% block title %}Sign in — REA{% endblock %}
+{% block brand_sub %}Sign in{% endblock %}
+{% block footer_status %}Sign in{% endblock %}
+
+{% block content %}
+<div class="acc-wrap acc-wrap-narrow">
+  <div class="acc-card">
+    <h1 class="acc-title">Sign in</h1>
+    <p class="acc-sub">Sign in to have your practice tracked over time.</p>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <div class="acc-form-error">
+          {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+        </div>
+      {% endif %}
+      {% for field in form %}{% include "accounts/_form_field.html" %}{% endfor %}
+      {% if next %}<input type="hidden" name="next" value="{{ next }}" />{% endif %}
+      <button type="submit" class="acc-btn acc-btn-primary acc-btn-block">Sign in</button>
+    </form>
+
+    <p class="acc-alt">
+      No account yet? <a href="{% url 'accounts:signup' %}">Create one</a>.
+    </p>
+  </div>
+</div>
+{% endblock %}

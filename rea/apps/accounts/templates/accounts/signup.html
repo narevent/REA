@@ -1,0 +1,58 @@
+{% extends "accounts/base.html" %}
+{% block title %}Create an account — REA{% endblock %}
+{% block brand_sub %}Sign up{% endblock %}
+{% block footer_status %}Create an account{% endblock %}
+
+{% block content %}
+<div class="acc-wrap acc-wrap-narrow">
+  <div class="acc-card">
+    <h1 class="acc-title">Create your account</h1>
+    <p class="acc-sub">Students get their progress tracked over time. Teachers author exercises.</p>
+
+    <form method="post" novalidate>
+      {% csrf_token %}
+      {% if form.non_field_errors %}
+        <div class="acc-form-error">
+          {% for error in form.non_field_errors %}<p>{{ error }}</p>{% endfor %}
+        </div>
+      {% endif %}
+
+      {% for field in form %}
+        {% if field.name == "role" %}
+          {% if not field.is_hidden %}
+            <div class="acc-field acc-field-role{% if field.errors %} has-error{% endif %}">
+              <label>{{ field.label }}</label>
+              <div class="acc-roles">
+                {% for choice in field %}
+                  <label class="acc-role" for="{{ choice.id_for_label }}">
+                    {{ choice.tag }}
+                    <span class="acc-role-body">
+                      <span class="acc-role-name">{{ choice.choice_label }}</span>
+                      <span class="acc-role-desc">
+                        {% if choice.data.value == "student" %}
+                          Practise the chapters; every run is recorded so you can see progress over time.
+                        {% else %}
+                          Author and edit exercises in the score editor.
+                        {% endif %}
+                      </span>
+                    </span>
+                  </label>
+                {% endfor %}
+              </div>
+              {% for error in field.errors %}<p class="acc-error">{{ error }}</p>{% endfor %}
+            </div>
+          {% else %}{{ field }}{% endif %}
+        {% else %}
+          {% include "accounts/_form_field.html" %}
+        {% endif %}
+      {% endfor %}
+
+      <button type="submit" class="acc-btn acc-btn-primary acc-btn-block">Create account</button>
+    </form>
+
+    <p class="acc-alt">
+      Already have an account? <a href="{% url 'accounts:login' %}">Sign in</a>.
+    </p>
+  </div>
+</div>
+{% endblock %}

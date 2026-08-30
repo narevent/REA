@@ -1,0 +1,7 @@
+{% comment %}One labelled form field with its errors and help text.{% endcomment %}
+<div class="acc-field{% if field.errors %} has-error{% endif %}">
+  <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+  {{ field }}
+  {% if field.help_text %}<p class="acc-help">{{ field.help_text }}</p>{% endif %}
+  {% for error in field.errors %}<p class="acc-error">{{ error }}</p>{% endfor %}
+</div>

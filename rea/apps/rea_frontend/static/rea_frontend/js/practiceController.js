@@ -26,16 +26,16 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=75";
-import { PitchDetector, midiToName } from "./pitchDetector.js?v=75";
-import { API } from "./api.js?v=75";
+import { AudioPlayer } from "./audioPlayer.js?v=76";
+import { PitchDetector, midiToName } from "./pitchDetector.js?v=76";
+import { API } from "./api.js?v=76";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt,
-} from "./practiceData.js?v=75";
+} from "./practiceData.js?v=76";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=75";
+} from "./practiceScore.js?v=76";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 const SING_TAIL_MS = 600;  // extra recording tail so the user can finish
@@ -169,6 +169,13 @@ function glyph(name, size) {
   const s = size || 18;
   const common = 'width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"';
   switch (name) {
+    // The chapter glyphs (shared with the map and the session topbar) — without
+    // them a chapter's icon fell through to the default circle here, so the
+    // same exercise wore two different marks on two screens.
+    case "wave": return '<svg ' + common + '><path d="M4 12h2M8 7v10M12 4v16M16 7v10M20 12h-2"/></svg>';
+    case "ear": return '<svg ' + common + '><path d="M6 10a6 6 0 0 1 12 0c0 3-2 4-3 6s-1 4-3 4-2-2-2-4"/><path d="M9 10a3 3 0 0 1 6 0"/></svg>';
+    case "note": return '<svg ' + common + '><circle cx="7" cy="18" r="3"/><circle cx="17" cy="16" r="3"/><path d="M10 18V6l10-2v12"/></svg>';
+    case "seq": return '<svg ' + common + '><circle cx="6" cy="18" r="2.2"/><circle cx="12" cy="16" r="2.2"/><circle cx="18" cy="14" r="2.2"/><path d="M8 18V8M14 16V6M20 14V4"/></svg>';
     case "mic": return '<svg ' + common + '><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8"/></svg>';
     case "clock": return '<svg ' + common + '><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>';
     case "bars": return '<svg ' + common + '><path d="M4 12h2M8 7v10M12 4v16M16 7v10M20 12h-2"/></svg>';
