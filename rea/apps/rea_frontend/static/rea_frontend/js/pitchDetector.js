@@ -94,6 +94,64 @@ export function setVoiceOctaveOffset(oct) {
 }
 
 // ---------------------------------------------------------------------------
+// Voice profile: vibrato width and articulation floor
+// ---------------------------------------------------------------------------
+//
+// Two numbers about *this* singer, measured once in the soundcheck from the
+// note they already sing there, and used by the exercise's note segmenter.
+//
+//   VIBRATO   How far this voice moves while holding one note, in cents.  The
+//             segmenter widens its idea of "still the same note" to fit, so a
+//             singer with a wide vibrato is not chopped into pieces — and one
+//             with none keeps a tight tolerance instead of inheriting an
+//             allowance made for somebody else.  Vibrato is also measured live
+//             during an exercise; this is the starting point, which matters
+//             because the live estimate needs most of a note before it means
+//             anything, and the first note of a bar is exactly where a wrong
+//             tolerance does its damage.
+//
+//   ONSET FLOOR  How much articulation-like activity this voice and room throw
+//             off while a note is simply being held.  It is never zero: breath,
+//             room tone and the voice's own texture all register.  Knowing the
+//             floor for this microphone in this room lets the exercise ask for
+//             evidence above it, rather than against an average of everyone.
+//
+// Both are advisory.  Absent, the exercise uses its own defaults and works;
+// present, it fits the person singing.
+const VIBRATO_KEY = "rea.voiceVibratoCents";
+const ONSET_FLOOR_KEY = "rea.voiceOnsetFloor";
+const VIBRATO_MAX_CENTS = 200;
+let _voiceVibratoCents = 0;   // 0 = never measured
+let _voiceOnsetFloor = 0;     // 0 = never measured
+try {
+  const v = parseFloat(localStorage.getItem(VIBRATO_KEY));
+  if (!Number.isNaN(v)) _voiceVibratoCents = Math.max(0, Math.min(VIBRATO_MAX_CENTS, v));
+  const o = parseFloat(localStorage.getItem(ONSET_FLOOR_KEY));
+  if (!Number.isNaN(o)) _voiceOnsetFloor = Math.max(0, Math.min(3, o));
+} catch (e) { /* localStorage unavailable */ }
+
+/** Measured vibrato half-width for this voice, in cents (0 = not measured). */
+export function getVoiceVibratoCents() { return _voiceVibratoCents; }
+export function setVoiceVibratoCents(cents) {
+  const v = Number(cents);
+  _voiceVibratoCents = Number.isFinite(v) ? Math.max(0, Math.min(VIBRATO_MAX_CENTS, v)) : 0;
+  try { localStorage.setItem(VIBRATO_KEY, String(_voiceVibratoCents)); } catch (e) {}
+  return _voiceVibratoCents;
+}
+
+/** Articulation strength this voice produces while merely sustaining a note. */
+export function getVoiceOnsetFloor() { return _voiceOnsetFloor; }
+export function setVoiceOnsetFloor(v) {
+  const n = Number(v);
+  _voiceOnsetFloor = Number.isFinite(n) ? Math.max(0, Math.min(3, n)) : 0;
+  try { localStorage.setItem(ONSET_FLOOR_KEY, String(_voiceOnsetFloor)); } catch (e) {}
+  return _voiceOnsetFloor;
+}
+
+/** Has the soundcheck ever measured this singer's voice? */
+export function hasVoiceProfile() { return _voiceVibratoCents > 0 || _voiceOnsetFloor > 0; }
+
+// ---------------------------------------------------------------------------
 // Input gain + noise gate (mic calibration).
 //
 // The browser's own auto-gain is deliberately off (see `start`): AGC pumps,
@@ -209,6 +267,13 @@ const ONSET_STRONG_JUMP = 3.2;    // flux/recent-max that scores 1.0
 const ONSET_JUMP_FRAMES = 4;      // ~65 ms of immediate past
 const ONSET_ENV_STRONG_DB = 5;    // fast-over-slow envelope rise that scores 1.0
 const ONSET_ENV_MIN_DB = 1.5;     // below this the level tells us nothing
+// A note dying away changes the spectrum as much as one being articulated —
+// the harmonics fall away at different rates — so the release of every note
+// looked like the start of another, and a phantom note appeared at the end of
+// every phrase.  The two are easy to tell apart by level: an articulation dips
+// briefly (measured around -1.4 dB at a re-articulation) while a release is a
+// sustained collapse.  Below this, nothing is starting.
+const ONSET_RELEASE_DB = -4;
 const ONSET_REFRACTORY_MS = 70;   // strength ramps back in over this, rather than being gated off
 const ONSET_HISTORY = 24;         // ~400 ms of flux at 60 fps
 
@@ -315,7 +380,8 @@ export function makeOnsetDetector(opts) {
       // Rising edge: an onset is the *start* of a change, so a sustain that
       // stays high must not keep re-scoring.
       let strength = 0;
-      if (flux > prevFlux) {
+      const releasing = attack < ONSET_RELEASE_DB;
+      if (flux > prevFlux && !releasing) {
         const overThresh = flux / thresh;
         const jump = flux / recentMax;
         // Both ratios must be satisfied, so the weaker of the two sets the
@@ -323,7 +389,7 @@ export function makeOnsetDetector(opts) {
         // that is sudden but tiny is noise.
         strength = Math.min(overThresh / ONSET_STRONG_RATIO, jump / ONSET_STRONG_JUMP);
       }
-      if (attack > prevAttack && attack > ONSET_ENV_MIN_DB) {
+      if (!releasing && attack > prevAttack && attack > ONSET_ENV_MIN_DB) {
         const envStrength = (attack - ONSET_ENV_MIN_DB) / (ONSET_ENV_STRONG_DB - ONSET_ENV_MIN_DB);
         if (envStrength > strength) strength = envStrength;
       }

@@ -9,6 +9,20 @@
 
 export const SR = 48000;
 
+// A seeded generator, so a case that passes today passes tomorrow.  The attack
+// transients and the room tone are noise, and with Math.random() a borderline
+// case flipped between runs — which makes a failure impossible to tell from a
+// fluctuation, and that is worse than no test.
+let _seed = 1;
+export function reseed(n) { _seed = n >>> 0 || 1; }
+function rnd() {
+  // xorshift32
+  _seed ^= _seed << 13; _seed >>>= 0;
+  _seed ^= _seed >> 17;
+  _seed ^= _seed << 5;  _seed >>>= 0;
+  return _seed / 4294967296;
+}
+
 const midiToHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
 /**
@@ -18,6 +32,7 @@ const midiToHz = (m) => 440 * Math.pow(2, (m - 69) / 12);
  *          "legato" (no attack at all — ties to the previous note)
  */
 export function sing(notes, opts = {}) {
+  reseed(opts.seed || 12345);
   const sr = opts.sampleRate || SR;
   const total = notes.reduce((n, x) => n + Math.ceil(((x.ms || 0) + (x.gapMs || 0)) * sr / 1000), 0);
   const out = new Float32Array(total + Math.ceil(0.2 * sr));
@@ -58,6 +73,12 @@ export function sing(notes, opts = {}) {
       else if (artic === "soft") env = Math.min(1, tSec / 0.09);
       else env = Math.min(1, tSec / 0.012);    // fast, consonant-like
       env *= Math.min(1, (1 - u) / 0.06 + 0.35);
+      // Dynamics within the note.  A singer swelling into a long note changes
+      // level by several dB, which is exactly what the envelope half of onset
+      // detection is looking for — so it has to be modelled, or the tests are
+      // quietly agreeing that nobody sings expressively.
+      if (n.swellDb) env *= Math.pow(10, (n.swellDb * Math.sin(Math.PI * u)) / 20);
+      if (n.crescDb) env *= Math.pow(10, (n.crescDb * u) / 20);
       env = Math.min(1, env);
 
       const f = midiToHz(midi);
@@ -71,10 +92,10 @@ export function sing(notes, opts = {}) {
             + 0.25 * Math.sin(3 * phase)
             + 0.12 * Math.sin(4 * phase);
       s /= 1.87;
-      if (artic === "hard" && tSec < 0.02) s += (Math.random() * 2 - 1) * 0.6 * (1 - tSec / 0.02);
+      if (artic === "hard" && tSec < 0.02) s += (rnd() * 2 - 1) * 0.6 * (1 - tSec / 0.02);
       out[i] = s * amp * env;
     }
-    for (let k = 0; k < gap; k++, i++) out[i] = (Math.random() * 2 - 1) * 0.0004; // room tone
+    for (let k = 0; k < gap; k++, i++) out[i] = (rnd() * 2 - 1) * 0.0004; // room tone
   }
   return { signal: out, sampleRate: sr, marks };
 }

@@ -17,11 +17,20 @@
  *                Sight-singing is not a rhythm test, and nothing here may
  *                depend on the singer matching the playback.
  * `patience.mjs` the ways the capture used to run ahead of the singer.
+ * `pacing.mjs`   *when* the marker moves on: the two promises to the singer,
+ *                that a note always gets a minimum time before the marker
+ *                leaves it and that the marker follows promptly once the note
+ *                is over.  This is what "it feels too fast" means in numbers,
+ *                and it is asserted because it has regressed once already.
+ * `lastnote.mjs` the last note of a bar gets the same time as any other.
+ * `profile.mjs`  the voice profile the soundcheck measures — vibrato width and
+ *                articulation floor — and what having one does for a singer
+ *                whose voice is nothing like the default.
  *
  * `measure.mjs` and `strength.mjs` print the figures the onset thresholds are
  * set from — run them if you change those constants.
  */
-const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs"];
+const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs", "./lastnote.mjs", "./profile.mjs"];
 let failed = false;
 for (const m of mods) {
   const before = process.exitCode;

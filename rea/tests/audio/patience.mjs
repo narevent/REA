@@ -35,4 +35,23 @@ T("late start", [69, 71],
   [{ midi: 69, ms: 600, artic: "hard", gapMs: 400 },
    { midi: 71, ms: 600, artic: "hard" }], 500);
 
+// Expression must not read as articulation.  A singer swelling through a long
+// note, or growing into it, changes level by several dB — which is precisely
+// what the envelope half of onset detection watches for.
+T("a note sung with a swell is still one note", [67, 69],
+  [{ midi: 67, ms: 1400, artic: "hard", vibCents: 40, swellDb: 7 },
+   { midi: 69, ms: 700, artic: "hard" }], 600);
+
+T("a crescendo through a note is still one note", [64, 65],
+  [{ midi: 64, ms: 1200, artic: "soft", crescDb: 9 },
+   { midi: 65, ms: 700, artic: "hard" }], 600);
+
+// Uneven singing must not wind the pace estimate down until the exercise races:
+// every threshold scales with pace, so a fragment lowering it is a feedback
+// loop.
+T("uneven phrase does not wind up the pace", [60, 62, 64, 65, 67],
+  [{ midi: 60, ms: 260, artic: "hard" }, { midi: 62, ms: 900, artic: "hard", vibCents: 40 },
+   { midi: 64, ms: 300, artic: "hard" }, { midi: 65, ms: 850, artic: "hard" },
+   { midi: 67, ms: 700, artic: "hard" }], 500);
+
 console.log("\n" + pass + "/" + total + " patience cases pass");
