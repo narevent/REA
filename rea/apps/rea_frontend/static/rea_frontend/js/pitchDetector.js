@@ -173,60 +173,84 @@ const FLUX_BAND_LO_HZ = 100;    // below this is rumble and handling noise
 const FLUX_BAND_HI_HZ = 5000;   // above this is mostly hiss for a sung voice
 const FLUX_BANDS = 24;          // log-spaced bands across that range
 const FLUX_FFT_SIZE = 1024;     // ~21 ms at 48 kHz: resolves an attack in time
-const ONSET_REFRACTORY_MS = 80; // one attack, one onset
-// Absolute floor for the flux test, set from measurement rather than taste
-// (rea/tests/audio measures these on synthesised singing):
+// The onset feature is measured at two offsets within each frame, half a hop
+// apart, and the strongest change is taken.  An attack lasts around 20 ms and a
+// frame arrives every ~17 ms, so a single window catches an attack whole or
+// splits it in half depending on nothing more than where the frame boundary
+// happened to fall — and a half-strength articulation is exactly the one that
+// gets missed.  Two offsets tile the timeline, so no attack can hide between
+// them, at the cost of one extra short FFT per frame.
+const FLUX_SUB_OFFSETS = 2;
+
+// --- what counts as a strong articulation ---------------------------------
 //
-//   re-articulated note ............ 0.14 - 0.29   (varies: a 20 ms transient
-//                                                   may straddle two frames)
+// The detector reports a *strength*, not a verdict.  A verdict has to pick one
+// threshold and stand on it, and no single threshold survives contact with real
+// singing: a clear consonant and a gentle re-attack on the same vowel differ by
+// an order of magnitude, and the same attack lands anywhere between one frame
+// and two depending on where the frame boundary happens to fall.  Strength lets
+// the segmenter weigh this against what else it knows — how firmly the pitch is
+// locked, whether the voice is in vibrato — instead of being told "yes" or "no"
+// by one number in isolation.
+//
+// Scale: 1.0 means "on its own, this is a new note".  Below that it is evidence
+// that needs corroborating; above it, an articulation nothing should override.
+//
+// Flux figures these are calibrated against (rea/tests/audio/measure.mjs):
+//   re-articulated note ............ 0.14 - 0.29  (varies with frame alignment)
 //   legato slide to another pitch .. 0.19
-//   wide vibrato (80 cents) ........ 0.13  sustained, not a burst
-//   ordinary vibrato (45 cents) .... 0.07  sustained
+//   wide vibrato (80 cents) ........ 0.13         sustained, not a burst
+//   ordinary vibrato (45 cents) .... 0.07         sustained
 //   steady sustain ................. 0.005
-//
-// The floor cannot be set above vibrato, because a badly-aligned articulation
-// reaches only 0.14.  So the floor is set just clear of a *steady* sustain, and
-// vibrato is left to the adaptive half of the threshold: while a voice is
-// wobbling, its own running median and MAD rise with it, and the bar rises too.
-// A burst stands out against its own recent past; a wobble is its own past.
-const ONSET_FLUX_FLOOR = 0.06;
-const ONSET_FLUX_K = 3.2;       // MAD multiples above the running median
-// ...and it must also be a *jump*: at least this many times the largest flux of
-// the last few frames.  A median-plus-MAD test looks backwards over ~400 ms, so
-// a flux that climbs gradually — vibrato developing over the first beat of a
-// held note — stays under the bar for a while and then quietly walks through
-// it, splitting one note into three.  An articulation does not climb; it
-// arrives.  Measuring the jump against the immediate past separates a burst
-// from a swell without needing any lookahead, so it costs no latency.
-const ONSET_FLUX_JUMP = 1.8;
-const ONSET_JUMP_FRAMES = 4;   // ~65 ms of immediate past
-const ONSET_ENV_ATTACK_DB = 3.5;// fast-over-slow envelope rise that counts as an attack
-// Note for anyone tempted to require a simultaneous rise in level here: an
-// articulation's flux spike lands on the *dip* — the consonant or glottal
-// closure — not on the rise that follows it a frame or two later.  Gating flux
-// on a rising envelope was tried and it suppressed every re-articulation while
-// letting vibrato through.  The two cues are independent on purpose; they are
-// combined by OR, not by AND.
-const ONSET_ENV_FAST_MS = 25;
-const ONSET_ENV_SLOW_MS = 180;
-const ONSET_HISTORY = 24;       // ~400 ms of flux at 60 fps
+const ONSET_FLUX_FLOOR = 0.055;   // clear of a steady sustain; vibrato is handled by the adaptive term
+const ONSET_FLUX_K = 3.2;         // MAD multiples above the running median
+const ONSET_STRONG_RATIO = 2.6;   // flux/threshold that scores 1.0
+const ONSET_STRONG_JUMP = 3.2;    // flux/recent-max that scores 1.0
+const ONSET_JUMP_FRAMES = 4;      // ~65 ms of immediate past
+const ONSET_ENV_STRONG_DB = 5;    // fast-over-slow envelope rise that scores 1.0
+const ONSET_ENV_MIN_DB = 1.5;     // below this the level tells us nothing
+const ONSET_REFRACTORY_MS = 70;   // strength ramps back in over this, rather than being gated off
+const ONSET_HISTORY = 24;         // ~400 ms of flux at 60 fps
 
 function median(sorted) { return sorted[(sorted.length - 1) >> 1]; }
+const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 /**
- * Decide, frame by frame, when a new note has been articulated.
+ * Report, frame by frame, how strongly the audio says a note was just
+ * articulated.
  *
- * Exported for testing: it is pure state over a stream of frames, so it can be
- * driven from synthesised audio without a microphone.
+ * Two independent cues, because a singer can start a note in two ways and each
+ * cue is blind to one of them:
  *
- * @returns {{feed: function, reset: function}} `feed` returns true on the frame
- *   an onset is detected.
+ *   FLUX  Spectral *shape* change — a consonant, a new vowel, a glottal
+ *         re-attack.  This is the only cue that can separate two notes at the
+ *         same pitch, which is the whole reason onset detection is here.
+ *         Scored on two ratios at once: against an adaptive threshold (the
+ *         running median and MAD of this voice in this room), and against the
+ *         immediate past.  The second matters because vibrato developing over
+ *         the first beat of a held note raises flux *gradually*; it would walk
+ *         through a backward-looking threshold, but it never jumps.
+ *
+ *   ENV   A fast envelope crossing above a slow one, in dB — the pure level
+ *         attack, which is what a re-articulation on the same vowel and pitch
+ *         looks like when the spectrum barely moves.
+ *
+ * They are combined by max, not sum: either one, on its own, is a real
+ * articulation, and adding them would let two weak coincidences outvote a
+ * clear one.
+ *
+ * A note for whoever tunes this next: the flux spike lands on the *dip* of an
+ * articulation — the consonant or glottal closure — not on the rise that
+ * follows it a frame or two later.  Requiring a simultaneous rise in level was
+ * tried, and it suppressed every re-articulation while letting vibrato through.
+ *
+ * Exported for testing: pure state over a frame stream, so it can be driven
+ * from synthesised singing without a microphone.
  */
 export function makeOnsetDetector(opts) {
   const o = opts || {};
   const fluxFloor = o.fluxFloor != null ? o.fluxFloor : ONSET_FLUX_FLOOR;
   const fluxK = o.fluxK != null ? o.fluxK : ONSET_FLUX_K;
-  const envAttackDb = o.envAttackDb != null ? o.envAttackDb : ONSET_ENV_ATTACK_DB;
   const refractoryMs = o.refractoryMs != null ? o.refractoryMs : ONSET_REFRACTORY_MS;
 
   let hist = [];
@@ -246,40 +270,36 @@ export function makeOnsetDetector(opts) {
     reset,
     /**
      * @param {object} f  { flux, db, sounding, t, dt }
-     *   `sounding` is the gate/voicing verdict: no onset is reported while the
-     *   input is below the noise gate, or the room itself would articulate.
+     * @returns {number}  strength; 0 for "nothing happened", 1.0 for "this is a
+     *                    new note on its own", higher for an unmistakable one.
      */
     feed(f) {
-      const t = f.t, dt = f.dt > 0 && f.dt < 500 ? f.dt : 0;
+      const t = f.t;
+      const dt = f.dt > 0 && f.dt < 500 ? f.dt : 0;
 
       if (!f.sounding) {
-        // Silence resets the envelopes; the next sound starts a note on its own
-        // account (below), so nothing is lost by forgetting the old levels.
         wasSounding = false;
         envFast = null; envSlow = null; prevAttack = 0; prevFlux = 0;
-        return false;
+        return 0;
       }
 
-      // Sound after silence is always a note start, whatever the spectrum says.
+      // Sound after silence is a note start beyond argument.
       if (!wasSounding) {
         wasSounding = true;
         envFast = f.db; envSlow = f.db; prevAttack = 0; prevFlux = f.flux || 0;
         lastOnsetT = t;
-        return true;
+        return 2;
       }
 
       const db = f.db;
       if (envFast == null) { envFast = db; envSlow = db; }
       else if (dt) {
-        envFast += (db - envFast) * Math.min(1, dt / ONSET_ENV_FAST_MS);
-        envSlow += (db - envSlow) * Math.min(1, dt / ONSET_ENV_SLOW_MS);
+        envFast += (db - envFast) * Math.min(1, dt / 25);
+        envSlow += (db - envSlow) * Math.min(1, dt / 180);
       }
       const attack = envFast - envSlow;
-
       const flux = f.flux || 0;
-      // Threshold from the recent past of this voice in this room.  MAD rather
-      // than standard deviation: one loud onset already in the window must not
-      // raise the bar enough to hide the next one.
+
       let thresh = fluxFloor;
       if (hist.length >= 8) {
         const sorted = hist.slice().sort((a, b) => a - b);
@@ -287,25 +307,41 @@ export function makeOnsetDetector(opts) {
         const devs = sorted.map((v) => Math.abs(v - med)).sort((a, b) => a - b);
         thresh = Math.max(fluxFloor, med + fluxK * median(devs));
       }
-
-      // Rising edge on both cues: an onset is the *start* of a change, and
-      // testing the edge keeps the whole sustain that follows from re-firing.
-      let recentMax = 0;
+      let recentMax = 1e-9;
       for (let i = Math.max(0, hist.length - ONSET_JUMP_FRAMES); i < hist.length; i++) {
         if (hist[i] > recentMax) recentMax = hist[i];
       }
-      const jumped = flux >= ONSET_FLUX_JUMP * recentMax;
-      const fluxOnset = flux >= thresh && flux > prevFlux && jumped;
-      const envOnset = attack >= envAttackDb && attack > prevAttack;
+
+      // Rising edge: an onset is the *start* of a change, so a sustain that
+      // stays high must not keep re-scoring.
+      let strength = 0;
+      if (flux > prevFlux) {
+        const overThresh = flux / thresh;
+        const jump = flux / recentMax;
+        // Both ratios must be satisfied, so the weaker of the two sets the
+        // score — a flux that is high but not sudden is a swell, and a flux
+        // that is sudden but tiny is noise.
+        strength = Math.min(overThresh / ONSET_STRONG_RATIO, jump / ONSET_STRONG_JUMP);
+      }
+      if (attack > prevAttack && attack > ONSET_ENV_MIN_DB) {
+        const envStrength = (attack - ONSET_ENV_MIN_DB) / (ONSET_ENV_STRONG_DB - ONSET_ENV_MIN_DB);
+        if (envStrength > strength) strength = envStrength;
+      }
+      strength = clamp(strength, 0, 2);
 
       hist.push(flux);
       if (hist.length > ONSET_HISTORY) hist.shift();
       prevFlux = flux;
       prevAttack = attack;
 
-      if (t - lastOnsetT < refractoryMs) return false;
-      if (fluxOnset || envOnset) { lastOnsetT = t; return true; }
-      return false;
+      // Refractory as a ramp rather than a gate.  One attack smeared across two
+      // or three frames should read as one strong onset, not as one onset plus
+      // a suppressed remainder — and a genuine second attack arriving soon
+      // after should still be able to register, just needing more evidence.
+      const since = t - lastOnsetT;
+      if (since < refractoryMs) strength *= clamp(since / refractoryMs, 0, 1);
+      if (strength >= 1) lastOnsetT = t;
+      return strength;
     },
   };
 }
@@ -444,23 +480,40 @@ export class Mpm {
     for (let i = 0; i < this.fluxN; i++) {
       this.hann[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (this.fluxN - 1));
     }
-    // Log-spaced bands: a spectral change is a band-shaped thing, and summing
-    // bins into bands averages out what leakage remains.
-    this.fluxEdges = [];
+    // Overlapping triangular filters, log-spaced — a mel-style filterbank.
+    // Hard band edges were tried first and they manufacture flux out of
+    // nothing: vibrato sweeps a harmonic back and forth across an edge, and
+    // each crossing moves a whole partial's energy from one band to its
+    // neighbour, which differences exactly like a spectral change.  Triangles
+    // that overlap hand energy over gradually, so a sweeping partial barely
+    // registers while a broadband transient — which lights every filter at
+    // once — still does.
+    this.fluxFilters = [];
     {
       const lo = FLUX_BAND_LO_HZ, hi = FLUX_BAND_HI_HZ;
       const nyqBin = (this.fluxN >> 1) - 1;
-      for (let b = 0; b <= FLUX_BANDS; b++) {
-        const hz = lo * Math.pow(hi / lo, b / FLUX_BANDS);
-        const bin = Math.min(nyqBin, Math.max(1, Math.round((hz * this.fluxN) / sampleRate)));
-        if (!this.fluxEdges.length || bin > this.fluxEdges[this.fluxEdges.length - 1]) {
-          this.fluxEdges.push(bin);
+      const binOf = (hz) => Math.min(nyqBin, Math.max(1, (hz * this.fluxN) / sampleRate));
+      const centres = [];
+      for (let b = 0; b <= FLUX_BANDS + 1; b++) {
+        centres.push(binOf(lo * Math.pow(hi / lo, b / (FLUX_BANDS + 1))));
+      }
+      for (let b = 1; b < centres.length - 1; b++) {
+        const left = centres[b - 1], mid = centres[b], right = centres[b + 1];
+        const from = Math.max(1, Math.floor(left)), to = Math.min(nyqBin, Math.ceil(right));
+        const bins = [], weights = [];
+        for (let k = from; k <= to; k++) {
+          let w = 0;
+          if (k <= mid && mid > left) w = (k - left) / (mid - left);
+          else if (k > mid && right > mid) w = (right - k) / (right - mid);
+          if (w > 0) { bins.push(k); weights.push(w); }
         }
+        if (bins.length) this.fluxFilters.push({ bins, weights });
       }
     }
-    const bands = Math.max(1, this.fluxEdges.length - 1);
-    this.prevBand = new Float64Array(bands);
-    this.curBand = new Float64Array(bands);
+    const bands = Math.max(1, this.fluxFilters.length);
+    this.bandA = new Float64Array(bands);   // earlier sub-window
+    this.bandB = new Float64Array(bands);   // later sub-window (frame end)
+    this.prevBand = new Float64Array(bands); // previous frame's bandB
     this.hasPrevMag = false;
     this.flux = 0;
   }
@@ -487,37 +540,63 @@ export class Mpm {
    * envelope test, a different question with a different answer.
    */
   _updateFlux(buf) {
+    const half = Math.floor((this.W - this.fluxN) / (FLUX_SUB_OFFSETS - 1 || 1));
+    const endB = this.W - this.fluxN;                  // window ending at the frame end
+    const endA = Math.max(0, endB - Math.min(half, Math.floor(this.fluxN / 2)));
+    this._spectrum(buf, endA, this.bandA);
+    this._spectrum(buf, endB, this.bandB);
+
+    if (!this.hasPrevMag) {
+      this.flux = 0;
+      this.prevBand.set(this.bandB);
+      this.hasPrevMag = true;
+      return;
+    }
+    // Two overlapping comparisons, each about half a hop apart: the previous
+    // frame's late window against this frame's early one, and this frame's
+    // early against its late.  Together they cover the whole interval, so an
+    // attack cannot fall between two measurements and read as half of one.
+    const f1 = this._diff(this.prevBand, this.bandA);
+    const f2 = this._diff(this.bandA, this.bandB);
+    this.flux = Math.max(f1, f2);
+    this.prevBand.set(this.bandB);
+  }
+
+  /** Windowed band amplitudes for the fluxN samples of `buf` ending at `off`. */
+  _spectrum(buf, off, into) {
     const n = this.fluxN, re = this.fre, im = this.fim, w = this.hann;
-    const off = Math.max(0, this.W - n);       // the most recent n samples
     let mean = 0;
     for (let i = 0; i < n; i++) mean += buf[off + i];
     mean /= n;
     for (let i = 0; i < n; i++) { re[i] = (buf[off + i] - mean) * w[i]; im[i] = 0; }
     fft(re, im, false);
 
-    const edges = this.fluxEdges, prev = this.prevBand, cur = this.curBand;
-    const bands = cur.length;
+    const filters = this.fluxFilters;
     let sum = 0;
-    for (let b = 0; b < bands; b++) {
+    for (let b = 0; b < filters.length; b++) {
+      const { bins, weights } = filters[b];
       let e = 0;
-      for (let k = edges[b]; k < edges[b + 1]; k++) e += re[k] * re[k] + im[k] * im[k];
-      // Amplitude, not power: power is dominated by the fundamental, while an
-      // onset's evidence is spread thinly across the upper bands.
-      const a = Math.sqrt(e);
-      cur[b] = a;
-      sum += a;
+      for (let i = 0; i < bins.length; i++) {
+        const k = bins[i];
+        // Amplitude, not power: power is dominated by the fundamental, while an
+        // onset's evidence is spread thinly across the upper bands.
+        e += weights[i] * Math.sqrt(re[k] * re[k] + im[k] * im[k]);
+      }
+      into[b] = e;
+      sum += e;
     }
-    if (!(sum > 0)) { this.flux = 0; this.hasPrevMag = false; return; }
-    const inv = 1 / sum;
+    // Normalise to unit sum, so this measures a change in spectral *shape* and
+    // one threshold holds for a whisper and a belt alike.  Level is a separate
+    // cue, asked and answered separately.
+    if (sum > 0) { const inv = 1 / sum; for (let b = 0; b < filters.length; b++) into[b] *= inv; }
+    return sum;
+  }
+
+  /** Rectified difference between two normalised band vectors. */
+  _diff(prev, cur) {
     let flux = 0;
-    for (let b = 0; b < bands; b++) {
-      const v = cur[b] * inv;
-      cur[b] = v;
-      if (this.hasPrevMag) { const d = v - prev[b]; if (d > 0) flux += d; }
-    }
-    this.flux = this.hasPrevMag ? flux : 0;
-    prev.set(cur);
-    this.hasPrevMag = true;
+    for (let b = 0; b < cur.length; b++) { const d = cur[b] - prev[b]; if (d > 0) flux += d; }
+    return flux;
   }
 
   detect(buf) {
@@ -676,6 +755,7 @@ export class PitchDetector {
     if (!this._onset) this._onset = makeOnsetDetector();
     this._onset.reset();
     this._lastOnset = false;
+    this._onsetStrength = 0;
     this._raw = [];       // recent raw (fractional) MIDI estimates, voiced only
     this._voiced = false;
     this._onCount = 0;
@@ -787,7 +867,7 @@ export class PitchDetector {
     this._emit({
       freq: null, midi: null, midiRound: null, cents: 0, clarity: 0, t,
       rms: rms || 0, db: rmsToDb(rms), gated: !this._gateOpen,
-      onset: this._lastOnset, flux: this._flux || 0,
+      onset: this._lastOnset, onsetStrength: this._onsetStrength || 0, flux: this._flux || 0,
     });
   }
 
@@ -802,12 +882,15 @@ export class PitchDetector {
     // all, and it is exactly the cue that a new note has begun.
     const dt = this._lastT == null ? 0 : t - this._lastT;
     this._lastT = t;
-    this._lastOnset = this._onset.feed({
+    this._onsetStrength = this._onset.feed({
       flux: this._flux,
       db: rmsToDb(rms),
       sounding: rms >= getNoiseGate() * GATE_RELEASE_RATIO,
       t, dt,
     });
+    // `onset` stays for anything that just wants a verdict; the exercise's
+    // segmenter weighs the strength instead.
+    this._lastOnset = this._onsetStrength >= 1;
 
     // Level gate, ahead of everything else.  NSDF clarity says nothing about
     // loudness, so without this a quiet periodic hum reads as a confidently
@@ -886,7 +969,7 @@ export class PitchDetector {
     if (this._last) {
       this._emit(Object.assign({}, this._last, {
         t, rms, db: rmsToDb(rms), gated: false,
-        onset: this._lastOnset, flux: this._flux,
+        onset: this._lastOnset, onsetStrength: this._onsetStrength, flux: this._flux,
       }));
     }
     else this._emitUnvoiced(t, rms);

@@ -10,12 +10,18 @@
  * vibrato, a legato slide, a re-articulated repeat, a breath — and run it
  * through the same Mpm, onset detector and segmenter the app uses.
  *
- * `cases.mjs` checks where notes begin and end.  `slots.mjs` checks the thing
- * the singer actually sees: which reference note each sung note was scored
- * against.  `measure.mjs` prints the flux figures the onset thresholds are set
- * from — run it if you change them.
+ * `cases.mjs`    where notes begin and end.
+ * `slots.mjs`    which reference note each sung note is scored against — the
+ *                thing the singer actually sees.
+ * `tempo.mjs`    the same phrase sung far slower and faster than it is written.
+ *                Sight-singing is not a rhythm test, and nothing here may
+ *                depend on the singer matching the playback.
+ * `patience.mjs` the ways the capture used to run ahead of the singer.
+ *
+ * `measure.mjs` and `strength.mjs` print the figures the onset thresholds are
+ * set from — run them if you change those constants.
  */
-const mods = ["./cases.mjs", "./slots.mjs"];
+const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs"];
 let failed = false;
 for (const m of mods) {
   const before = process.exitCode;

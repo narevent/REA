@@ -39,12 +39,16 @@ export function sing(notes, opts = {}) {
       const tSec = k / sr;
       // Pitch: an optional slide in from the previous note, a scoop that
       // resolves over the first ~120 ms, and vibrato once the note settles.
+      // A singer moving fast slides fast: portamento and scoop scale with the
+      // note, rather than eating a fixed 120 ms of a note that may only last
+      // 220 ms.  A fixed slide made fast legato unsingable in a way no voice is.
+      const glideSec = Math.min(0.12, 0.45 * (n.ms / 1000));
       let midi = n.midi;
       if (from != null) {
-        const slideU = Math.min(1, tSec / 0.12);
+        const slideU = Math.min(1, tSec / glideSec);
         midi = from + (n.midi - from) * slideU;
       }
-      if (scoop) midi -= scoop * Math.max(0, 1 - tSec / 0.12);
+      if (scoop) midi -= scoop * Math.max(0, 1 - tSec / glideSec);
       if (vib) midi += vib * Math.sin(2 * Math.PI * 5.5 * tSec) * Math.min(1, tSec / 0.25);
 
       // Amplitude envelope: attack shape depends on the articulation.
@@ -94,12 +98,12 @@ export function analyse(signal, sampleRate, Mpm, makeOnsetDetector, opts = {}) {
     const rms = Math.sqrt(sum / win);
     const res = mpm.detect(buf);
     const db = 20 * Math.log10(Math.max(rms, 1e-7));
-    const isOnset = onset.feed({
+    const strength = onset.feed({
       flux: mpm.flux, db, sounding: rms >= gate * 0.7, t,
       dt: frames.length ? hopMs : 0,
     });
     frames.push({
-      t, rms, db, flux: mpm.flux, onset: isOnset,
+      t, rms, db, flux: mpm.flux, onsetStrength: strength, onset: strength >= 1,
       midi: res ? 69 + 12 * Math.log2(res.freq / 440) : null,
       clarity: res ? res.clarity : 0,
       sampleAt: start,
