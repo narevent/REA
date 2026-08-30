@@ -346,6 +346,26 @@ body {
 .notation.noteheads-only .vf-beam { display: none !important; }
 
 /* Live sung-pitch preview marker (singing exercises). */
+/* Per-note accuracy, left on the stave after singing so a finished run can be
+   read back at a glance: which notes landed and which were off.  Colours are
+   darker than the live sung-pitch marker below because these sit on the white
+   notation paper rather than floating over it. */
+.notation .vf-stavenote.vf-acc-good .vf-notehead text,
+.notation .vf-stavenote.vf-acc-good .vf-notehead path { fill: #157f45 !important; stroke: #157f45 !important; }
+.notation .vf-stavenote.vf-acc-ok .vf-notehead text,
+.notation .vf-stavenote.vf-acc-ok .vf-notehead path { fill: #b9750f !important; stroke: #b9750f !important; }
+.notation .vf-stavenote.vf-acc-weak .vf-notehead text,
+.notation .vf-stavenote.vf-acc-weak .vf-notehead path { fill: #c62f22 !important; stroke: #c62f22 !important; }
+/* Never sung — present on the stave but greyed, so a skipped note reads as
+   "no attempt" rather than as a bad one. */
+.notation .vf-stavenote.vf-acc-miss .vf-notehead text,
+.notation .vf-stavenote.vf-acc-miss .vf-notehead path { fill: #a8adb4 !important; stroke: #a8adb4 !important; }
+
+/* The transient playback cursor still wins over a result colour, so following
+   the music never gets lost behind last round's scores. */
+.notation .vf-stavenote.vf-note-active .vf-notehead text,
+.notation .vf-stavenote.vf-note-active .vf-notehead path { fill: #ff7a18 !important; stroke: none !important; }
+
 .notation .vf-sung-note { stroke: #1a1a1a; stroke-width: 1; opacity: 0.92; }
 .notation .vf-sung-good { fill: #2ecc71; }
 .notation .vf-sung-ok { fill: #f5a623; }
@@ -465,6 +485,13 @@ body {
 .sn-cell.ok { border-color: var(--muted); color: var(--fg-dim); }
 .sn-cell.weak, .mg-cell.wrong { border-color: var(--bad); color: var(--bad); background: rgba(255,107,107,0.07); }
 .mg-cell.pending { border-style: dashed; color: var(--muted); }
+.sn-cell.pending { border-style: dashed; color: var(--muted); }
+/* The reference note the singer is on right now, in the live per-note strip. */
+.sn-cell.pending.active {
+  border-style: solid; border-color: var(--accent); color: var(--accent);
+  background: rgba(106,169,255,0.10);
+  box-shadow: 0 0 0 2px rgba(106,169,255,0.14);
+}
 
 /* summary */
 .summary {
@@ -596,6 +623,64 @@ body {
 .sc-meter-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
 
 .sc-notation { min-height: 180px; margin: 8px 0 14px; }
+
+/* Input-level meter: post-gain signal, the healthy band it should sit in, and
+   a tick where the noise gate is — so mic setup is a glance, not a guess. */
+.sc-input { margin: 4px 0 14px; }
+.sc-input-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--muted-2); font-weight: 700; margin-bottom: 6px;
+}
+.sc-input-val { font-family: var(--font-mono); font-size: 12px; letter-spacing: 0; color: var(--muted); }
+.sc-input-val.good { color: #2ecc71; }
+.sc-input-val.hot { color: #e74c3c; }
+.sc-input-val.low { color: var(--muted); }
+.sc-input-track {
+  position: relative; height: 10px; border-radius: 999px; overflow: hidden;
+  background: var(--panel-2); border: 1px solid var(--border);
+}
+.sc-input-good { position: absolute; top: 0; bottom: 0; background: rgba(46,204,113,0.14); }
+.sc-input-gate { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--muted-2); opacity: 0.8; }
+.sc-input-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+  background: var(--muted-2); border-radius: 999px; transition: width .06s linear, background .2s;
+}
+.sc-input-fill.good { background: #2ecc71; }
+.sc-input-fill.hot { background: #e74c3c; }
+.sc-input-scale {
+  display: flex; justify-content: space-between; font-size: 10px; color: var(--muted);
+  margin-top: 6px; text-transform: uppercase; letter-spacing: 0.06em;
+}
+
+/* Calibration outcome card — the "it matched, here's what we measured, you're
+   done" signal for Auto gain and Auto-detect.  Sits on its own line under the
+   row's controls (flex-basis 100% breaks it to a new line in .sc-setup-row). */
+.sc-result-slot { flex: 1 1 100%; margin-top: 12px; }
+.sc-result-slot:empty { display: none; }
+/* Hint beside a setup control that the soundcheck normally sets for you. */
+.sc-setup-hint { font-size: 12px; color: var(--muted); }
+.sc-result {
+  display: flex; align-items: flex-start; gap: 10px; margin-top: 4px;
+  padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--panel-2);
+}
+.sc-result-ico { display: flex; flex: none; margin-top: 1px; color: var(--muted); }
+.sc-result-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.sc-result-title { font-size: 13px; font-weight: 700; color: var(--fg); }
+.sc-result-detail { font-size: 12.5px; line-height: 1.55; color: var(--fg-dim); }
+.sc-result-detail b { color: var(--fg); font-weight: 700; }
+/* Note names read better in the mono face; ordinary emphasis should not. */
+.sc-result-detail .sc-note-name { font-family: var(--font-mono); }
+.sc-result.good { border-color: rgba(76,214,180,0.45); background: rgba(76,214,180,0.08); }
+.sc-result.good .sc-result-ico, .sc-result.good .sc-result-title { color: var(--accent-2); }
+.sc-result.warn { border-color: rgba(245,166,35,0.45); background: rgba(245,166,35,0.08); }
+.sc-result.warn .sc-result-ico, .sc-result.warn .sc-result-title { color: var(--warn); }
+.sc-result.idle .sc-result-title { color: var(--fg-dim); }
+.sc-result.busy { border-color: rgba(106,169,255,0.45); background: rgba(106,169,255,0.08); }
+.sc-result.busy .sc-result-ico, .sc-result.busy .sc-result-title { color: var(--accent); }
+.sc-result.busy .sc-result-ico { animation: sc-pulse 1.2s ease-in-out infinite; }
+
 .sc-live-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 
 @media (min-width: 720px) {

@@ -27,11 +27,15 @@
  * The microphone is opened with echo-cancellation / noise-suppression /
  * auto-gain *disabled*: those are tuned for speech intelligibility and
  * actively distort pitch (AGC pumping, NS warble), which is the opposite of
- * what a pitch tracker wants.
+ * what a pitch tracker wants.  In their place sits a *fixed* input trim plus a
+ * level gate, both calibrated once in Soundcheck — see the "Input gain + noise
+ * gate" section below for why static beats adaptive here.
  *
  * All values are relative to A4 = 440 Hz, matching audioPlayer.js.  The
- * per-frame callback shape is unchanged from earlier versions:
- *   { freq, midi, midiRound, cents, clarity, t }  (freq/midi null when unvoiced)
+ * per-frame callback shape is:
+ *   { freq, midi, midiRound, cents, clarity, t, rms, db, gated }
+ *   (freq/midi null when unvoiced; rms/db are the post-gain input level, so
+ *    callers can meter the mic even while nothing is being sung)
  */
 
 const A4_HZ = 440;
@@ -87,6 +91,102 @@ export function setVoiceOctaveOffset(oct) {
   _voiceOctaveOffset = Math.max(-3, Math.min(3, Math.round(oct) || 0));
   try { localStorage.setItem(OCTAVE_OFFSET_KEY, String(_voiceOctaveOffset)); } catch (e) {}
   return _voiceOctaveOffset;
+}
+
+// ---------------------------------------------------------------------------
+// Input gain + noise gate (mic calibration).
+//
+// The browser's own auto-gain is deliberately off (see `start`): AGC pumps,
+// and pumping distorts pitch.  What a pitch tracker wants instead is a *fixed*
+// gain, calibrated once, that puts the singer's comfortable voice at a healthy
+// level and keeps it there — loud enough to sit well above the room's noise
+// floor, quiet enough never to clip.
+//
+// The noise gate is the other half of the same calibration, and it matters
+// more than it looks.  NSDF clarity is scale-invariant: room tone, a fan, a
+// desk bump — anything with a bit of periodicity — can clear the clarity
+// threshold at a whisper of a level and be reported as a real, confidently
+// tracked note.  In the singing exercises that reads as the user having sung
+// something, so notes get banked they never sang and the exercise appears to
+// rush past them.  Gating on level below `_noiseGate` is what stops that: it
+// is measured from the user's actual room during calibration, so it sits just
+// above their noise floor and well below their singing.
+//
+// Both are single app-wide settings (every PitchDetector honours them),
+// persisted so the user calibrates once, and applied live to running
+// detectors so Soundcheck can hear its own adjustments immediately.
+// ---------------------------------------------------------------------------
+const INPUT_GAIN_KEY = "rea.inputGain";
+const NOISE_GATE_KEY = "rea.noiseGate";
+
+/** Gain bounds.  Below 0.2 or above 16 the problem is the system input level
+ *  or mic placement, not something a software trim should paper over. */
+export const INPUT_GAIN_MIN = 0.2;
+export const INPUT_GAIN_MAX = 16;
+
+/** Default gate, in post-gain RMS.  ≈ −52 dBFS: under any real singing voice,
+ *  over digital silence.  Calibration replaces it with a room-derived value. */
+const DEFAULT_NOISE_GATE = 0.0025;
+
+/** Gate hysteresis: once open, it stays open down to this fraction of the
+ *  threshold, so a note whose sustain decays near the gate doesn't stutter. */
+const GATE_RELEASE_RATIO = 0.7;
+
+let _inputGain = 1;
+let _noiseGate = DEFAULT_NOISE_GATE;
+try {
+  const g = parseFloat(localStorage.getItem(INPUT_GAIN_KEY));
+  if (!Number.isNaN(g) && g > 0) _inputGain = Math.max(INPUT_GAIN_MIN, Math.min(INPUT_GAIN_MAX, g));
+  const n = parseFloat(localStorage.getItem(NOISE_GATE_KEY));
+  if (!Number.isNaN(n) && n >= 0) _noiseGate = Math.max(0, Math.min(0.2, n));
+} catch (e) { /* localStorage unavailable */ }
+
+// Every running detector, so a gain change takes effect while the user listens.
+const _liveDetectors = new Set();
+
+/** Current app-wide input gain (linear multiplier). */
+export function getInputGain() { return _inputGain; }
+
+/** Set the app-wide input gain; applies to running detectors and persists. */
+export function setInputGain(g) {
+  const v = Number(g);
+  _inputGain = Math.max(INPUT_GAIN_MIN, Math.min(INPUT_GAIN_MAX, Number.isFinite(v) && v > 0 ? v : 1));
+  try { localStorage.setItem(INPUT_GAIN_KEY, String(_inputGain)); } catch (e) {}
+  _liveDetectors.forEach((d) => d._applyInputGain());
+  return _inputGain;
+}
+
+/** Current app-wide noise gate, as a post-gain RMS level. */
+export function getNoiseGate() { return _noiseGate; }
+
+/** Set the app-wide noise gate (post-gain RMS) and persist it. */
+export function setNoiseGate(rms) {
+  const v = Number(rms);
+  _noiseGate = Math.max(0, Math.min(0.2, Number.isFinite(v) && v >= 0 ? v : DEFAULT_NOISE_GATE));
+  try { localStorage.setItem(NOISE_GATE_KEY, String(_noiseGate)); } catch (e) {}
+  return _noiseGate;
+}
+
+/** True once the user has actually run a full input calibration, so the UI can
+ *  prompt for one.  Keyed on the noise gate rather than the gain, because only
+ *  a real calibration measures the room and writes a gate — nudging the gain
+ *  by hand is a preference, not a calibration, and should not silence the
+ *  prompt. */
+export function hasCalibratedInput() {
+  try { return localStorage.getItem(NOISE_GATE_KEY) != null; } catch (e) { return false; }
+}
+
+/** Linear amplitude -> dBFS, floored so a silent buffer doesn't return -Infinity. */
+export function rmsToDb(rms) {
+  if (!rms || rms <= 0) return -100;
+  return Math.max(-100, 20 * Math.log10(rms));
+}
+
+/** RMS of a time-domain buffer. */
+function bufferRms(buf) {
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+  return Math.sqrt(sum / buf.length);
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +392,7 @@ export class PitchDetector {
     this.stream = null;
     this.analyser = null;
     this.source = null;
+    this.gainNode = null;
     this.buffer = null;
     this.mpm = null;
     this.running = false;
@@ -305,15 +406,32 @@ export class PitchDetector {
     this._voiced = false;
     this._onCount = 0;
     this._offCount = 0;
+    this._belowCount = 0; // consecutive frames under the noise gate
+    this._gateOpen = false;
     this._ema = null;     // smoothed MIDI
     this._last = null;    // last emitted voiced info (held through short dropouts)
+  }
+
+  /** Push the app-wide input gain onto this detector's gain node (if running). */
+  _applyInputGain() {
+    if (!this.gainNode || !this.ctx) return;
+    // A short ramp rather than a step: an instantaneous gain change is a click,
+    // and a click is broadband — exactly the kind of transient that makes the
+    // tracker report a spurious pitch for a frame or two.
+    const g = getInputGain();
+    try {
+      this.gainNode.gain.setTargetAtTime(g, this.ctx.currentTime, 0.01);
+    } catch (e) {
+      this.gainNode.gain.value = g;
+    }
   }
 
   /**
    * Start the microphone and the detection loop.
    * @param {function} onPitch  called with { freq, midi, midiRound, cents,
-   *                            clarity, t } for every analysed frame (freq/midi
-   *                            null when no pitch is being sung).
+   *                            clarity, t, rms, db, gated } for every analysed
+   *                            frame (freq/midi null when no pitch is being
+   *                            sung; rms/db are always present).
    */
   async start(onPitch) {
     if (this.running) return true;
@@ -342,11 +460,16 @@ export class PitchDetector {
       if (p && p.catch) p.catch(() => {});
     }
     this.source = this.ctx.createMediaStreamSource(this.stream);
+    // Calibrated input trim, ahead of the analyser so every level the tracker
+    // (and the meters) sees is the post-gain one.
+    this.gainNode = this.ctx.createGain();
+    this.gainNode.gain.value = getInputGain();
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = this.windowSize;      // time-domain window size
     this.analyser.smoothingTimeConstant = 0;
     this.buffer = new Float32Array(this.analyser.fftSize);
-    this.source.connect(this.analyser);
+    this.source.connect(this.gainNode);
+    this.gainNode.connect(this.analyser);
     // analyser is deliberately NOT connected to destination (no mic feedback).
 
     this.mpm = new Mpm(
@@ -356,11 +479,13 @@ export class PitchDetector {
     this._resetSmoothing();
 
     this.running = true;
+    _liveDetectors.add(this);
     const loop = () => {
       if (!this.running) return;
       this.analyser.getFloatTimeDomainData(this.buffer);
+      const rms = bufferRms(this.buffer);
       const res = this.mpm.detect(this.buffer);
-      this._process(res, performance.now());
+      this._process(res, performance.now(), rms);
       this.rafId = requestAnimationFrame(loop);
     };
     this.rafId = requestAnimationFrame(loop);
@@ -369,9 +494,11 @@ export class PitchDetector {
 
   stop() {
     this.running = false;
+    _liveDetectors.delete(this);
     if (this.rafId) cancelAnimationFrame(this.rafId);
     this.rafId = null;
     if (this.source) { try { this.source.disconnect(); } catch (e) {} this.source = null; }
+    if (this.gainNode) { try { this.gainNode.disconnect(); } catch (e) {} this.gainNode = null; }
     if (this.analyser) { try { this.analyser.disconnect(); } catch (e) {} this.analyser = null; }
     if (this.stream) { this.stream.getTracks().forEach((t) => t.stop()); this.stream = null; }
     this._resetSmoothing();
@@ -382,13 +509,45 @@ export class PitchDetector {
 
   _emit(info) { if (this.onPitch) this.onPitch(info); }
 
-  _emitUnvoiced(t) {
-    this._emit({ freq: null, midi: null, midiRound: null, cents: 0, clarity: 0, t });
+  _emitUnvoiced(t, rms) {
+    this._emit({
+      freq: null, midi: null, midiRound: null, cents: 0, clarity: 0, t,
+      rms: rms || 0, db: rmsToDb(rms), gated: !this._gateOpen,
+    });
   }
 
   /** Turn a raw per-frame MPM result into a stable, de-jittered reading. */
-  _process(res, t) {
+  _process(res, t, rms) {
     const clarity = res ? res.clarity : 0;
+    rms = rms || 0;
+
+    // Level gate, ahead of everything else.  NSDF clarity says nothing about
+    // loudness, so without this a quiet periodic hum reads as a confidently
+    // tracked note.  Hysteresis (release at 70% of the gate) plus an
+    // `offFrames` hold keeps a note from chattering when a sustain dips near
+    // the threshold.
+    const open = this._gateOpen
+      ? rms >= getNoiseGate() * GATE_RELEASE_RATIO
+      : rms >= getNoiseGate();
+    this._gateOpen = open;
+    this._belowCount = open ? 0 : this._belowCount + 1;
+    // A below-gate frame may never *start* a note — otherwise clear-but-quiet
+    // room tone gets a couple of frames through before the hold expires, and
+    // those frames show up as a real note in the readout.  The `offFrames`
+    // hold applies only to *ending* one, so a sustain dipping near the gate
+    // doesn't stutter.
+    if (!open && (!this._voiced || this._belowCount >= this.offFrames)) {
+      if (this._voiced) {
+        this._voiced = false;
+        this._raw.length = 0;
+        this._ema = null;
+        this._last = null;
+      }
+      this._onCount = 0;
+      this._offCount = this.offFrames;
+      this._emitUnvoiced(t, rms);
+      return;
+    }
 
     // Voicing state machine with hysteresis (separate on/off thresholds).
     if (clarity >= this.onThreshold) { this._onCount++; this._offCount = 0; }
@@ -404,10 +563,10 @@ export class PitchDetector {
       this._raw.length = 0;
       this._ema = null;
       this._last = null;
-      this._emitUnvoiced(t);
+      this._emitUnvoiced(t, rms);
       return;
     }
-    if (!this._voiced) { this._emitUnvoiced(t); return; }
+    if (!this._voiced) { this._emitUnvoiced(t, rms); return; }
 
     // Voiced.  Update the smoothed estimate on frames that carry a usable
     // pitch; otherwise hold the last reading (bridges brief dropouts so the
@@ -436,7 +595,7 @@ export class PitchDetector {
       };
     }
 
-    if (this._last) this._emit(Object.assign({}, this._last, { t }));
-    else this._emitUnvoiced(t);
+    if (this._last) this._emit(Object.assign({}, this._last, { t, rms, db: rmsToDb(rms), gated: false }));
+    else this._emitUnvoiced(t, rms);
   }
 }

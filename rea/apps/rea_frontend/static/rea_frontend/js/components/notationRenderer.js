@@ -12,7 +12,7 @@
  *  - per-note SVG references so the UI can highlight notes during playback.
  */
 
-import { modeChordToVexKey, noteNameToVexflow, parseNoteToken } from "../notation.js?v=63";
+import { modeChordToVexKey, noteNameToVexflow, parseNoteToken } from "../notation.js?v=75";
 
 const PX_PER_WHOLE = 260;
 const STAVE_PADDING = 26;
@@ -23,6 +23,17 @@ const ROW_HEIGHT = 132; // vertical pitch of each wrapped row
 const MARGIN = 10; // left margin inside the SVG
 
 const MOD_TO_ACC = { "#": "#", b: "b", x: "##", r: "n" };
+
+/** Accuracy bands for `setNoteAccuracy`.  The thresholds match the per-note
+ *  chips in the feedback row, so the stave and the report agree. */
+const ACCURACY_CLASSES = ["vf-acc-good", "vf-acc-ok", "vf-acc-weak", "vf-acc-miss"];
+
+function accuracyClass(score) {
+  if (score == null) return "vf-acc-miss";
+  if (score >= 70) return "vf-acc-good";
+  if (score >= 40) return "vf-acc-ok";
+  return "vf-acc-weak";
+}
 
 export class NotationRenderer {
   constructor(container, { width = 900 } = {}) {
@@ -410,6 +421,30 @@ export class NotationRenderer {
   clearBarBox() {
     this.bars.forEach((b) => b.staveEl && b.staveEl.classList.remove("vf-bar-sing"));
     if (this._outlineEl) { this._outlineEl.remove(); this._outlineEl = null; }
+  }
+
+  /**
+   * Colour a notehead by how accurately it was sung, and leave it that way.
+   *
+   * Unlike `highlightNote` (a transient playback cursor) this is a *result*:
+   * it stays on the stave for the rest of the session, so once a run is over
+   * the score itself shows which notes were off and which were clean.
+   *
+   * @param {number} globalIndex  note slot on the stave
+   * @param {number|null} score   0-100, or null for a note that was never sung
+   */
+  setNoteAccuracy(globalIndex, score) {
+    const entry = this.notes.find((n) => n.globalIndex === globalIndex);
+    if (!entry || !entry.el) return;
+    ACCURACY_CLASSES.forEach((c) => entry.el.classList.remove(c));
+    entry.el.classList.add(accuracyClass(score));
+  }
+
+  /** Drop every accuracy colour (a fresh run starts from a clean stave). */
+  clearNoteAccuracy() {
+    this.notes.forEach((n) => {
+      if (n.el) ACCURACY_CLASSES.forEach((c) => n.el.classList.remove(c));
+    });
   }
 
   /** Return the global note-index range for a bar. */
