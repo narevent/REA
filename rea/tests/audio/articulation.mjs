@@ -19,7 +19,7 @@
  */
 import { sing, analyse, SR } from "./synth.mjs";
 const JS = "../../apps/rea_frontend/static/rea_frontend/js/";
-globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+import "./env.mjs";
 const pd = await import(JS + "pitchDetector.js");
 
 const LOOK = ((2048 - SR * 0.0107) / SR) * 1000;

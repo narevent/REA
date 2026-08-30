@@ -29,6 +29,8 @@
  *    the wrong octave, 0 otherwise.
  */
 
+import { tuning } from "./difficulty.js?v=114";
+
 /** Gap cost used by the DTW alignment when a sung note has no reference
  *  counterpart (insertion) or a reference note has no sung counterpart
  *  (deletion).  Expressed on the same 0-100 note-score scale so it is
@@ -38,20 +40,22 @@
  *  the way a strict positional alignment does. */
 const DTW_GAP_COST = 35;
 
-/** Cents falloff window: within `centsPerfect` the note scores 100; at
- *  `centsZero` or beyond it scores 0; linear between.  Widened slightly from
- *  the old (12/150) so a semitone-ish wobble during a sustained note does not
- *  collapse the score — vibrato and light intonation drift are common. */
-const CENTS_PERFECT = 20;
-const CENTS_ZERO = 170;
-
-/** Map a cents deviation (absolute) to a 0-100 note score. */
+/**
+ * Map a cents deviation (absolute) to a 0-100 note score.
+ *
+ * The window is the student's own — see `difficulty.js`, which holds the three
+ * settings and the reasoning.  It used to be fixed at twenty cents for full
+ * marks, which is a fifth of a semitone on every note of every bar: good
+ * singing scored in the seventies and a high score was not something a student
+ * could work towards.
+ */
 export function centsToScore(absCents) {
+  const t = tuning();
   const c = Math.abs(absCents);
-  if (c <= CENTS_PERFECT) return 100;            // within ~a quarter tone -> perfect
-  if (c >= CENTS_ZERO) return 0;                 // far off -> 0
-  // Linear falloff between CENTS_PERFECT (100) and CENTS_ZERO (0).
-  return Math.round(100 * (1 - (c - CENTS_PERFECT) / (CENTS_ZERO - CENTS_PERFECT)));
+  if (c <= t.perfectCents) return 100;
+  if (c >= t.zeroCents) return 0;
+  // Linear falloff between the two.
+  return Math.round(100 * (1 - (c - t.perfectCents) / (t.zeroCents - t.perfectCents)));
 }
 
 /** Map a 0-100 note score to a short label. */
@@ -77,7 +81,7 @@ function matchCost(sungMidi, refMidi) {
   if (Math.abs(diff) > 2 && diff % 12 === 0) {
     // Right pitch class, wrong octave.  Give it a solid-but-not-perfect score
     // so an octave-down sing still reads as mostly correct.
-    return 100 - 70; // note score 70 -> cost 30
+    return 100 - tuning().octaveScore;
   }
   const cents = Math.abs(diff) * 100;
   return 100 - centsToScore(cents);
@@ -138,7 +142,7 @@ export function scoreSungBar(sung, reference) {
       let cents = diff * 100;
       let noteScore;
       if (Math.abs(diff) > 2 && diff % 12 === 0) {
-        noteScore = 70;                 // octave equivalence: right class, wrong register
+        noteScore = tuning().octaveScore;   // right class, wrong register
       } else {
         noteScore = centsToScore(cents);
       }
@@ -185,7 +189,7 @@ export function scoreSungBar(sung, reference) {
       let cents = diff * 100;
       let noteScore;
       if (Math.abs(diff) > 2 && diff % 12 === 0) {
-        noteScore = 70;
+        noteScore = tuning().octaveScore;
       } else {
         noteScore = centsToScore(cents);
       }
@@ -241,14 +245,18 @@ export function scoreSungBar(sung, reference) {
 /**
  * Score a guessed bar against the reference bar.
  *
- * Exact match -> 100; one bar off (proximity) -> 40; otherwise 0.
+ * Exact match scores 100; a neighbour earns partial credit, because hearing
+ * that a phrase was *nearly* the one you picked is most of the skill and
+ * scoring it as nothing tells the student less than it could.  How much
+ * partial credit is the student's setting — see `difficulty.js`.
  */
 export function scoreGuessBar(guessedIndex, referenceIndex, totalBars) {
   if (guessedIndex == null || referenceIndex == null) return 0;
   if (guessedIndex === referenceIndex) return 100;
+  const t = tuning();
   const dist = Math.abs(guessedIndex - referenceIndex);
-  if (dist === 1) return 40;
-  if (dist === 2) return 15;
+  if (dist === 1) return t.nearBar;
+  if (dist === 2) return t.farBar;
   return 0;
 }
 

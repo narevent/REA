@@ -35,6 +35,14 @@
  *                an attack, with the figures its threshold is set from.
  * `singlenote.mjs`  chapters 8 and 9, which had no coverage at all until the
  *                capture they run on called a helper that no longer existed.
+ * `scoring.mjs`  what a sung note is worth at each difficulty — the table is
+ *                printed, so what the settings actually promise can be read
+ *                rather than inferred from the constants.
+ *
+ * `REA_DIFFICULTY=medium node rea/tests/audio/run.mjs` runs the whole suite at
+ * another setting.  Segmentation must not depend on it — difficulty moves
+ * scoring and patience, not where a note begins and ends — and running all
+ * three is how that stays true.
  *
  * `measure.mjs` and `strength.mjs` print the figures the onset thresholds are
  * set from — run them if you change those constants.  `inspect.mjs` is a
@@ -42,7 +50,7 @@
  * each one began and whether it settled, which is the first thing to look at
  * when a learner case fails.
  */
-const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs", "./lastnote.mjs", "./profile.mjs", "./learner.mjs", "./articulation.mjs", "./singlenote.mjs"];
+const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs", "./lastnote.mjs", "./profile.mjs", "./learner.mjs", "./articulation.mjs", "./singlenote.mjs", "./scoring.mjs"];
 let failed = false;
 for (const m of mods) {
   const before = process.exitCode;

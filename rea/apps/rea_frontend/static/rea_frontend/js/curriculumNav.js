@@ -20,6 +20,9 @@
  *   partValue()      → the selected part value
  *   keyOptions()     → [{ value, label }] tonalities ([] when not relative)
  *   keyValue()       → the selected key id, as a string
+ *   difficultyOptions() → [{ value, label }] how much room the exercises give
+ *   difficultyValue()   → the selected one
+ *   goDifficulty(value)
  *   goCategory(node, partValue?, exerciseIdx?)
  *   goPart(value)
  *   goExercise(idx)
@@ -161,6 +164,25 @@ export function createNav(deps) {
     }
   }
 
+  /** The difficulty chip — how much room the exercises give this singer.
+   *  Beside the tonality rather than buried in a settings page, because it
+   *  changes what the score in front of them means and a student who is
+   *  finding an exercise impossible should not have to go looking. */
+  function renderDifficulty(host) {
+    if (!host) return;
+    host.innerHTML = "";
+    const opts = deps.difficultyOptions ? deps.difficultyOptions() : [];
+    if (!opts.length) { host.hidden = true; return; }
+    host.hidden = false;
+    const cur = deps.difficultyValue();
+    const now = opts.find((o) => o.value === cur) || opts[0];
+    segment(host, now ? now.label : "—", opts.map((o) => ({
+      label: o.label,
+      current: o.value === cur,
+      pick: () => deps.goDifficulty(o.value),
+    })));
+  }
+
   /** The tonality chip — one control, sitting apart from the path because a
    *  key applies across the whole relative system rather than to one node. */
   function renderKey(host) {
@@ -294,6 +316,7 @@ export function createNav(deps) {
     category = cat;
     renderPath(document.getElementById("path-bar"));
     renderKey(document.getElementById("path-key"));
+    renderDifficulty(document.getElementById("path-difficulty"));
     renderFooter(document.getElementById("session-nav"));
     if (sheetOpen) renderSheet(document.getElementById("curriculum-tree"));
   }

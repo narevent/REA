@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import progress as progress_calc
-from .models import PracticeSession
+from .models import Difficulty, PracticeSession
 from .permissions import is_teacher
 
 
@@ -64,6 +64,27 @@ class MeView(APIView):
 
     permission_classes = []
 
+    def patch(self, request):
+        """Change a setting that belongs to the person, not to the browser.
+
+        Only difficulty for now.  It is stored on the profile rather than in
+        localStorage alone so a student who practises on a laptop and a phone
+        gets the same exercise on both — the frontend keeps a local copy too,
+        because the app has to work signed out.
+        """
+        if not request.user.is_authenticated:
+            return Response({"detail": "Not signed in."}, status=status.HTTP_403_FORBIDDEN)
+        value = request.data.get("difficulty")
+        if value not in Difficulty.values:
+            return Response(
+                {"detail": "difficulty must be one of " + ", ".join(Difficulty.values)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        profile = request.user.profile
+        profile.difficulty = value
+        profile.save(update_fields=["difficulty"])
+        return Response({"difficulty": profile.difficulty})
+
     def get(self, request):
         user = request.user
         if not user.is_authenticated:
@@ -76,6 +97,7 @@ class MeView(APIView):
             "name": profile.name,
             "role": profile.role,
             "is_teacher": is_teacher(user),
+            "difficulty": profile.difficulty,
             "dashboard_url": "/accounts/profile/",
         }
         if not profile.is_teacher:

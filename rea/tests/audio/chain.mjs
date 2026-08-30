@@ -4,7 +4,7 @@
  */
 import { sing, analyse, SR } from "./synth.mjs";
 const JS = "../../apps/rea_frontend/static/rea_frontend/js/";
-globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+import "./env.mjs";
 const pd = await import(JS + "pitchDetector.js");
 const pc = await import(JS + "practiceController.js");
 

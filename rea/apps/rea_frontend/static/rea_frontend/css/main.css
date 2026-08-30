@@ -1154,6 +1154,13 @@ svg.rea-score .vf-beam { display: none !important; }
   font-variant-numeric: tabular-nums;
 }
 
+/* How much room the exercises give this singer.  It sits beside the tonality
+   because it is the same kind of thing — a setting that applies across
+   everything rather than to the node you happen to be on — but quieter: the
+   key is part of the exercise, and this is a preference about it. */
+.path-difficulty .seg-btn { color: var(--muted); font-weight: 500; }
+.path-difficulty .seg-btn:hover { color: var(--ink); }
+
 /* --- Previous / Next ------------------------------------------------------ */
 
 .session-nav {

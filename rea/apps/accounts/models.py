@@ -24,6 +24,26 @@ class Role(models.TextChoices):
     TEACHER = "teacher", "Teacher"
 
 
+class Difficulty(models.TextChoices):
+    """How much room the exercises give a singer.
+
+    Intonation is a skill being learned, not a tuner reading.  A student who
+    sings a phrase recognisably in tune is doing the thing the exercise is
+    teaching, and scoring that at 60 because they averaged forty cents sharp
+    teaches them nothing except that the app is impossible.  So the window a
+    note is judged in — and how readily the tracker treats a wobble as a
+    different note — is the student's to set, and it starts wide.
+
+    The numbers themselves live in the frontend, next to the scoring that uses
+    them (`js/difficulty.js`); what is stored here is only which of the three
+    the user chose, so it follows them between devices.
+    """
+
+    EASY = "easy", "Easy"
+    MEDIUM = "medium", "Medium"
+    HARD = "hard", "Hard"
+
+
 class Profile(models.Model):
     """Per-user role and display details."""
 
@@ -42,6 +62,12 @@ class Profile(models.Model):
         max_length=80,
         blank=True,
         help_text="Shown instead of the username when set.",
+    )
+    difficulty = models.CharField(
+        max_length=16,
+        choices=Difficulty.choices,
+        default=Difficulty.EASY,
+        help_text="How much pitch error the exercises allow before scoring it down.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
 

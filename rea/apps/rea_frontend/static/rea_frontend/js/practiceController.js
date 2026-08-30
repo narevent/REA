@@ -38,6 +38,7 @@ import {
 import {
   centsToScore, scoreGuessBar, scoreLabel,
 } from "./practiceScore.js?v=114";
+import { tuning } from "./difficulty.js?v=114";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 // Above this many rounds the per-round pips stop being readable (a 39-bar
@@ -50,17 +51,20 @@ const SING_TAIL_MS = 600;  // extra recording tail so the user can finish
 // PATIENCE is the promise that the exercise waits while the singer looks for
 // the note.  It has to end somewhere — a voice that never settles would
 // otherwise park the bar on its first reference forever — but it is measured
-// in the singer's own note-lengths, so it is generous at any tempo.  Three of
-// them is long enough to hunt through an interval and still sing it.
-const SLOT_PATIENCE_PACES = 3;
-// Overhold is a fermata guard and nothing else.  It was briefly set near two
-// note-lengths, and at that value it is not a guard but a lead: a singer
-// holding one note a little longer than the rest had the marker walk off two
-// thirds of the way through it, which is the very complaint this work exists
-// to answer.  Both a generous multiple *and* an absolute floor, so it cannot
-// come into range through a wound-down pace estimate either.
-const SLOT_OVERHOLD_PACES = 3.5;
-const SLOT_OVERHOLD_MIN_MS = 1800;
+// in the singer's own note-lengths, so it is generous at any tempo, and in
+// how many of them by the student's difficulty setting (`difficulty.js`):
+// a beginner gets longer to find the note than someone who has chosen not to
+// need it.
+// Overhold is not a lead.  It exists for one case — a singer who has stopped
+// doing the exercise and is sitting on a note — and for nothing else, because
+// the marker moving off a note somebody is still singing is the whole
+// complaint this work answers.  There is no longer any need for it to come
+// early: the reading now appears on the note being sung and keeps refining
+// while it is held, so a marker that stays put reads as "still listening"
+// rather than as "stuck".  Generously long, with an absolute floor as well so
+// a wound-down pace estimate cannot bring it into range.
+const SLOT_OVERHOLD_PACES = 5;
+const SLOT_OVERHOLD_MIN_MS = 3000;
 // Silence ends the argument.  A short note is only a search if the singer went
 // on to sing something better; if they stopped instead, it is what they sang
 // and it answers its reference.
@@ -1490,10 +1494,24 @@ export class PracticeController {
     // back to the note they were on: see `continuationOf`.
     let lastAnswer = null;       // { index, midi }
     let excursion = false;
+    // The bar's last reference has its answer, but the singer is still singing
+    // it.  See `answer` — the bar waits for them rather than stopping
+    // underneath them.
+    let finishing = -1;          // the slot being finished, or -1
 
-    /** Answer the current reference with `note` and move the marker on.
-     *  Returns true when that was the bar's last note. */
-    const answer = (note) => {
+    /**
+     * Answer the current reference with `note` and move the marker on.
+     * Returns true when the caller should stop touching the capture.
+     *
+     * `stillSinging` says the singer is in the middle of a note as this is
+     * decided — which happens whenever the answer comes from the open note
+     * rather than from one that has ended.  On any reference but the last that
+     * changes nothing.  On the last it changes everything: completing there
+     * ends the bar, and ending the bar takes the marker off the note the
+     * singer is still holding and scores it from a partial reading.  So the
+     * bar waits, keeps refining, and finishes when they do.
+     */
+    const answer = (note, stillSinging) => {
       if (!note || done) return false;
       const i = step;
       step += 1;
@@ -1501,14 +1519,28 @@ export class PracticeController {
       lastAnswer = { index: i, midi: note.midi };
       excursion = false;
       if (onNote) onNote(i, { midi: note.midi, durMs: note.durMs });
-      if (onNoteDone) onNoteDone(i, { midi: note.midi, durMs: note.durMs });
       if (step >= targets.length) {
+        if (stillSinging) { finishing = i; return true; }
+        if (onNoteDone) onNoteDone(i, { midi: note.midi, durMs: note.durMs });
         done = true;
         if (onComplete) onComplete();
         return true;
       }
+      if (onNoteDone) onNoteDone(i, { midi: note.midi, durMs: note.durMs });
       showTarget(step, smoothMidi);
       return false;
+    };
+
+    /** Settle the note the bar has been waiting on, and end the bar. */
+    const finishBar = (midi, durMs) => {
+      const i = finishing;
+      finishing = -1;
+      done = true;
+      if (i >= 0) {
+        if (onNote) onNote(i, { midi, durMs });
+        if (onNoteDone) onNoteDone(i, { midi, durMs });
+      }
+      if (onComplete) onComplete();
     };
 
     /**
@@ -1529,12 +1561,12 @@ export class PracticeController {
      *
      * Returns true if the bar ended while flushing.
      */
-    const resolveSearches = (againstMs) => {
+    const resolveSearches = (againstMs, stillSinging) => {
       const keep = searching;
       searching = [];
       for (const f of keep) {
         if (f.durMs * SLOT_SEARCH_RATIO < againstMs) continue;
-        if (answer(f)) return true;
+        if (answer(f, stillSinging)) return true;
       }
       return false;
     };
@@ -1624,6 +1656,23 @@ export class PracticeController {
       // against a note that is never going to come.
       if (midi == null) silentMs += usableDt; else silentMs = 0;
 
+      // --- waiting for the singer to finish the last note --------------------
+      // Its reference is already answered; what is left is to let them finish
+      // it and to score it from the whole note rather than from the part of it
+      // that had been sung when the answer was taken.
+      if (finishing >= 0) {
+        if (note.ended) { finishBar(note.ended.midi, note.ended.durMs); return; }
+        if (!note.open && silentMs >= SLOT_SILENCE_FLUSH_MS) {
+          finishBar(note.pitch != null ? note.pitch : note.rough, note.heldMs);
+          return;
+        }
+        if (onNote && note.pitch != null && now - lastReport > 80) {
+          lastReport = now;
+          onNote(finishing, { midi: note.pitch, durMs: note.heldMs });
+        }
+        return;
+      }
+
       // --- a sung note finished --------------------------------------------
       // `openAnswered` still belongs to the note that just ended: a note that
       // already answered a reference while it was being held must not answer
@@ -1707,7 +1756,7 @@ export class PracticeController {
         // than sitting under a fermata until the bar times out.
         if (note.heldMs >= Math.max(SLOT_OVERHOLD_MIN_MS, SLOT_OVERHOLD_PACES * seg.paceMs())) {
           openAnswered = true;
-          if (answer({ midi: note.pitch, durMs: note.heldMs })) return;
+          if (answer({ midi: note.pitch, durMs: note.heldMs }, true)) return;
         }
         return;
       }
@@ -1729,14 +1778,14 @@ export class PracticeController {
       // note too.  Measured from when the marker arrived at this reference,
       // not from the start of the sound, so a slot that opened mid-phrase
       // still gets its full share of patience.
-      if (slotOpenedAt != null && now - slotOpenedAt >= SLOT_PATIENCE_PACES * seg.paceMs()) {
+      if (slotOpenedAt != null && now - slotOpenedAt >= tuning().patiencePaces * seg.paceMs()) {
         if (searching.length) {
           const longest = searching.reduce((a, b) => (b.durMs > a.durMs ? b : a));
           searching = [];
           if (answer(longest)) return;
         } else if (note.rough != null && !openAnswered) {
           openAnswered = true;
-          if (answer({ midi: note.rough, durMs: note.heldMs })) return;
+          if (answer({ midi: note.rough, durMs: note.heldMs }, note.open)) return;
         }
       }
     };
@@ -2360,12 +2409,14 @@ export function makeNoteSegmenter(opts) {
     // tail of a release, a click, half a frame of something.  Reporting it as
     // an ended note leaves every caller to re-derive whether to believe it.
     if (midi == null || !confident) return null;
-    // Only a note that was long enough *and* actually locked teaches us about
-    // the singer's pace.  Every threshold here scales with pace, so letting a
-    // clipped fragment lower it is a feedback loop: shorter pace, shorter
-    // minimum note, more fragments — and the exercise winds itself up until it
-    // is racing.  A note has to be one before it gets a vote.
-    if (confident) {
+    // Only a note the singer *meant* teaches us about their pace: one they
+    // held, or one they began.  Every threshold here scales with pace, so
+    // letting a fragment lower it is a feedback loop — shorter pace, shorter
+    // thresholds, more fragments — and the exercise winds itself up until it
+    // is racing.  A pause on the way to a note is the clearest case: it is
+    // short by definition, and letting it set the tempo made the exercise
+    // impatient with the very hunting it is supposed to wait through.
+    if (confident && (wasSettled || reason === "silence" || attack >= ONSET_ARTICULATION_DB)) {
       lastNote = { startT: noteStart, confident: true };
       durations.push(durMs);
       if (durations.length > 4) durations.shift();
@@ -2426,7 +2477,7 @@ export function makeNoteSegmenter(opts) {
       const midi = f.midi;
       const strength = f.onsetStrength || 0;
       const out = {
-        ended: null, started: false, pitch: centre, rough: null,
+        ended: null, started: false, pitch: centre, rough: null, open: startT != null,
         locked: false, settled: false, stable: false, heldMs: 0, vibrato: vib.present,
       };
 
@@ -2434,6 +2485,7 @@ export function makeNoteSegmenter(opts) {
         silentMs += dt;
         if (silentMs >= gapMs() && startT != null) out.ended = close(t);
         out.pitch = centre;
+        out.open = startT != null;
         return out;
       }
       silentMs = 0;
@@ -2567,6 +2619,7 @@ export function makeNoteSegmenter(opts) {
       }
 
       out.pitch = centre;
+      out.open = startT != null;
       out.locked = locked;
       out.settled = settledAt != null;
       out.vibrato = vib.present;
@@ -2595,7 +2648,8 @@ function medianNoteDurationMs(barSteps) {
  * `sungMidi` is the *fractional* tracked pitch, so the cents deviation is
  * real rather than quantised to a semitone.  An octave error is treated
  * leniently (it is the right pitch class in the wrong register), matching the
- * bar scorer in practiceScore.js.
+ * bar scorer in practiceScore.js — by how much is the student's difficulty
+ * setting, as is the window the cents are judged in.
  */
 function noteScoreFor(sungMidi, refMidi) {
   if (sungMidi == null || refMidi == null) return 0;
@@ -2606,7 +2660,8 @@ function noteScoreFor(sungMidi, refMidi) {
     // an exact octave lands on 70, the same as the bar scorer gives.
     const mod = Math.abs(diff) % 12;
     const folded = Math.min(mod, 12 - mod);
-    score = Math.max(score, Math.round(0.7 * centsToScore(folded * 100)));
+    const octave = tuning().octaveScore / 100;
+    score = Math.max(score, Math.round(octave * centsToScore(folded * 100)));
   }
   return Math.max(0, Math.min(100, score));
 }

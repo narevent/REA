@@ -8,8 +8,7 @@
  */
 import { sing, analyse, SR } from "./synth.mjs";
 const JS = "../../apps/rea_frontend/static/rea_frontend/js/";
-globalThis.localStorage = { getItem: () => null, setItem: () => {} };
-globalThis.performance = globalThis.performance || { now: () => 0 };
+import "./env.mjs";
 const pd = await import(JS + "pitchDetector.js");
 const pc = await import(JS + "practiceController.js");
 
@@ -62,6 +61,15 @@ T("last note the same length as the rest", [
 T("staccato last note", [
   { midi: 60, ms: 200, artic: "hard", gapMs: 300 }, { midi: 62, ms: 200, artic: "hard", gapMs: 300 },
   { midi: 64, ms: 200, artic: "hard", gapMs: 300 }], R, 500);
+// A fermata.  The marker acknowledging a note held far past its own length is
+// deliberate — it beats sitting under it until the bar times out — but on the
+// *last* reference acknowledging it used to end the bar, which took the marker
+// off a note the singer was still holding and scored it from the part of it
+// they had sung so far.  From their side: "the last note locks and then the
+// highlight disappears."
+T("a fermata on the last note does not end the bar", [
+  { midi: 60, ms: 500, artic: "hard" }, { midi: 62, ms: 500, artic: "hard" },
+  { midi: 64, ms: 2600, artic: "hard", vibCents: 40 }], R, 500);
 T("last note with a scoop into it", [
   { midi: 60, ms: 500, artic: "hard" }, { midi: 62, ms: 500, artic: "hard" },
   { midi: 64, ms: 900, artic: "soft", scoopCents: 150 }], R, 500);
