@@ -23,17 +23,19 @@
   {% if is_teacher %}
     {# ---- Teacher ------------------------------------------------------ #}
     <div class="acc-card">
-      <h2 class="acc-h2">Exercises</h2>
-      <div class="acc-placeholder">
-        <div class="acc-placeholder-title">The score editor isn't built yet</div>
-        <p>
-          Your account already has the teacher role, and the permission checks that
-          will guard exercise creation, editing and deletion are in place. The
-          editing interface itself is still to come — until then, exercises are
-          managed through the
-          {% if user.is_staff %}<a href="/admin/">Django admin</a>{% else %}Django admin{% endif %}.
-        </p>
+      <div class="acc-card-head">
+        <h2 class="acc-h2">Exercises</h2>
+        <span class="acc-card-note">Write and edit the exercises students practise</span>
       </div>
+      <p class="acc-help">
+        The score editor opens the whole library: search for an exercise, edit its
+        notes on the stave, set the properties that make it an exercise — degree
+        aliases, timing offsets, dynamics — and hear it the way a student will.
+      </p>
+      <a class="acc-btn acc-btn-primary" href="{% url 'rea_frontend:editor' %}">Open the score editor</a>
+      {% if user.is_staff %}
+        <p class="acc-help">Raw rows are still reachable through the <a href="/admin/">Django admin</a>.</p>
+      {% endif %}
     </div>
   {% else %}
     {# ---- Student: headline figures ------------------------------------ #}

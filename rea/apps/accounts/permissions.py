@@ -1,9 +1,9 @@
 """
-Role checks, ready for the exercise editor.
+Role checks for the exercise editor.
 
-The score editor does not exist yet, but the authorisation for it should not be
-invented at the same time as the UI — these are the checks it will use, and
-they are already covered by tests.
+The score editor page (`rea_frontend.views.EditorView`) and every endpoint
+under `/api/editor/` are gated on these, so a student who finds the URL is
+refused at the page *and* at each request the page would make.
 """
 
 from django.contrib.auth.decorators import user_passes_test
@@ -38,7 +38,7 @@ def teacher_required(view_func):
 
 
 class IsTeacher(permissions.BasePermission):
-    """DRF permission for the future exercise-editing endpoints."""
+    """DRF permission for the exercise-editing endpoints."""
 
     message = "Only teachers can edit exercises."
 

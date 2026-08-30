@@ -1,0 +1,101 @@
+{% load static %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>REA — Exercise editor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=83" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=83" />
+</head>
+<body class="ed-body">
+  <header class="app-header">
+    <a href="{% url 'rea_frontend:index' %}" class="brand" title="Back to the practice app">
+      <span class="brand-mark"><svg width="22" height="26" viewBox="0 0 22 26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2v10a5 5 0 0 0 10 0V2"/><path d="M11 17v7"/><path d="M8 24h6"/></svg></span>
+      <span class="brand-text">
+        <span class="brand-name">REA</span>
+        <span class="brand-sub">Editor</span>
+      </span>
+    </a>
+    <nav class="app-nav">
+      <a class="app-nav-btn" href="{% url 'rea_frontend:index' %}">Practice</a>
+      <a class="app-nav-btn active" href="{% url 'rea_frontend:editor' %}">Editor</a>
+      <a class="app-nav-btn" href="{% url 'accounts:dashboard' %}">Profile</a>
+    </nav>
+    <div class="header-right">
+      {% include "accounts/_account_chip.html" %}
+    </div>
+  </header>
+
+  <main class="ed-main">
+    {# The exercise library: search, filter, open, start a new one. #}
+    <aside class="ed-panel ed-panel-left" id="ed-library"></aside>
+
+    <section class="ed-stage">
+      <div class="ed-stage-head">
+        <div class="ed-stage-titles">
+          <h1 class="ed-title" id="ed-title">Loading…</h1>
+          <p class="ed-subtitle" id="ed-subtitle"></p>
+        </div>
+        <button class="ed-btn ed-btn-quiet" type="button" id="ed-help-toggle" title="Keyboard shortcuts (?)">Shortcuts</button>
+      </div>
+
+      <div class="ed-toolbar" id="ed-toolbar"></div>
+
+      {# The stave itself.  tabindex so it can hold focus for the keyboard. #}
+      <div class="ed-canvas" id="ed-canvas" tabindex="0"
+           aria-label="Score. Click empty staff to add a note, click a note to select it."></div>
+
+      <p class="ed-status" id="ed-status">Loading the editor…</p>
+
+      <div class="ed-help" id="ed-help" hidden>
+        <h2>Keyboard</h2>
+        <dl>
+          <dt>c d e f g a h</dt><dd>set the selected note's letter (<kbd>h</kbd> is B natural)</dd>
+          <dt>Shift + letter</dt><dd>write a new note after the selection</dd>
+          <dt>← →</dt><dd>move through the notes</dd>
+          <dt>Alt + ← →</dt><dd>move the note itself, across bars if need be</dd>
+          <dt>↑ ↓</dt><dd>raise / lower by a step — with Shift, by an octave</dd>
+          <dt>Alt + ↑ ↓</dt><dd>cycle the accidental: natural, ♯, ♭, 𝄪, naturalised</dd>
+          <dt>1 – 6</dt><dd>duration, from a whole note to a thirty-second</dd>
+          <dt>, .</dt><dd>nudge the timing offset earlier / later (Shift for ±5)</dd>
+          <dt>- =</dt><dd>quieter / louder</dd>
+          <dt>r</dt><dd>turn the note into a rest, and back</dd>
+          <dt>k</dt><dd>let the note follow the key signature</dd>
+          <dt>[ ]</dt><dd>previous / next bar</dd>
+          <dt>Enter</dt><dd>add a bar after the selection</dd>
+          <dt>Delete</dt><dd>delete the selected notes, or the selected bar</dd>
+          <dt>Space</dt><dd>play the exercise — with Shift, just this bar</dd>
+          <dt>⌘/Ctrl + Z</dt><dd>undo (with Shift, redo)</dd>
+          <dt>⌘/Ctrl + S</dt><dd>save</dd>
+        </dl>
+        <h2>Mouse</h2>
+        <dl>
+          <dt>Click empty staff</dt><dd>write a note at that pitch and position</dd>
+          <dt>Click a note</dt><dd>select it — Shift extends, ⌘/Ctrl adds one</dd>
+          <dt>Drag a note</dt><dd>up or down to change its pitch</dd>
+          <dt>Alt + drag</dt><dd>sideways to change its timing offset</dd>
+          <dt>Shift + click staff</dt><dd>select the bar</dd>
+        </dl>
+      </div>
+    </section>
+
+    {# Properties of whatever is selected: note, bar, or the exercise. #}
+    <aside class="ed-panel ed-panel-right" id="ed-inspector"></aside>
+  </main>
+
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=83"></script>
+  <script type="module" src="{% static 'rea_frontend/js/editor/editor.js' %}?v=83"></script>
+  <script>
+    // The one behaviour that belongs to the page rather than the score: the
+    // shortcut sheet.  Keeping it here means the editor module never has to
+    // care whether the button exists.
+    document.getElementById("ed-help-toggle").addEventListener("click", function () {
+      var help = document.getElementById("ed-help");
+      help.hidden = !help.hidden;
+    });
+  </script>
+</body>
+</html>

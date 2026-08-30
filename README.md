@@ -33,6 +33,11 @@ rea5/
 │   │   ├── rea_api/              # REST API (DRF)
 │   │   │   ├── urls.py           # API root (/api/...)
 │   │   │   ├── pagination.py     # LargePageSizePagination (cap 2000)
+│   │   │   ├── editor/           # teacher-only WRITE API (/api/editor/...)
+│   │   │   │   ├── score.py               # the score document: read/write a whole lesson
+│   │   │   │   ├── serializers.py         # note tokens, durations, offsets, lesson meta
+│   │   │   │   ├── views.py               # browse / blank / create / save / duplicate / delete
+│   │   │   │   └── urls.py
 │   │   │   ├── intonation/
 │   │   │   │   ├── views.py      # cross-domain endpoints (chapters, facets, exercises)
 │   │   │   │   ├── relative/     # the "relative" domain
@@ -64,14 +69,16 @@ rea5/
 │   │   │   │           ├── import_absolute_base.py
 │   │   │   │           └── import_absolute_lessons.py
 │   │   └── rea_frontend/        # frontend layer
-│   │       ├── views.py         # IndexView (serves index.html) + favicon
+│   │       ├── views.py         # IndexView (practice app) + EditorView (teachers) + favicon
 │   │       ├── urls.py
-│   │       ├── templates/rea_frontend/index.html
+│   │       ├── templates/rea_frontend/{index,editor}.html
 │   │       └── static/rea_frontend/
-│   │           ├── css/main.css
+│   │           ├── css/{main,editor}.css
 │   │           ├── js/                       # ES modules: app, api, audioPlayer,
 │   │           │   ├── components/notationRenderer.js   #   pitchDetector, practiceController,
 │   │           │   ├── views/{lesson,scale,soundcheck}View.js   #   practiceData/Score, soundPresets, ...
+│   │           │   ├── editor/               # the score editor: editorApi, scoreDoc,
+│   │           │   │                         #   scoreCanvas, inspector, library, editor
 │   │           │   └── ...
 │   │           └── vendor/vexflow/vexflow.min.js
 │   ├── tests/                   # note_parser, services, frontend view tests
@@ -136,7 +143,8 @@ signature (`incdec`). See `rea/apps/rea_api/intonation/relative/utils/note_parse
 
 ## REST API
 
-All endpoints are read-only. Base URL: `/api/`.
+Base URL: `/api/`. Everything the practice app reads is read-only; the only
+writers are the teacher-only editor endpoints under `/api/editor/`.
 
 **Relative** (`/api/intonation/relative/`):
 `scale-models`, `key-models`, `lessons`, `bars`, `events` — DRF
@@ -158,6 +166,23 @@ All endpoints are read-only. Base URL: `/api/`.
   (inversions, interval names, qualities, parts, phases, keys, variants, …)
   dynamically. Accepts `results=0` for a cheap facets-only call.
 - `exercises/` — flat uniform list across one or both systems.
+
+**Editor** (`/api/editor/`, teachers only — `IsTeacher`):
+- `options/` — every dropdown's contents, read from the library itself (keys,
+  categories, spans, exercise types, clefs, rhythms, …).
+- `browse/` — id + name + bar count for exercises matching the picker's
+  facets and a free-text search (each word narrows, any field may match).
+- `<system>/blank/` — a starting document with the importers' defaults.
+- `<system>/scores/` — `POST` creates; `<system>/scores/<id>/` `GET`s,
+  `PUT`s (replaces the whole score) and `DELETE`s;
+  `<system>/scores/<id>/duplicate/` copies one under a free variant /
+  exercise number.
+
+The editor's unit of work is the **whole score** — lesson meta plus every bar
+and event — rewritten in one transaction. Bar and event indices come from
+document order, and `pitch_class` is recomputed server-side from the note
+tokens and the lesson's key, so an unaltered `f` in G major is stored as F♯
+whatever the browser believed.
 
 List endpoints use a **summary serializer** (scalar fields only — no nested
 bars/events, no `raw` blob) so category fetches stay small; the **detail**
@@ -213,8 +238,9 @@ generate_lesson_for_key(source_lesson, target_key_model)
 python manage.py test rea.tests
 ```
 
-Covers the German note parser, the relative import services, and the frontend
-index view.
+Covers the German note parser, the relative import services, the frontend
+index view, accounts (roles, auth pages, progress) and the editor API — who
+may write, what a saved score keeps, and what an invalid one is refused for.
 
 ## Frontend
 
@@ -222,6 +248,34 @@ Vanilla JS (ES modules) + [VexFlow](https://github.com/0xfe/vexflow) for staff
 rendering, Web Audio for playback, and microphone-based pitch detection. The
 real VexFlow build lives at
 `rea/apps/rea_frontend/static/rea_frontend/vendor/vexflow/vexflow.min.js`.
+
+**One score is drawn one way.** `js/components/staveLayout.js` owns the
+measuring, the row wrapping, the accidental carry rules and the drawing;
+`notationRenderer` (practice) and `editor/scoreCanvas` (editor) each add only
+their own interaction layer on top, so the two views are pixel-identical.
+
+What is drawn is deliberately spare: five lines, barlines and noteheads. No
+clef, no time signature, no key signature, and no stems, flags or beams — the
+last three hidden by one rule on the `svg.rea-score` class every score
+carries. These are intonation exercises, so the eye belongs on where the note
+sits. Rhythm is still real in playback and editable in the editor's
+inspector; it is simply not notated. With no key signature drawn, a notehead
+carries only the accidental in its own token — a written `f` in G major shows
+plain but still *sounds* F♯ (the pitch is resolved from the key server-side,
+and the editor's inspector names the sounding pitch).
+
+Two pages share that stack:
+
+- **`/`** — the practice app (chapter map, lessons, singing).
+- **`/editor/`** — the **score editor**, for teachers only. Library on the
+  left, an editable stave in the middle, property panels on the right. Notes
+  are written by clicking empty staff at the pitch you want, dragged
+  vertically to re-pitch and `Alt`-dragged sideways to change their timing
+  offset; the keyboard can do all of it (press `?` or *Shortcuts* for the
+  sheet). Every property the data model carries is editable — degree alias,
+  offset, attack/decay, volume, rests, key-signature notes, pickup bars, bar
+  labels and the exercise's own identity — and the transport previews the
+  result with the same synth and timing rules the students hear.
 
 ## Deployment
 

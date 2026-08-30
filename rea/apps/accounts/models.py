@@ -5,8 +5,8 @@ Two roles share one login:
 
   student  practises, and every completed session is recorded so progress can
            be read back over time (see `PracticeSession`).
-  teacher  will author and edit exercises in the score editor.  The role and
-           its permission checks exist now; the editor itself does not yet.
+  teacher  authors and edits exercises in the score editor (/editor/), and is
+           the only role the editing API will write for (see `permissions`).
 
 The project already had users when accounts were added, so the role lives on a
 `Profile` attached one-to-one to Django's own `User` rather than in a custom

@@ -1,0 +1,253 @@
+/* ==========================================================================
+   REA — exercise editor
+   Loaded after main.css, so it inherits the app's tokens, header and buttons
+   and only adds what an editing surface needs: a three-column workspace, an
+   interactive stave, and dense property forms.
+   ========================================================================== */
+
+.ed-body { height: 100vh; overflow: hidden; }
+
+/* Library · stage · inspector.  The stage takes the slack; the two panels
+   keep a fixed measure so a long exercise name never squeezes the score. */
+.ed-main {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr) 320px;
+  gap: 0;
+}
+
+.ed-panel {
+  overflow-y: auto;
+  background: var(--surface);
+  padding: 18px 16px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ed-panel-left { border-right: 1px solid var(--border); }
+.ed-panel-right { border-left: 1px solid var(--border); }
+
+.ed-stage {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--canvas);
+}
+
+/* ------------------------------------------------------------------- head */
+.ed-stage-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  padding: 18px 24px 10px;
+}
+.ed-stage-titles { min-width: 0; }
+.ed-title {
+  margin: 0; font-size: 21px; font-weight: 600; letter-spacing: -0.02em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* An unsaved score says so in the title itself — the one place the teacher is
+   already looking when they wonder whether their work is safe. */
+.ed-title.is-dirty::after {
+  content: " • unsaved";
+  color: var(--warn); font-size: 12px; font-weight: 600; letter-spacing: 0;
+}
+.ed-subtitle { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
+
+/* ---------------------------------------------------------------- toolbar */
+.ed-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+  padding: 0 24px 12px; border-bottom: 1px solid var(--border);
+}
+.ed-tool-group { display: flex; gap: 6px; align-items: center; }
+.ed-tool-group + .ed-tool-group { padding-left: 14px; border-left: 1px solid var(--border); }
+.ed-tool-views { margin-left: auto; gap: 12px; }
+
+.ed-btn {
+  font: inherit; font-size: 13px; font-weight: 500;
+  padding: 7px 12px; border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink);
+  cursor: pointer;
+}
+.ed-btn:hover:not(:disabled) { border-color: var(--ink-2); }
+.ed-btn:disabled { opacity: 0.42; cursor: default; }
+.ed-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ed-btn-primary:hover:not(:disabled) { background: var(--accent-ink); border-color: var(--accent-ink); }
+.ed-btn-quiet { background: transparent; border-color: var(--border); color: var(--muted); }
+
+.ed-toggle {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--ink-2); cursor: pointer; user-select: none;
+}
+
+/* ----------------------------------------------------------------- canvas */
+.ed-canvas {
+  flex: 1; min-height: 0; overflow: auto;
+  /* The gutter is reserved whether or not the score is tall enough to scroll,
+     so a bar never re-wraps the moment a scrollbar appears. */
+  scrollbar-gutter: stable;
+  padding: 20px 24px 32px;
+  background: var(--surface);
+  margin: 16px 24px; border: 1px solid var(--border); border-radius: var(--r-lg);
+}
+.ed-canvas:focus-visible { box-shadow: var(--ring); }
+.ed-canvas.is-over-note { cursor: pointer; }
+.ed-canvas svg { display: block; }
+
+/* VexFlow paints the SVG root with its own presentation attributes — a music
+   font, a black fill *and a black stroke*.  Anything the editor adds to that
+   SVG inherits all three unless it says otherwise, which is how the bar hit
+   areas ended up drawn as black squares around every bar.  So each of the
+   editor's own shapes states its font and its stroke. */
+.ed-canvas svg text.ed-bar-number,
+.ed-canvas svg text.ed-bar-label,
+.ed-canvas svg text.ed-bar-flag,
+.ed-canvas svg text.ed-bar-empty,
+.ed-canvas svg text.ed-ann,
+.ed-canvas svg text.ed-ann-enh { font-family: var(--font-sans); stroke: none; }
+
+/* Empty staff invites a click, so the whole bar is a target — not just the
+   five lines a notehead would land on.  Invisible: fill and stroke both. */
+.ed-bar-hit { fill: transparent; stroke: none; cursor: crosshair; }
+.ed-bar-hit:hover { fill: rgba(61, 78, 219, 0.035); }
+
+.ed-bar-number { font-size: 10px; fill: var(--muted-2); }
+.ed-bar-label { font-size: 12px; font-weight: 600; fill: var(--ink); }
+.ed-bar-flag { font-size: 10px; fill: var(--warn); }
+.ed-bar-empty { font-size: 11px; fill: var(--muted-2); pointer-events: none; }
+
+.ed-bar-sel { fill: rgba(61, 78, 219, 0.06); stroke: var(--accent); stroke-width: 1.5; }
+
+.ed-note { cursor: pointer; }
+.ed-note.is-hover .vf-notehead path { fill: var(--accent); }
+.ed-note.is-selected .vf-notehead path { fill: var(--accent-ink); }
+.ed-note.is-playing .vf-notehead path { fill: var(--warn); }
+
+.ed-sel-box {
+  fill: rgba(61, 78, 219, 0.10); stroke: var(--accent); stroke-width: 1; pointer-events: none;
+}
+.ed-sel-box.is-anchor { stroke-width: 1.8; }
+
+/* Annotation lanes under the stave: what a note carries besides its pitch. */
+.ed-ann { font-size: 10px; fill: var(--muted); }
+.ed-ann-degree { fill: var(--accent-ink); font-weight: 600; }
+.ed-ann-offset { font-size: 9.5px; }
+.ed-ann-offset.early { fill: var(--bad); }
+.ed-ann-offset.late { fill: var(--good); }
+.ed-ann-offset-tick { stroke-width: 2; stroke-linecap: round; }
+.ed-ann-offset-tick.early { stroke: var(--bad); }
+.ed-ann-offset-tick.late { stroke: var(--good); }
+.ed-ann-volume { fill: var(--muted-2); stroke: none; opacity: 0.6; }
+.ed-ann-enh { font-size: 9px; fill: var(--accent); font-style: italic; }
+
+.ed-drag-ghost { fill: var(--accent); stroke: none; opacity: 0.55; pointer-events: none; }
+.ed-drag-hint {
+  position: fixed; z-index: 50; pointer-events: none;
+  background: var(--ink); color: var(--canvas);
+  font-size: 11px; padding: 3px 7px; border-radius: var(--r-sm);
+}
+
+/* ----------------------------------------------------------------- status */
+.ed-status {
+  margin: 0; padding: 8px 24px 14px;
+  font-size: 12.5px; color: var(--muted);
+  border-top: 1px solid var(--border);
+}
+.ed-status.error { color: var(--bad); }
+.ed-status.good { color: var(--good); }
+
+/* ------------------------------------------------------------------- help */
+.ed-help {
+  position: absolute; right: 340px; bottom: 60px; z-index: 20;
+  width: 460px; max-height: 70vh; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-2); padding: 18px 22px;
+}
+.ed-help[hidden] { display: none; }
+.ed-help h2 {
+  margin: 0 0 8px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted);
+}
+.ed-help h2 + dl { margin: 0 0 18px; }
+.ed-help dl { display: grid; grid-template-columns: 130px 1fr; gap: 5px 12px; margin: 0; }
+.ed-help dt { font-size: 12px; font-weight: 600; color: var(--ink); }
+.ed-help dd { margin: 0; font-size: 12px; color: var(--ink-2); }
+
+/* ---------------------------------------------------------------- library */
+.ed-lib-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ed-lib-title { margin: 0; font-size: 15px; font-weight: 600; }
+
+.ed-seg { display: flex; background: var(--surface-2); border-radius: var(--r-sm); padding: 3px; }
+.ed-seg-btn {
+  flex: 1; font: inherit; font-size: 12.5px; padding: 6px 8px; cursor: pointer;
+  border: 0; background: transparent; color: var(--muted); border-radius: 4px;
+}
+.ed-seg-btn.is-active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); }
+
+.ed-lib-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.ed-lib-list { display: flex; flex-direction: column; gap: 2px; }
+.ed-lib-count { margin: 2px 0 6px; font-size: 11px; color: var(--muted-2); }
+.ed-lib-item {
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  font: inherit; padding: 7px 9px; border: 1px solid transparent; border-radius: var(--r-sm);
+  background: transparent; cursor: pointer;
+}
+.ed-lib-item:hover { background: var(--surface-2); }
+.ed-lib-item.is-current { background: var(--accent-tint); border-color: var(--accent); }
+.ed-lib-name { font-size: 12.5px; color: var(--ink); line-height: 1.35; }
+.ed-lib-meta { font-size: 11px; color: var(--muted-2); }
+
+/* -------------------------------------------------------------- inspector */
+.ed-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.ed-tab {
+  font: inherit; font-size: 12.5px; padding: 7px 10px; cursor: pointer;
+  background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--muted);
+}
+.ed-tab.is-active { color: var(--ink); border-bottom-color: var(--accent); }
+
+.ed-tab-body { display: flex; flex-direction: column; gap: 18px; }
+
+.ed-note-summary {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--surface-2); border-radius: var(--r-sm); padding: 9px 11px;
+}
+.ed-note-pitch { font-size: 14px; font-weight: 600; }
+.ed-note-place { font-size: 11px; color: var(--muted); }
+
+.ed-group { display: flex; flex-direction: column; gap: 9px; }
+.ed-group-title {
+  margin: 0; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted);
+}
+
+.ed-field { display: flex; flex-direction: column; gap: 3px; }
+.ed-field-lbl { font-size: 12px; color: var(--ink-2); }
+.ed-field-hint { font-size: 11px; color: var(--muted-2); line-height: 1.4; }
+.ed-field-check { flex-direction: row; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ed-field-check .ed-field-hint { flex-basis: 100%; }
+
+.ed-input {
+  font: inherit; font-size: 13px; width: 100%;
+  padding: 6px 8px; border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink);
+}
+.ed-input-sm { font-size: 12px; padding: 5px 6px; }
+.ed-input-num { width: 74px; flex: none; }
+.ed-check { width: 15px; height: 15px; accent-color: var(--accent); }
+
+.ed-range { display: flex; align-items: center; gap: 8px; }
+.ed-range input[type="range"] { flex: 1; accent-color: var(--accent); }
+
+.ed-hint { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 8px 0; }
+.ed-error { font-size: 12px; color: var(--bad); margin: 8px 0; }
+.ed-empty { padding: 40px; text-align: center; color: var(--muted); }
+
+/* ------------------------------------------------------------- responsive */
+/* Below a certain width the three columns stop being a workspace and start
+   being three cramped ones, so the panels move under the score instead. */
+@media (max-width: 1180px) {
+  .ed-body { overflow: auto; height: auto; }
+  .ed-main { grid-template-columns: 1fr; }
+  .ed-panel { max-height: 420px; border: 0; border-top: 1px solid var(--border); }
+  .ed-help { position: static; width: auto; right: auto; bottom: auto; margin: 0 24px 20px; }
+}

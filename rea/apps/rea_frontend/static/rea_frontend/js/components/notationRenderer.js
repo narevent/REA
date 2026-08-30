@@ -1,28 +1,17 @@
 /**
  * notationRenderer.js
  *
- * Renders a sequence of bars (each with a list of notes) onto an SVG stave
- * using VexFlow 5, with:
- *  - a key signature drawn on the first stave,
- *  - accidentals that follow standard carry rules (only drawn on change),
- *  - variable bar widths sized so every note fits - including the first bar,
- *  - whitespace gaps between bars,
- *  - beaming of eighth/sixteenth notes into beat groups (flags -> beams),
+ * The practice view's stave: a score to be *read*, with
  *  - per-bar SVG references + click handling + hover styling,
- *  - per-note SVG references so the UI can highlight notes during playback.
+ *  - per-note SVG references so the UI can highlight notes during playback,
+ *  - accuracy colouring that stays on the notes after a run,
+ *  - a live sung-pitch marker driven by the microphone.
+ *
+ * The drawing underneath — measuring, wrapping, accidentals, beaming — lives
+ * in `staveLayout.js`, which the score editor draws with too.
  */
 
-import { modeChordToVexKey, noteNameToVexflow, parseNoteToken } from "../notation.js?v=80";
-
-const PX_PER_WHOLE = 260;
-const STAVE_PADDING = 26;
-const MIN_BAR_WIDTH = 120;
-const BAR_GAP = 22; // whitespace between adjacent bars
-const STAVE_Y = 30; // y offset of the stave within its row
-const ROW_HEIGHT = 132; // vertical pitch of each wrapped row
-const MARGIN = 10; // left margin inside the SVG
-
-const MOD_TO_ACC = { "#": "#", b: "b", x: "##", r: "n" };
+import { drawScore, durationToType, resolveVexFlow } from "./staveLayout.js?v=83";
 
 /** Accuracy bands for `setNoteAccuracy`.  The thresholds match the per-note
  *  chips in the feedback row, so the stave and the report agree. */
@@ -60,12 +49,7 @@ export class NotationRenderer {
   }
 
   _resolveVF() {
-    if (this.VF) return this.VF;
-    const candidates = [window.VexFlow, window.Vex && window.Vex.Flow, window.Vex];
-    for (const c of candidates) {
-      if (c && c.Renderer && c.Stave && c.StaveNote) return c;
-    }
-    return null;
+    return this.VF || resolveVexFlow();
   }
 
   _ensureVexflow() {
@@ -81,197 +65,40 @@ export class NotationRenderer {
 
   /**
    * Render an array of bars.
-   *   [{ clef, notes: [{ name, alias, duration, is_rest, is_enharmonic }] }]
-   * `options.keySignature` is a VexFlow key name (e.g. "G", "Abm").
+   *   [{ clef, label, notes: [{ name, alias, duration, is_rest, is_enharmonic }] }]
    * `options.onBarClick` is called with the bar index when a bar is clicked.
+   *
+   * The drawing itself belongs to `staveLayout`, shared with the score
+   * editor so a teacher's picture of an exercise and a student's are the
+   * same picture.  What stays here is what only a *reading* view needs: bars
+   * that answer to a click, and the highlighting the practice session drives.
    */
-  render(bars, { clef = "treble", keySignature = "", title = "", onBarClick = null } = {}) {
+  render(bars, { clef = "treble", title = "", onBarClick = null } = {}) {
     this.clear();
-    const VF = this._ensureVexflow();
-    if (!VF) return [];
+    if (!this._ensureVexflow()) return [];
     if (!bars || bars.length === 0) {
       this.container.innerHTML = '<div class="empty">No notes to display.</div>';
       return [];
     }
     this.onBarClick = onBarClick;
 
-    // --- Measure the available width inside the notation panel -----------
-    // Bars wrap into multiple rows so the whole score is visible without
-    // horizontal scrolling, regardless of how many bars a scale/lesson has.
-    // clientWidth is the inner content width (CSS padding already excluded),
-    // so we only keep a small safety margin for borders/sub-pixel rounding.
-    const availWidth = Math.max(320, Math.floor(this.container.clientWidth - 4));
+    const drawn = drawScore(this.container, bars);
+    if (!drawn) return [];
 
-    // --- Pre-compute the clef/key-signature/time-signature width --------
-    const probe = new VF.Stave(0, 0, 400);
-    probe.addClef("treble");
-    if (keySignature) probe.addKeySignature(keySignature);
-    probe.addTimeSignature("4/4");
-    const prefixWidth = Math.ceil(probe.getNoteStartX()) + 10;
+    this.notes = drawn.notes.map((entry) => ({
+      note: entry.note, el: entry.el, globalIndex: entry.globalIndex, barIndex: entry.barIndex,
+    }));
+    this.bars = drawn.bars.map((bar) => ({
+      staveEl: bar.staveEl, stave: bar.stave, noteStart: bar.noteStart, noteEnd: bar.noteEnd,
+      barIndex: bar.barIndex, x: bar.x, y: bar.y, width: bar.width,
+    }));
+    this.bars.forEach((bar) => bar.staveEl && bar.staveEl.classList.add("vf-bar-interactive"));
 
-    // --- Natural (preferred) bar widths from note content ----------------
-    // Each bar's preferred width is driven by its note durations so notes
-    // never collide.  These are upper bounds; rows scale down to fit.
-    const prefWidths = bars.map((bar, i) => {
-      const notes = bar.notes || [];
-      const totalWhole = notes.reduce((s, n) => s + (n.duration || 0.125), 0);
-      // Width must fit *both* the total duration and every notehead: poly
-      // bars pack many short (sixteenth) notes whose total duration is small
-      // but which need horizontal room so they don't collide.  Reserve a
-      // minimum per-note slot and take the larger of the two estimates.
-      const durArea = Math.ceil(totalWhole * PX_PER_WHOLE);
-      const countArea = notes.length * 26; // ~26px per notehead + spacing
-      const noteArea = Math.max(durArea, countArea) + STAVE_PADDING * 2;
-      return Math.max(MIN_BAR_WIDTH, noteArea) + (i === 0 ? prefixWidth : 0);
-    });
+    const svgEl = drawn.svg;
+    this.svgEl = svgEl;
+    const staveGroups = this.bars.map((b) => b.staveEl);
 
-    // --- Flow-wrap bars into rows ---------------------------------------
-    // A row holds bars until the next bar would exceed availWidth.  If a
-    // single bar is wider than the row (long bars / first bar with clef), it
-    // gets its own row and is scaled to fit the row.  We never exceed the
-    // available width, so no horizontal scroll is ever needed.
-    const rows = [];
-    let cur = [];
-    let curW = 0;
-    bars.forEach((bar, i) => {
-      const w = prefWidths[i] + (cur.length ? BAR_GAP : 0);
-      if (cur.length && curW + w > availWidth) {
-        rows.push(cur);
-        cur = [];
-        curW = 0;
-      }
-      cur.push(i);
-      curW += (cur.length > 1 ? BAR_GAP : 0) + prefWidths[i];
-    });
-    if (cur.length) rows.push(cur);
-
-    // Compute per-bar scaled width + placement (x, y) so each row exactly
-    // fills availWidth.  Scale factor = availWidth / rowPrefWidth (clamped to
-    // <=1 so we never grow beyond preferred; a single over-wide bar is shrunk
-    // to fit).  Bars within a row are laid out left-to-right with BAR_GAP.
-    const barWidths = new Array(bars.length);
-    const placement = new Array(bars.length); // {x, y}
-    rows.forEach((row, r) => {
-      const pref = row.reduce((s, i, k) => s + prefWidths[i] + (k ? BAR_GAP : 0), 0);
-      const scale = pref > availWidth ? availWidth / pref : 1;
-      let x = MARGIN;
-      row.forEach((i, k) => {
-        barWidths[i] = Math.floor(prefWidths[i] * scale);
-        placement[i] = { x, y: r * ROW_HEIGHT + STAVE_Y };
-        x += barWidths[i] + BAR_GAP;
-      });
-    });
-
-    // --- Create the SVG sized for all rows ------------------------------
-    const totalHeight = rows.length * ROW_HEIGHT + 16;
-
-    const renderer = new VF.Renderer(this.container, VF.Renderer.Backends.SVG);
-    renderer.resize(availWidth, totalHeight);
-    const context = renderer.getContext();
-    context.setFont("Arial", 10);
-    context.setBackgroundFillStyle("#ffffff");
-    context.setFillStyle("#16171a");
-    context.setStrokeStyle("#16171a");
-
-    const effective = {};
-    this._initKeySignatureState(effective, keySignature);
-
-    let globalIndex = 0;
-    const formatted = [];
-    const allBeams = [];
-
-    bars.forEach((bar, i) => {
-      const bw = barWidths[i];
-      const stave = new VF.Stave(placement[i].x, placement[i].y, bw);
-      if (i === 0) {
-        stave.addClef("treble");
-        if (keySignature) stave.addKeySignature(keySignature);
-        stave.addTimeSignature("4/4");
-      }
-      stave.setContext(context).draw();
-      const noteStartX = stave.getNoteStartX();
-      const noteStart = globalIndex; // first note index of this bar
-
-      // Per-bar text label (e.g. Roman-numeral harmonic function "I", "IV"
-      // on polyphonic lessons) drawn above the stave.  NB: we deliberately
-      // do NOT use stave.setText() — in VexFlow 5.0.0 adding a text modifier
-      // collapses stave.getWidth() to the text's measured width, shrinking
-      // the staff to a sliver.  Drawing the label directly via the context
-      // after the stave avoids that bug entirely.  We estimate the label
-      // width (~8px per char at this font size) to center it on the bar.
-      if (bar.label) {
-        try {
-          const lx = stave.getX() + (stave.getWidth() / 2) - (bar.label.length * 4);
-          const ly = placement[i].y - 6;
-          context.setFont("Arial", 11);
-          context.setFillStyle("#16171a");
-          context.fillText(bar.label, lx, ly);
-        } catch (e) { /* label best-effort */ }
-      }
-
-      const barStart = Object.assign({}, effective);
-      const notes = [];
-      (bar.notes || []).forEach((n) => {
-        const durType = this._durToType(n.duration || 0.125);
-        let note;
-        if (n.is_rest || !n.name) {
-          note = new VF.StaveNote({ keys: ["b/4"], duration: durType + "r", clef: "treble" });
-        } else {
-          const tok = parseNoteToken(n.name);
-          const key = noteNameToVexflow(tok);
-          note = new VF.StaveNote({ keys: [key], duration: durType, clef: "treble", auto_stem: true });
-          const accVal = this._accidentalValue(tok);
-          const prev = barStart[tok.letter] || 0;
-          if (accVal !== prev || (i === 0 && accVal !== 0 && accVal !== (effective[tok.letter] || 0))) {
-            const accStr = MOD_TO_ACC[tok.modifier];
-            if (accStr) note.addModifier(new VF.Accidental(accStr), 0);
-            barStart[tok.letter] = accVal;
-          }
-        }
-        note.globalIndex = globalIndex;
-        notes.push(note);
-        globalIndex += 1;
-      });
-
-      // Beaming
-      const beamable = notes.filter((n) => {
-        const d = n.getDuration ? n.getDuration() : "";
-        return d === "8" || d === "16";
-      });
-      if (beamable.length >= 2) {
-        try {
-          const beams = VF.Beam.generateBeams(beamable, { groups: [new VF.Fraction(2, 8)] });
-          beams.forEach((b) => allBeams.push(b));
-        } catch (e) { /* best-effort */ }
-      }
-
-      const voice = new VF.Voice({ num_beats: 4, beat_value: 4 }).setStrict(false);
-      voice.addTickables(notes);
-      formatted.push({ voice, stave, notes, noteStartX, noteStart, barIndex: i });
-    });
-
-    // Format each voice into its note area
-    formatted.forEach(({ voice, stave, noteStartX }) => {
-      const noteAreaWidth = stave.getWidth() - (noteStartX - stave.getX()) - STAVE_PADDING;
-      new VF.Formatter().joinVoices([voice]).format([voice], Math.max(40, noteAreaWidth));
-    });
-
-    // Draw voices + beams
-    formatted.forEach(({ voice, stave }) => voice.draw(stave.getContext(), stave));
-    allBeams.forEach((b) => b.setContext(context).draw());
-
-    // --- Collect per-note SVG <g> for highlighting ---------------------
-    const noteGroups = this.container.querySelectorAll("svg g.vf-stavenote");
-    this.notes = [];
-    let gi = 0;
-    formatted.forEach(({ notes, barIndex }) => {
-      notes.forEach((note) => {
-        this.notes.push({ note, el: noteGroups[gi] || null, globalIndex: note.globalIndex, barIndex });
-        gi += 1;
-      });
-    });
-
-    // --- Collect per-bar stave SVG <g> + click/hover wiring ------------
+    // --- Per-bar click/hover wiring -------------------------------------
     // VexFlow draws note groups (g.vf-stavenote) as *siblings* of, and on top
     // of, the stave group, so a click on a notehead/beam never reaches the
     // stave's own handler.  We attach a delegated listener to the notation
@@ -280,31 +107,14 @@ export class NotationRenderer {
     // coordinate transforms or scrolling).  A nearest-bar fallback covers
     // noteheads/beams that sit above or below the staff box, so the whole bar
     // area is clickable, not just the staff lines.
-    const staveGroups = this.container.querySelectorAll("svg g.vf-stave");
-    const svgEl = this.container.querySelector("svg");
-    this.bars = [];
-    formatted.forEach((f, i) => {
-      const staveEl = staveGroups[i];
-      this.bars.push({
-        staveEl, stave: f.stave, noteStart: f.noteStart, noteEnd: f.noteStart + f.notes.length - 1, barIndex: i,
-        x: placement[i].x, y: placement[i].y, width: barWidths[i],
-      });
-      if (staveEl) staveEl.classList.add("vf-bar-interactive");
-    });
-    this.svgEl = svgEl;
-
     if (svgEl) {
       svgEl.style.cursor = "pointer";
 
-      const barRects = () => {
-        const rects = [];
-        staveGroups.forEach((g, i) => {
-          if (!g) { rects.push(null); return; }
-          const r = g.getBoundingClientRect();
-          rects.push({ x0: r.left, x1: r.right, y0: r.top, y1: r.bottom, barIndex: i });
-        });
-        return rects;
-      };
+      const barRects = () => staveGroups.map((g, i) => {
+        if (!g) return null;
+        const r = g.getBoundingClientRect();
+        return { x0: r.left, x1: r.right, y0: r.top, y1: r.bottom, barIndex: i };
+      });
 
       const hitTest = (clientX, clientY) => {
         const rects = barRects();
@@ -458,39 +268,7 @@ export class NotationRenderer {
     return this.bars.length;
   }
 
-  _initKeySignatureState(state, vexKey) {
-    if (!vexKey) return;
-    const sharpOrder = ["f", "c", "g", "d", "a", "e", "b"];
-    const flatOrder = ["b", "e", "a", "d", "g", "c", "f"];
-    const isMinor = vexKey.endsWith("m");
-    const root = vexKey.replace("m", "");
-    const sharpKeys = { C: 0, G: 1, D: 2, A: 3, E: 4, B: 5, "F#": 6, "C#": 7 };
-    const flatKeys = { C: 0, F: 1, Bb: 2, Eb: 3, Ab: 4, Db: 5, Gb: 6, Cb: 7 };
-    const minorSharpRoots = { A: 0, E: 1, B: 2, "F#": 3, "C#": 4, "G#": 5, "D#": 6, "A#": 7 };
-    const minorFlatRoots = { A: 0, D: 1, G: 2, C: 3, F: 4, Bb: 5, Eb: 6, Ab: 7 };
-    let nSharps = 0, nFlats = 0;
-    if (isMinor) {
-      if (root in minorSharpRoots) nSharps = minorSharpRoots[root];
-      else if (root in minorFlatRoots) nFlats = minorFlatRoots[root];
-    } else {
-      if (root in sharpKeys) nSharps = sharpKeys[root];
-      else if (root in flatKeys) nFlats = flatKeys[root];
-    }
-    if (nSharps > 0) {
-      for (let k = 0; k < Math.min(nSharps, 7); k++) state[sharpOrder[k]] = 1;
-    } else if (nFlats > 0) {
-      for (let k = 0; k < Math.min(nFlats, 7); k++) state[flatOrder[k]] = -1;
-    }
-  }
 
-  _accidentalValue(tok) {
-    if (!tok.modifier) return 0;
-    if (tok.modifier === "r") return 0;
-    if (tok.modifier === "#") return 1;
-    if (tok.modifier === "b") return -1;
-    if (tok.modifier === "x") return 2;
-    return 0;
-  }
 
   highlightNote(globalIndex) {
     this.notes.forEach((entry) => {
@@ -666,11 +444,6 @@ export class NotationRenderer {
   }
 
   _durToType(d) {
-    if (d >= 1) return "w";
-    if (d >= 0.5) return "h";
-    if (d >= 0.25) return "q";
-    if (d >= 0.125) return "8";
-    if (d >= 0.0625) return "16";
-    return "8";
+    return durationToType(d);
   }
 }

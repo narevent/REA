@@ -1,7 +1,9 @@
-from django.contrib.auth.mixins import LoginRequiredMixin
+from django.contrib.auth.mixins import LoginRequiredMixin, UserPassesTestMixin
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.generic import TemplateView
+
+from rea.apps.accounts.permissions import is_teacher
 
 
 @method_decorator(ensure_csrf_cookie, name="dispatch")
@@ -20,3 +22,23 @@ class IndexView(LoginRequiredMixin, TemplateView):
     """
 
     template_name = "rea_frontend/index.html"
+
+
+@method_decorator(ensure_csrf_cookie, name="dispatch")
+class EditorView(UserPassesTestMixin, TemplateView):
+    """
+    The exercise editor shell — teachers only.
+
+    The gate is the same :func:`is_teacher` check the editing API enforces, so
+    a student who guesses the URL is refused here *and* at every endpoint the
+    page would call.  ``raise_exception`` is deliberate: bouncing a signed-in
+    student to the login page would suggest signing in again fixes it.
+
+    ``ensure_csrf_cookie`` because every save is a fetch() carrying the token.
+    """
+
+    template_name = "rea_frontend/editor.html"
+    raise_exception = True
+
+    def test_func(self):
+        return is_teacher(self.request.user)

@@ -176,6 +176,14 @@ body {
 .app-nav-btn.active { color: var(--ink); background: var(--surface); box-shadow: var(--shadow-1); }
 /* Account pages use links in the product nav; the app uses buttons. */
 .app-nav a.app-nav-btn { text-decoration: none; display: inline-flex; align-items: center; }
+/* The teacher's link to the editor sits in the right-hand cluster rather than
+   the product nav — it leaves the practice app rather than switching within
+   it — but it should still read as one of the header's controls. */
+.header-right a.app-nav-btn {
+  text-decoration: none; display: inline-flex; align-items: center;
+  padding: 6px 12px; border: 1px solid var(--border); background: var(--surface);
+}
+.header-right a.app-nav-btn:hover { border-color: var(--border-strong); }
 
 /* Header right-hand cluster: practice stats and the account chip together. */
 .header-right { justify-self: end; display: flex; align-items: center; gap: 16px; min-width: 0; }
@@ -458,9 +466,15 @@ body {
 
 /* Noteheads-only mode (intonation focus): hide stems, beams and flags so only
    noteheads (and rests) are visible.  Playback rhythm is unaffected. */
-.notation.noteheads-only .vf-stavenote .vf-stem,
-.notation.noteheads-only .vf-stavenote .vf-flag,
-.notation.noteheads-only .vf-beam { display: none !important; }
+/* Every REA stave, in the practice view and in the editor alike, shows
+   noteheads only.  These are intonation exercises: the rhythm is real in
+   playback (and editable in the editor's inspector) but drawing stems, flags
+   and beams only adds clutter around the one thing being trained, which is
+   where the note sits.  The rule keys off the class `staveLayout` puts on
+   every score it draws, so neither view has to remember to ask. */
+svg.rea-score .vf-stavenote .vf-stem,
+svg.rea-score .vf-stavenote .vf-flag,
+svg.rea-score .vf-beam { display: none !important; }
 
 /* Live sung-pitch preview marker (singing exercises). */
 /* Per-note accuracy, left on the stave after singing so a finished run can be

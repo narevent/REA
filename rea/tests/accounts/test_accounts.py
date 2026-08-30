@@ -128,13 +128,13 @@ class DashboardTests(TestCase):
         response = self.client.get(reverse("accounts:dashboard"))
         self.assertContains(response, "No sessions recorded yet")
 
-    def test_teacher_dashboard_shows_editor_placeholder_not_progress(self):
+    def test_teacher_dashboard_offers_the_editor_not_progress(self):
         make_user(username="tess", role=Role.TEACHER)
         self.client.login(username="tess", password="practice-pass-123")
         response = self.client.get(reverse("accounts:dashboard"))
         self.assertTrue(response.context["is_teacher"])
         self.assertNotIn("overview", response.context)
-        self.assertContains(response, "score editor isn't built yet")
+        self.assertContains(response, reverse("rea_frontend:editor"))
 
     def test_display_name_can_be_updated(self):
         make_user()
