@@ -68,7 +68,7 @@ export class NotationRenderer {
    *  8px deadband and the attempt cap stop a redraw that adds or removes a
    *  scrollbar from oscillating with the one that follows it. */
   _maybeRelayout() {
-    if (!this._lastDraw || this._relayoutQueued) return;
+    if (!this._lastDraw || this._relayoutQueued || !this._ownsStage()) return;
     const avail = this.container.clientWidth;
     if (!avail || Math.abs(avail - this._drawnFor) <= 8) return;
     if (this._relayouts >= 3) return;
@@ -83,8 +83,19 @@ export class NotationRenderer {
     });
   }
 
+  /** Whether the score this renderer drew is still the one on the stage.
+   *  The stage is shared — the lesson stave, the key-model stave and the
+   *  numeric display all draw into the same node — so a renderer that has
+   *  been drawn over must stop reacting to it: its resize observer would
+   *  otherwise redraw a staff on top of whatever replaced it, and its click
+   *  handler would keep answering for bars that are no longer there. */
+  _ownsStage() {
+    return !!(this.svgEl && this.container.contains(this.svgEl));
+  }
+
   clear() {
     this.container.innerHTML = "";
+    this.svgEl = null;
     this.notes = [];
     this.bars = [];
     this._revealed = null;
@@ -186,11 +197,13 @@ export class NotationRenderer {
       };
 
       this.container.addEventListener("click", (e) => {
+        if (!this._ownsStage()) return;
         const idx = hitTest(e.clientX, e.clientY);
         if (idx != null && this.onBarClick) this.onBarClick(idx);
       });
 
       this.container.addEventListener("mousemove", (e) => {
+        if (!this._ownsStage()) return;
         const idx = hitTest(e.clientX, e.clientY);
         staveGroups.forEach((g) => g && g.classList.remove("vf-bar-hover"));
         if (idx != null && staveGroups[idx]) staveGroups[idx].classList.add("vf-bar-hover");

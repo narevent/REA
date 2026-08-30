@@ -14,6 +14,7 @@
 import { API } from "./api.js?v=114";
 import { renderLessonNotation } from "./views/lessonView.js?v=114";
 import { renderScaleNotation } from "./views/scaleView.js?v=114";
+import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=114";
 import { SoundcheckView } from "./views/soundcheckView.js?v=114";
 import { AudioPlayer } from "./audioPlayer.js?v=114";
 import { PracticeController } from "./practiceController.js?v=114";
@@ -23,8 +24,8 @@ import {
   isUnlocked, completedCount, PASS_THRESHOLD,
 } from "./chapters.js?v=114";
 import {
-  AREAS, AREA_BY_ID, contextFor, kindOf, defaultCategory, categoryByUid,
-  firstCategory, pathOf, neighbourCategory,
+  AREAS, AREA_BY_ID, contextFor, kindOf, isPractisable, defaultCategory,
+  categoryByUid, firstCategory, pathOf, neighbourCategory,
 } from "./curriculum.js?v=114";
 import { createNav } from "./curriculumNav.js?v=114";
 
@@ -608,13 +609,28 @@ let state = {
   contextVariant: "",
 };
 
+/** True while the open category is one of the numeric-display leaves. */
+function isNumericCategory() {
+  return !!state.category && kindOf(state.category) === "numeric";
+}
+
 const practice = new PracticeController({
   stage: document.getElementById("notation"),
   legend: document.getElementById("legend"),
   info: document.getElementById("info"),
   player,
-  renderNotation: renderLessonNotation,
-  renderKeyModelNotation: renderScaleNotation,
+  // Which picture the exercise is read from.  A numeric category is not a
+  // different lesson — it is the same one shown as scale degrees, so the
+  // choice is made here, at the one place the score is drawn, and nothing
+  // downstream has to know which of the two it is driving.
+  renderNotation: (lesson, onBarClick) =>
+    isNumericCategory()
+      ? renderLessonNumeric(lesson, onBarClick)
+      : renderLessonNotation(lesson, onBarClick),
+  renderKeyModelNotation: (keyModel, onBarClick) =>
+    isNumericCategory()
+      ? renderScaleNumeric(keyModel, onBarClick)
+      : renderScaleNotation(keyModel, onBarClick),
   getKeyModel: (id) => API.getKey(id),
   setStatus: (m) => setStatus(m),
   onSessionComplete: (chapter, avg) => onSessionComplete(chapter, avg),
@@ -1297,12 +1313,13 @@ function renderHeader() {
 
 const POSITION_KEY = "rea.position.v1";
 
-/** The ten exercises a category holds — none, for the document and numeric
- *  pages, which are a single view rather than a set to work through. */
+/** The ten exercises a category holds — none, for the document pages, which
+ *  are a single view rather than a set to work through. */
 function exerciseList() {
   // Only a real lesson runs the ten exercises; a placeholder is one view.
-  if (state.category && kindOf(state.category) !== "score" &&
-      kindOf(state.category) !== "combo") return [];
+  // A numeric category is a real lesson — it is the Notal material read as
+  // degrees, so it runs the same ten.
+  if (state.category && !isPractisable(state.category)) return [];
   // `short` is what the collapsed path shows: "2. Singing with repetition" is
   // wider than a phone's path line on its own, and the number plus the skill
   // already says which of the ten this is.
@@ -1358,7 +1375,6 @@ function keyValue() { return state.contextKey ? String(state.contextKey.id) : ""
 async function applyCategory(node, part, exercise) {
   if (!node) return;
   const ctx = contextFor(node);
-  const kind = kindOf(node);
   state.category = node;
   // Jumping through the sheet, or restoring a position, can land in another
   // area; the switcher has to follow rather than keep highlighting the old one.
@@ -1367,10 +1383,10 @@ async function applyCategory(node, part, exercise) {
     renderNav();
   }
 
-  if (kind !== "score" && kind !== "combo") {
+  if (!isPractisable(node)) {
     practice.stop();
     state.activeChapter = null;
-    showPlaceholder(node, kind);
+    showPlaceholder(node);
     renderTopbar();
     return;
   }
@@ -1425,11 +1441,11 @@ async function applyCategory(node, part, exercise) {
 }
 
 // --- placeholder views -----------------------------------------------------
-// Numeric and the document chapters keep their place in the method's order
-// rather than being hidden, so the ordering stays honest and what is still
-// unbuilt is visible.  Each is one render away from being the real thing.
+// The document chapters keep their place in the method's order rather than
+// being hidden, so the ordering stays honest and what is still unbuilt is
+// visible.  Each is one render away from being the real thing.
 
-function showPlaceholder(node, kind) {
+function showPlaceholder(node) {
   showSession();
   const stage = document.querySelector(".session-stage");
   const info = document.getElementById("info");
@@ -1438,15 +1454,10 @@ function showPlaceholder(node, kind) {
   if (info) info.hidden = true;
   if (!ph) return;
   ph.hidden = false;
-  const copy = kind === "numeric"
-    ? {
-        label: "Numeric display",
-        text: "The numeric view shows scale degrees rather than a staff. Not built yet — it is a separate display of the same lesson, not a different lesson.",
-      }
-    : {
-        label: "Not built yet",
-        text: "This part of the method has no exercises behind it yet. It keeps its place in the order so the path stays true to the method.",
-      };
+  const copy = {
+    label: "Not built yet",
+    text: "This part of the method has no exercises behind it yet. It keeps its place in the order so the path stays true to the method.",
+  };
   ph.innerHTML =
     '<div class="ph-card">' +
       '<div class="ph-kind">' + copy.label + "</div>" +
