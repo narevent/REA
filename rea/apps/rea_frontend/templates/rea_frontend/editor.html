@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=83" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=83" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=131" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=131" />
 </head>
 <body class="ed-body">
   <header class="app-header">
@@ -58,9 +58,11 @@
           <dt>← →</dt><dd>move through the notes</dd>
           <dt>Alt + ← →</dt><dd>move the note itself, across bars if need be</dd>
           <dt>↑ ↓</dt><dd>raise / lower by a step — with Shift, by an octave</dd>
+          <dt># b n</dt><dd>sharp, flat, or back to whatever the key signature says</dd>
           <dt>Alt + ↑ ↓</dt><dd>cycle the accidental: natural, ♯, ♭, 𝄪, naturalised</dd>
           <dt>1 – 6</dt><dd>duration, from a whole note to a thirty-second</dd>
-          <dt>, .</dt><dd>nudge the timing offset earlier / later (Shift for ±5)</dd>
+          <dt>, .</dt><dd>sound the note earlier / later — the playback offset (Shift for bigger steps)</dd>
+          <dt>Alt + , .</dt><dd>draw the note further left / right — the visual offset; when it sounds does not change</dd>
           <dt>- =</dt><dd>quieter / louder</dd>
           <dt>r</dt><dd>turn the note into a rest, and back</dd>
           <dt>k</dt><dd>let the note follow the key signature</dd>
@@ -76,7 +78,8 @@
           <dt>Click empty staff</dt><dd>write a note at that pitch and position</dd>
           <dt>Click a note</dt><dd>select it — Shift extends, ⌘/Ctrl adds one</dd>
           <dt>Drag a note</dt><dd>up or down to change its pitch</dd>
-          <dt>Alt + drag</dt><dd>sideways to change its timing offset</dd>
+          <dt>Alt + drag</dt><dd>sideways to change when it sounds — the playback offset</dd>
+          <dt>Alt + Shift + drag</dt><dd>sideways to change where it is drawn — the visual offset</dd>
           <dt>Shift + click staff</dt><dd>select the bar</dd>
         </dl>
       </div>
@@ -86,8 +89,8 @@
     <aside class="ed-panel ed-panel-right" id="ed-inspector"></aside>
   </main>
 
-  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=83"></script>
-  <script type="module" src="{% static 'rea_frontend/js/editor/editor.js' %}?v=83"></script>
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=131"></script>
+  <script type="module" src="{% static 'rea_frontend/js/editor/editor.js' %}?v=131"></script>
   <script>
     // The one behaviour that belongs to the page rather than the score: the
     // shortcut sheet.  Keeping it here means the editor module never has to

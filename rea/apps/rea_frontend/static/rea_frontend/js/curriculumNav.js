@@ -23,6 +23,9 @@
  *   difficultyOptions() → [{ value, label }] how much room the exercises give
  *   difficultyValue()   → the selected one
  *   goDifficulty(value)
+ *   tempoOptions()      → [{ value, label }] how fast the exercises play
+ *   tempoValue()        → the selected one
+ *   goTempo(value)
  *   goCategory(node, partValue?, exerciseIdx?)
  *   goPart(value)
  *   goExercise(idx)
@@ -31,7 +34,7 @@
 
 import {
   pathOf, firstCategory, labelFor, kindOf, neighbourCategory,
-} from "./curriculum.js?v=114";
+} from "./curriculum.js?v=131";
 
 function el(tag, cls, html) {
   const n = document.createElement(tag);
@@ -183,6 +186,25 @@ export function createNav(deps) {
     })));
   }
 
+  /** The tempo chip — how fast this singer wants the exercises to play.
+   *  Next to difficulty, and for the same reason: it is a property of the
+   *  person practising rather than of the material, and a student who cannot
+   *  keep up should be able to fix that from where they are stuck. */
+  function renderTempo(host) {
+    if (!host) return;
+    host.innerHTML = "";
+    const opts = deps.tempoOptions ? deps.tempoOptions() : [];
+    if (!opts.length) { host.hidden = true; return; }
+    host.hidden = false;
+    const cur = deps.tempoValue();
+    const now = opts.find((o) => o.value === cur) || opts[0];
+    segment(host, now ? now.label : "—", opts.map((o) => ({
+      label: o.label,
+      current: o.value === cur,
+      pick: () => deps.goTempo(o.value),
+    })));
+  }
+
   /** The tonality chip — one control, sitting apart from the path because a
    *  key applies across the whole relative system rather than to one node. */
   function renderKey(host) {
@@ -316,6 +338,7 @@ export function createNav(deps) {
     category = cat;
     renderPath(document.getElementById("path-bar"));
     renderKey(document.getElementById("path-key"));
+    renderTempo(document.getElementById("path-tempo"));
     renderDifficulty(document.getElementById("path-difficulty"));
     renderFooter(document.getElementById("session-nav"));
     if (sheetOpen) renderSheet(document.getElementById("curriculum-tree"));

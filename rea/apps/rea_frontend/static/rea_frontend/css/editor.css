@@ -74,6 +74,30 @@
 .ed-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .ed-btn-primary:hover:not(:disabled) { background: var(--accent-ink); border-color: var(--accent-ink); }
 .ed-btn-quiet { background: transparent; border-color: var(--border); color: var(--muted); }
+.ed-btn-danger { border-color: var(--bad); color: var(--bad); }
+.ed-btn-danger:hover:not(:disabled) { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+/* ------------------------------------------------------------------- ask */
+/* The editor's own dialog, for the questions with more than two answers —
+   above all "you have unsaved work and you are leaving it", where the answer a
+   teacher wants (save it, then go) is the one `window.confirm` has no room
+   for. */
+.ed-ask-scrim {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(16, 17, 20, 0.35);
+}
+.ed-ask {
+  width: min(520px, calc(100vw - 40px));
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg); box-shadow: var(--shadow-2);
+  padding: 22px 24px 18px;
+}
+.ed-ask-title { margin: 0 0 8px; font-size: 16px; font-weight: 600; }
+.ed-ask-body { margin: 0 0 18px; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+/* Reversed, so the least destructive answer sits nearest the cursor's rest
+   position and the primary one reads last. */
+.ed-ask-actions { display: flex; flex-direction: row-reverse; flex-wrap: wrap; gap: 8px; }
 
 .ed-toggle {
   display: inline-flex; align-items: center; gap: 6px;
@@ -137,6 +161,12 @@
 .ed-ann-offset-tick { stroke-width: 2; stroke-linecap: round; }
 .ed-ann-offset-tick.early { stroke: var(--bad); }
 .ed-ann-offset-tick.late { stroke: var(--good); }
+
+/* Where a visually-nudged notehead would otherwise have sat.  Faint on
+   purpose: it is a reminder, not a reading, and only ever appears on notes
+   the teacher has moved by hand. */
+.ed-ann-visual-link { stroke: var(--muted-2); stroke-width: 1; stroke-dasharray: 2 2; }
+.ed-ann-visual-home { stroke: var(--muted-2); stroke-width: 1.5; stroke-linecap: round; }
 .ed-ann-volume { fill: var(--muted-2); stroke: none; opacity: 0.6; }
 .ed-ann-enh { font-size: 9px; fill: var(--accent); font-style: italic; }
 

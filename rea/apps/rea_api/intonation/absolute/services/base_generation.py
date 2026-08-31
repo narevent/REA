@@ -54,6 +54,7 @@ def import_chromatic_base(data: dict, filename: str, *, clear: bool = True) -> C
                 bar=bar,
                 event_index=ev_index,
                 horizontal_offset_ms=ev.horizontal_offset_ms,
+                visual_offset_px=ev.visual_offset_px,
                 duration=ev.duration,
                 attack_decay_time=ev.attack_decay_time,
                 volume=ev.volume,

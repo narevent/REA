@@ -186,6 +186,7 @@ def import_key_model(data: dict, filename: str, *, clear: bool = True) -> KeyMod
             bar=bar,
             event_index=0,
             horizontal_offset_ms=ev.horizontal_offset_ms,
+            visual_offset_px=ev.visual_offset_px,
             duration=ev.duration,
             attack_decay_time=ev.attack_decay_time,
             volume=ev.volume,

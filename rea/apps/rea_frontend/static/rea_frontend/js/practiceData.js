@@ -11,9 +11,15 @@
  * without depending on the main app state.
  */
 
-import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=114";
+import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=131";
+import { getTempoScale } from "./tempo.js?v=131";
 
 const DEFAULT_TEMPO = 80;
+// The event's stored offset is a *playback* offset — it moves when a note
+// sounds, never where it is written — and one stored unit is twelve
+// milliseconds of it.  The editor's `scoreDoc.js` says the same thing at
+// greater length, and the two constants have to agree: a teacher previewing an
+// exercise and a student practising it must hear the same timing.
 const OFFSET_GAIN = 12;
 const A4_MIDI = 69;
 
@@ -40,11 +46,18 @@ export function keySigMap(item) {
  * fast.  The mono exercises feel right, so to give the poly exercises the
  * same comfortable pace we halve the effective tempo for poly-texture items
  * (a sixteenth at half-tempo lands on the same wall-clock duration as an
- * eighth at full tempo).  Mono and key-model items are unaffected. */
+ * eighth at full tempo).  Mono and key-model items are unaffected.
+ *
+ * The singer's own speed setting (`tempo.js`) is applied last, on top of all
+ * of that.  This is the one place it is applied, and everything that
+ * schedules or times a note comes through here — playback, the gaps between
+ * notes, and the pace the singing tracker expects of the voice — so they can
+ * never disagree about how fast the exercise is going. */
 export function tempoOf(item) {
   const raw = item.tempo || DEFAULT_TEMPO;
   const t = raw > 10 ? raw : DEFAULT_TEMPO;
-  return item.texture === "poly" ? t / 2 : t;
+  const written = item.texture === "poly" ? t / 2 : t;
+  return written * getTempoScale();
 }
 
 /** VexFlow key name for the lesson/key (from the first bar's mode chord). */

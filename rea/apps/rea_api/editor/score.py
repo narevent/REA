@@ -50,8 +50,8 @@ BAR_FIELDS = (
 RELATIVE_BAR_FIELDS = ("degree", "quality")
 
 EVENT_FIELDS = (
-    "horizontal_offset_ms", "duration", "attack_decay_time", "volume",
-    "note_name", "alias_degree", "is_rest", "is_enharmonic", "event_type",
+    "horizontal_offset_ms", "visual_offset_px", "duration", "attack_decay_time",
+    "volume", "note_name", "alias_degree", "is_rest", "is_enharmonic", "event_type",
 )
 
 
@@ -71,6 +71,7 @@ def event_document(event):
         "alias_degree": event.alias_degree,
         "duration": event.duration,
         "horizontal_offset_ms": event.horizontal_offset_ms,
+        "visual_offset_px": event.visual_offset_px,
         "attack_decay_time": event.attack_decay_time,
         "volume": event.volume,
         "is_rest": event.is_rest,

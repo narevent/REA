@@ -13,7 +13,7 @@
  * teacher edits is what gets stored.
  */
 
-import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=114";
+import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=131";
 
 /** Note letters in staff order.  German naming: `h` is B-natural. */
 export const LETTERS = ["c", "d", "e", "f", "g", "a", "h"];
@@ -39,8 +39,51 @@ export const DURATIONS = [
   { value: 0.03125, label: "Thirty-second", short: "1/32" },
 ];
 
-/** The offset is stored in the source's own units; playback multiplies by 12. */
+/**
+ * The offset is a *playback* offset, not a notation one.
+ *
+ * This is the one field in the score whose two readings kept getting mixed up.
+ * It is stored as `horizontal_offset_ms`, it is drawn as a horizontal nudge
+ * under the notehead, and both of those say "this note is written slightly to
+ * the left" — which it is not.  Where the note is written never changes.  What
+ * changes is *when it sounds*: the offset shifts the note's start in the
+ * playback schedule, which is what these exercises use it for (an anticipated
+ * or delayed note that a singer has to hear as such) and the only thing it has
+ * ever done.
+ *
+ * It is stored in the source library's own units, and one of those is twelve
+ * milliseconds of playback.  Everything a teacher sees is in milliseconds —
+ * the unit the field is actually about — and `offsetMs` / `offsetUnits`
+ * convert at the edge, so the conversion lives in one place rather than as a
+ * bare `* 12` in each view.
+ */
 export const OFFSET_GAIN = 12;
+
+/** The stored offset of an event, in milliseconds of playback. */
+export function offsetMs(event) {
+  return (event && event.horizontal_offset_ms ? event.horizontal_offset_ms : 0) * OFFSET_GAIN;
+}
+
+/** Milliseconds back to the stored unit, rounded to one it can hold. */
+export function offsetUnits(ms) {
+  return Math.round((ms || 0) / OFFSET_GAIN);
+}
+
+/** The widest offset the score can store, in milliseconds either way. */
+export const MAX_OFFSET_MS = 60 * OFFSET_GAIN;
+
+/**
+ * The other offset: where a notehead is *drawn*, in stave pixels.
+ *
+ * These two are easy to confuse and must not be.  `horizontal_offset_ms` moves
+ * the moment a note sounds and changes nothing on the page;
+ * `visual_offset_px` moves the notehead on the page and changes nothing about
+ * the sound.  A teacher wants the first for an anticipated or delayed note,
+ * and the second when the automatic spacing has put a note somewhere that
+ * reads badly.  Kept in step with `MAX_VISUAL_OFFSET_PX` in the editor's
+ * serializer, which is what actually refuses an out-of-range value.
+ */
+export const MAX_VISUAL_OFFSET_PX = 24;
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -117,6 +160,11 @@ export function blankEvent(previous = null, overrides = {}) {
     alias_degree: "",
     duration: previous ? previous.duration : 0.125,
     horizontal_offset_ms: 0,
+    // Neither offset is inherited from the note before.  Both are corrections
+    // to one particular note in one particular place — an anticipation here,
+    // a notehead pulled clear of its neighbour there — and copying them onto
+    // the next note would spread one deliberate exception down the whole line.
+    visual_offset_px: 0,
     attack_decay_time: previous ? previous.attack_decay_time : null,
     volume: previous ? previous.volume : 80,
     is_rest: false,
@@ -376,6 +424,20 @@ export class ScoreDoc extends EventTarget {
         touched += 1;
       });
       if (!touched) return false;
+    });
+  }
+
+  /**
+   * Replace every bar in the score at once — the MIDI-import path.
+   *
+   * It goes through `edit` like any other change, which is the point: an
+   * import is the largest edit the editor can make, and it is exactly the one
+   * a teacher most needs to be able to take back after seeing the result.
+   */
+  replaceBars(bars, label = "import MIDI") {
+    return this.edit(label, (doc) => {
+      if (!Array.isArray(bars) || !bars.length) return false;
+      doc.bars = clone(bars);
     });
   }
 

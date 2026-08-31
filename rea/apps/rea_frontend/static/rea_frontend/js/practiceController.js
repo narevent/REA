@@ -26,19 +26,19 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=114";
+import { AudioPlayer } from "./audioPlayer.js?v=131";
 import {
   PitchDetector, midiToName, getVoiceVibratoCents, getVoiceOnsetFloor,
-} from "./pitchDetector.js?v=114";
-import { API } from "./api.js?v=114";
+} from "./pitchDetector.js?v=131";
+import { API } from "./api.js?v=131";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
-  vexKeyOf, shuffle, randInt,
-} from "./practiceData.js?v=114";
+  vexKeyOf, shuffle, randInt, tempoOf,
+} from "./practiceData.js?v=131";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=114";
-import { tuning } from "./difficulty.js?v=114";
+} from "./practiceScore.js?v=131";
+import { tuning } from "./difficulty.js?v=131";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 // Above this many rounds the per-round pips stop being readable (a 39-bar
@@ -244,6 +244,55 @@ export class PracticeController {
     return k === "guess_notes" || k === "guess_notes_t" ||
            k === "sing_notes" || k === "sing_notes_t" ||
            k === "guess_multi";
+  }
+
+  /** True for the chapters answered by clicking the score rather than singing.
+   *
+   *  These are the ones where the score doubles as the answer sheet, so they
+   *  share a visual contract the singing chapters don't have: nothing on the
+   *  stave moves or lights up while the question is being asked, and the
+   *  moment an answer is given the score shows what was picked and what was
+   *  right.  See `_markPick` / `_showAnswer`. */
+  _isGuessing() {
+    const k = this.mode && this.mode.key;
+    return k === "guess" || k === "guess_timed" || k === "guess_notes" ||
+           k === "guess_notes_t" || k === "guess_multi";
+  }
+
+  /** Mark the bar the student just clicked, before it has been judged.
+   *
+   *  A click on a stave has nothing of a button's press about it — without
+   *  this the only sign the answer landed is the card that appears a beat
+   *  later, and a student who is not sure they hit the bar clicks again. */
+  _markPick(barIndex) {
+    if (this.renderer && this.renderer.markBarResult) this.renderer.markBarResult(barIndex, "picked");
+  }
+
+  /**
+   * Show the outcome of a guess on the score itself.
+   *
+   * The picked bar turns green or red, and when the pick was wrong the bar
+   * that was actually played is framed as well, so the two are read together:
+   * "you chose this one, it was that one" is the whole lesson of a guessing
+   * round, and it is far easier to take from the notes than from a sentence
+   * naming two bar numbers.  Then the answer is scrolled into view — after
+   * the guess, never before it.
+   */
+  _showAnswer(pickedBar, answerBar, correct) {
+    const r = this.renderer;
+    if (!r || !r.markBarResult) return;
+    if (pickedBar != null) r.markBarResult(pickedBar, correct ? "correct" : "wrong");
+    if (answerBar != null && (!correct || pickedBar == null)) r.markBarResult(answerBar, "correct");
+    if (r.highlightBar) r.highlightBar(answerBar != null ? answerBar : pickedBar, { reveal: false });
+    if (r.revealBar) r.revealBar(answerBar != null ? answerBar : pickedBar);
+  }
+
+  /** Clear the previous round's answer marks and highlighting. */
+  _clearAnswerMarks() {
+    if (!this.renderer) return;
+    this.renderer.clearHighlight();
+    this.renderer.clearBarHighlight();
+    if (this.renderer.clearBarResults) this.renderer.clearBarResults();
   }
 
   /** The data source (key model for note modes, lesson otherwise). */
@@ -1137,7 +1186,7 @@ export class PracticeController {
     this.player.stop();
     const token = this._roundToken;
     const { steps } = barsToFlat(this.barSteps, [barIndex], this.renderer);
-    this.renderer.clearHighlight(); this.renderer.clearBarHighlight();
+    this._clearAnswerMarks();
     const ok = this.player.play(steps, {
       onStep: (i) => { if (i < 0 && token === this._roundToken) this._awaitGuess(barIndex, timed); },
     });
@@ -1152,9 +1201,11 @@ export class PracticeController {
       resolved = true;
       this._stopCountdown();
       this._showNotes();
+      this._markPick(idx);
       const score = scoreGuessBar(idx, answerBar, this.barSteps.length);
       this.scores.push(score);
       this._renderScore(); this._renderProgress();
+      this._showAnswer(idx, answerBar, idx === answerBar);
       this._feedback({
         score, verdict: scoreLabel(score),
         head: "You picked bar " + (idx + 1) + " · correct was bar " + (answerBar + 1),
@@ -1169,6 +1220,7 @@ export class PracticeController {
       this._showNotes();
       this.scores.push(0);
       this._renderScore(); this._renderProgress();
+      this._showAnswer(null, answerBar, false);
       this._feedback({ score: 0, verdict: "Miss", head: "Time up! Correct was bar " + (answerBar + 1), detail: "" });
       this._setLegend("Time up");
       this._advanceAfter(900);
@@ -1193,7 +1245,7 @@ export class PracticeController {
     const { steps } = barsToFlat(this.barSteps, [barIndex], this.renderer);
     const single = steps.filter((s) => !s.isRest).slice(noteIdx, noteIdx + 1).map((s) => ({ ...s, startMs: 0 }));
     const sched = single.length ? single : steps.filter((s) => !s.isRest).slice(0, 1).map((s) => ({ ...s, startMs: 0 }));
-    this.renderer.clearHighlight(); this.renderer.clearBarHighlight();
+    this._clearAnswerMarks();
     this._setLegend("Hear the note, click the bar of its scale degree." + (timed ? " (" + TIMED_DEFAULT + "s)" : ""));
     this._prompt("Hear the note, click the bar of its degree. <b>" + (this.round + 1) + "/" + this.order.length + "</b>" +
       (timed ? ' <span class="cd" id="d-countdown">' + TIMED_DEFAULT + "s</span>" : ""));
@@ -1210,12 +1262,17 @@ export class PracticeController {
       if (resolved || !this.running) return;
       resolved = true;
       this._stopCountdown();
+      this._markPick(idx);
       const guessedDegrees = barDegrees(this.barSteps[idx]);
       const guessedDegree = guessedDegrees.length ? guessedDegrees[0] : null;
       const hit = guessedDegrees.some((d) => String(d) === String(answerDegree));
       const score = hit ? 100 : 0;
       this.scores.push(score);
       this._renderScore(); this._renderProgress();
+      // A hit is a hit whichever bar carries the degree, so the bar clicked is
+      // the one marked correct — pointing at `answerBar` instead would tell a
+      // student who got it right that they got it wrong.
+      this._showAnswer(idx, hit ? idx : answerBar, hit);
       this._feedback({
         score, verdict: hit ? "Perfect" : "Miss",
         head: "Note was degree " + answerDegree + " (bar " + (answerBar + 1) + ")",
@@ -1229,6 +1286,7 @@ export class PracticeController {
       resolved = true;
       this.scores.push(0);
       this._renderScore(); this._renderProgress();
+      this._showAnswer(null, answerBar, false);
       this._feedback({ score: 0, verdict: "Miss", head: "Time up! Note was degree " + answerDegree + " (bar " + (answerBar + 1) + ")", detail: "" });
       this._setLegend("Time up");
       this._advanceAfter(900);
@@ -1295,12 +1353,15 @@ export class PracticeController {
     if (!question || !question.length) { this._advance(); return; }
     this._setLegend("Listen to the " + question.length + " notes, then click the bars in order.");
     this._prompt("Hear the sequence, click the matching bars in order. <b>" + (this.round + 1) + "/" + this.order.length + "</b>");
-    const tempo = (this._source().tempo && this._source().tempo > 10) ? this._source().tempo : 80;
+    // Generated sequences have no notated rhythm of their own, so their pace
+    // comes from the lesson's tempo — through `tempoOf`, so the singer's speed
+    // setting reaches them the same way it reaches every written bar.
+    const tempo = tempoOf(this._source());
     const wholeMs = (4 * 60000) / tempo;
     const noteMs = Math.max(200, Math.round(0.25 * wholeMs));
     const sched = question.map((qn, i) => ({ midi: qn.midi, isRest: false, startMs: i * noteMs, durationMs: noteMs, volume: 85, barIndex: -1, scoreGlobalIndex: -1 }));
     this.player.stop();
-    this.renderer.clearHighlight(); this.renderer.clearBarHighlight();
+    this._clearAnswerMarks();
     const token = this._roundToken;
     const ok = this.player.play(sched, {
       onStep: (i) => { if (i < 0 && token === this._roundToken) this._awaitMultiGuess(question); },
@@ -1324,15 +1385,22 @@ export class PracticeController {
       if (rep) rep.innerHTML = "Click bar for note <b>" + (guesses.length + 1) + "/" + answer.length + "</b><div class='mg-row'>" + cells + "</div>";
     };
     renderProgress();
+    const pickedBars = [];
     this._clickGuard = (idx) => {
       if (resolved || !this.running) return;
       const degrees = barDegrees(this.barSteps[idx]);
       guesses.push(degrees.length ? degrees[0] : null);
+      pickedBars.push(idx);
+      this._markPick(idx);
       if (guesses.length >= answer.length) {
         resolved = true;
         let correct = 0;
         for (let i = 0; i < answer.length; i++) if (String(guesses[i]) === String(answer[i])) correct++;
         const score = Math.round((correct / answer.length) * 100);
+        // Correct first, wrong second: one bar can be picked for more than one
+        // note of the sequence, and a bar that was right once and wrong once
+        // should end up reading as the mistake.
+        this._markMultiResults(pickedBars, guesses, answer);
         this.scores.push(score);
         this._renderScore(); this._renderProgress();
         const cells = answer.map((a, i) => {
@@ -1350,6 +1418,18 @@ export class PracticeController {
         renderProgress();
       }
     };
+  }
+
+  /** Colour every bar picked during a multi-note round by whether the note it
+   *  stood for was the one played. */
+  _markMultiResults(pickedBars, guesses, answer) {
+    const r = this.renderer;
+    if (!r || !r.markBarResult) return;
+    const ok = (i) => guesses[i] != null && String(guesses[i]) === String(answer[i]);
+    pickedBars.forEach((bar, i) => { if (ok(i)) r.markBarResult(bar, "correct"); });
+    pickedBars.forEach((bar, i) => { if (!ok(i)) r.markBarResult(bar, "wrong"); });
+    const firstWrong = pickedBars.find((bar, i) => !ok(i));
+    if (firstWrong != null && r.revealBar) r.revealBar(firstWrong);
   }
 
   // ---- recording / singing helpers -----------------------------------------

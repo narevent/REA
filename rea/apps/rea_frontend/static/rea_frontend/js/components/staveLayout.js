@@ -27,7 +27,7 @@
  * editor's inspector names the sounding pitch for the teacher.
  */
 
-import { noteNameToVexflow, parseNoteToken } from "../notation.js?v=114";
+import { noteNameToVexflow, parseNoteToken } from "../notation.js?v=131";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
 export const METRICS = {
@@ -42,6 +42,49 @@ export const METRICS = {
 };
 
 const MOD_TO_ACC = { "#": "#", b: "b", x: "##", r: "n" };
+
+/**
+ * Move one drawn notehead sideways: the note's *visual* offset.
+ *
+ * This is a different thing from `horizontal_offset_ms`, which moves when a
+ * note sounds and changes nothing on the page.  This moves the picture and
+ * changes nothing about the sound.  A teacher reaches for it when the
+ * automatic spacing puts a note somewhere that reads badly — two noteheads
+ * crowding each other, an accidental colliding with the note before it, a
+ * phrase wanting a little air in the middle — and it is stored per note on the
+ * exercise, so a student sees the picture the teacher approved.
+ *
+ * It is a transform on the drawn group rather than VexFlow's `setXShift`, and
+ * that is a deliberate choice between two things that sound alike:
+ *
+ *   - `setXShift` *before* formatting is an input to the formatter, which then
+ *     renegotiates the whole bar — the nudged note ends up somewhere else
+ *     entirely and its neighbours move too.  That is spacing advice, not an
+ *     offset.
+ *   - `setXShift` *after* formatting has no effect at all in the vendored
+ *     VexFlow 5 build: the drawn x is fixed by then.
+ *
+ * The transform moves that note and only that note, by exactly the number of
+ * pixels asked for, which is what a per-note offset has to mean.  It carries
+ * the notehead, its stem, its flag and its accidental — everything inside the
+ * group — and it moves the group's bounding box with them, which matters
+ * beyond looks: both views hit-test clicks against those rectangles, so a
+ * note drawn in one place and clickable in another would be worse than no
+ * feature at all.
+ *
+ * The one thing it does not carry is a beam, which VexFlow draws as its own
+ * group spanning several notes.  Beams are hidden on every REA stave (see the
+ * `svg.rea-score` rule in main.css) and are shown only by the editor's Rhythm
+ * toggle, so the cost is that a nudged note under that toggle has a beam that
+ * does not follow it.  That is the diagnostic view, not the exercise.
+ */
+function applyVisualOffset(el, px) {
+  const shift = Number(px) || 0;
+  if (!el || !shift) return;
+  const existing = el.getAttribute("transform");
+  const move = `translate(${shift},0)`;
+  el.setAttribute("transform", existing ? `${existing} ${move}` : move);
+}
 
 /**
  * VexFlow reserves four line-spaces above every stave for text and ornaments
@@ -219,6 +262,9 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
         }
       }
       note.globalIndex = globalIndex;
+      // Carried here, applied to the drawn group after the draw — see
+      // `applyVisualOffset` for why it cannot be done through VexFlow.
+      note.reaVisualOffset = Number(n.visual_offset_px) || 0;
       staveNotes.push(note);
       globalIndex += 1;
     });
@@ -252,6 +298,7 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
       - (stave.getNoteStartX() - stave.getX()) - METRICS.STAVE_PADDING;
     new VF.Formatter().joinVoices([voice]).format([voice], Math.max(40, noteAreaWidth));
   });
+
   formatted.forEach(({ voice, stave }) => voice && voice.draw(context, stave));
   allBeams.forEach((b) => b.setContext(context).draw());
 
@@ -268,8 +315,10 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
   let gi = 0;
   formatted.forEach(({ notes, barIndex }) => {
     notes.forEach((note, noteIndex) => {
+      const el = noteGroups[gi] || null;
+      applyVisualOffset(el, note.reaVisualOffset);
       noteEntries.push({
-        barIndex, noteIndex, globalIndex: note.globalIndex, note, el: noteGroups[gi] || null,
+        barIndex, noteIndex, globalIndex: note.globalIndex, note, el,
       });
       gi += 1;
     });

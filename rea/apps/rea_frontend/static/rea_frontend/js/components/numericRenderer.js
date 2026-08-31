@@ -17,6 +17,10 @@
 /** Accuracy bands, thresholds shared with the stave and the feedback chips. */
 const ACCURACY_CLASSES = ["acc-good", "acc-ok", "acc-weak", "acc-miss"];
 
+/** Answer marks for `markBarResult` — the guessing chapters' counterpart to
+ *  the accuracy colours, and the same three kinds the stave draws. */
+const RESULT_CLASSES = ["res-picked", "res-correct", "res-wrong"];
+
 function accuracyClass(score) {
   if (score == null) return "acc-miss";
   if (score >= 70) return "acc-good";
@@ -121,6 +125,14 @@ export class NumericRenderer {
         const dur = n.duration || 0.125;
         chip.style.setProperty("--num-w", Math.max(1, Math.min(3, dur / 0.125)));
 
+        // The note's visual offset — where the teacher wants it drawn, as
+        // against when it sounds.  The stave shifts the notehead itself; here
+        // the degree slides the same way and by the same amount, so the two
+        // views of one exercise agree about its shape.  A transform rather
+        // than a margin, so a nudged degree cannot reflow the row it is in.
+        const nudge = Number(n.visual_offset_px) || 0;
+        if (nudge) chip.style.transform = `translateX(${nudge}px)`;
+
         const deg = document.createElement("span");
         deg.className = "num-deg";
         deg.textContent = isRest ? "–" : (n.alias || "?");
@@ -128,7 +140,7 @@ export class NumericRenderer {
         row.appendChild(chip);
 
         const entry = {
-          globalIndex, barIndex, el: chip, isRest,
+          globalIndex, barIndex, el: chip, isRest, visualOffset: nudge,
           midi: isRest ? null : (n.midi != null ? n.midi : null),
           degree: n.alias || "",
         };
@@ -153,21 +165,65 @@ export class NumericRenderer {
 
   // ---- bar highlighting ----------------------------------------------------
 
-  /** Mark every note in a bar as the bar in play. */
-  highlightBar(barIndex) {
+  /** Mark every note in a bar as the bar in play.
+   *
+   *  `opts.reveal === false` leaves the scroll position alone: see
+   *  `_revealBar`, and the stave renderer's note on the same option. */
+  highlightBar(barIndex, opts = {}) {
     this.notes.forEach((n) => {
       if (!n.el) return;
       n.el.classList.toggle("is-bar-active", n.barIndex === barIndex);
     });
-    this.highlightBarBox(barIndex);
+    this.highlightBarBox(barIndex, opts);
   }
 
   /** Frame a bar (the one to sing, or the one just answered). */
-  highlightBarBox(barIndex) {
+  highlightBarBox(barIndex, opts = {}) {
+    const { reveal = true } = opts;
     this.bars.forEach((b) => {
       if (b.el) b.el.classList.toggle("is-sing", b.barIndex === barIndex);
     });
+    if (reveal) this._revealBar(barIndex);
+  }
+
+  /**
+   * Mark a bar with the outcome of a guess: "picked" the moment it is
+   * clicked, then "correct" / "wrong" once it has been judged.  Several bars
+   * can carry a mark at once (a wrong pick and the right answer), so these
+   * accumulate until `clearBarResults`.  The stave renderer's version of this
+   * carries the full explanation.
+   */
+  markBarResult(barIndex, kind) {
+    if (barIndex == null) return;
+    const b = this.bars.find((x) => x.barIndex === barIndex);
+    if (b && b.el) {
+      RESULT_CLASSES.forEach((c) => b.el.classList.remove(c));
+      b.el.classList.add("res-" + kind);
+    }
+    this.notes.forEach((n) => {
+      if (n.barIndex !== barIndex || !n.el) return;
+      RESULT_CLASSES.forEach((c) => n.el.classList.remove(c));
+      n.el.classList.add("res-" + kind);
+    });
+  }
+
+  /**
+   * Scroll a bar into view on purpose.
+   *
+   * `_revealBar` follows the bar that is *sounding*; this is the deliberate
+   * version, for the moment a guessing round gives its answer.  Following the
+   * bar during the question would hand the answer over before the student had
+   * guessed, so the guessing chapters keep the score still until here.
+   */
+  revealBar(barIndex) {
+    this._revealed = null;   // the same bar twice running should still scroll
     this._revealBar(barIndex);
+  }
+
+  /** Drop every answer mark — the next question starts from a clean score. */
+  clearBarResults() {
+    this.bars.forEach((b) => b.el && RESULT_CLASSES.forEach((c) => b.el.classList.remove(c)));
+    this.notes.forEach((n) => n.el && RESULT_CLASSES.forEach((c) => n.el.classList.remove(c)));
   }
 
   clearBarHighlight() {
@@ -219,7 +275,10 @@ export class NumericRenderer {
 
   // ---- note highlighting ---------------------------------------------------
 
-  highlightNote(globalIndex) {
+  highlightNote(globalIndex, opts = {}) {
+    // The numeric view never scrolls to a note (the bar it is in already did
+    // that), so `opts.reveal` is accepted for interface parity and unused.
+    void opts;
     this.notes.forEach((n) => {
       if (n.el) n.el.classList.toggle("is-playing", n.globalIndex === globalIndex);
     });

@@ -19,11 +19,18 @@
  * pixel-identical to the practice view.
  */
 
-import { METRICS, drawScore, resolveVexFlow } from "../components/staveLayout.js?v=114";
-import { LETTERS, buildToken, splitToken } from "./scoreDoc.js?v=114";
+import { METRICS, drawScore, resolveVexFlow } from "../components/staveLayout.js?v=131";
+import {
+  LETTERS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX, OFFSET_GAIN,
+  buildToken, offsetMs, splitToken,
+} from "./scoreDoc.js?v=131";
 
 /** Vertical room added to each row when annotation lanes are showing. */
 const LANE_SPACE = 58;
+/** Headroom for stems, flags and beams when the Rhythm view is on. */
+const STEM_SPACE = 26;
+/** Half a notehead, for measuring how far down a bar's notes actually reach. */
+const NOTEHEAD_HALF = 12;
 
 /** F5 — VexFlow's top stave line — in the document's own diatonic units. */
 const TOP_LINE_DIATONIC = 2 * 7 + LETTERS.indexOf("f");
@@ -47,7 +54,13 @@ export class ScoreCanvas {
     this.notes = [];   // [{barIndex, noteIndex, el, stave}]
     this.barBoxes = []; // [{barIndex, stave, x, y, width, staveEl}]
     this.doc = null;
-    this.view = { degrees: true, offsets: true, volumes: false };
+    // `rhythm` is off by default for the same reason the practice stave has no
+    // stems at all: these are intonation exercises and the notation is there
+    // to show where a note sits.  It exists because the *editor* is the one
+    // place the rhythm is being decided — a teacher setting durations has no
+    // other way to see whether the line they are writing reads as they intend,
+    // and a column of identical noteheads shows nothing about it.
+    this.view = { degrees: true, offsets: true, volumes: false, rhythm: false };
     this.selection = { notes: [], bars: [] };
     this.playing = null;
     this.rowExtra = 0;
@@ -59,10 +72,13 @@ export class ScoreCanvas {
     return resolveVexFlow();
   }
 
-  /** Extra row height for the annotation lanes — none when they are all off. */
+  /** Extra row height the view needs: the annotation lanes under each stave,
+   *  plus headroom for stems and beams when the rhythm is being shown (they
+   *  reach well above and below the staff, and would otherwise run into the
+   *  row above). */
   _rowExtra() {
-    const { degrees, offsets, volumes } = this.view;
-    return (degrees || offsets || volumes) ? LANE_SPACE : 0;
+    const { degrees, offsets, volumes, rhythm } = this.view;
+    return ((degrees || offsets || volumes) ? LANE_SPACE : 0) + (rhythm ? STEM_SPACE : 0);
   }
 
   setView(view) {
@@ -93,6 +109,7 @@ export class ScoreCanvas {
         name: event.note_name,
         duration: event.duration,
         is_rest: event.is_rest,
+        visual_offset_px: event.visual_offset_px,
       })),
     }));
 
@@ -102,6 +119,9 @@ export class ScoreCanvas {
 
     this.svg = drawn.svg;
     if (this.svg) this.svg.classList.add("ed-svg");
+    // Stems, flags and beams are hidden on every REA stave by a rule in
+    // main.css; this class is what lifts it, and only here.
+    this.container.classList.toggle("shows-rhythm", !!this.view.rhythm);
     this.notes = drawn.notes.map((entry) => ({
       barIndex: entry.barIndex, noteIndex: entry.noteIndex, el: entry.el,
     }));
@@ -204,8 +224,18 @@ export class ScoreCanvas {
       let bottom = span.line4;
       this.notes.forEach((entry) => {
         if (entry.barIndex !== box.barIndex || !entry.el) return;
-        const rect = entry.el.getBoundingClientRect();
-        bottom = Math.max(bottom, rect.bottom - svgRect.top);
+        // Measured from the noteheads' own baselines, not from the note
+        // group's bounding box.  A VexFlow notehead is a glyph in the music
+        // font, and the group's box is the font's em box — the same ~160
+        // units tall for every note on the stave.  Using it made this loop
+        // dead code: `bottom` always came out far below the row, the clamp
+        // always won, and the lanes always sat at the bottom of the row
+        // instead of under the notes they label, which on a low-lying phrase
+        // put a bar's degrees closer to the next stave than to its own.
+        entry.el.querySelectorAll(".vf-notehead text").forEach((t) => {
+          const y = parseFloat(t.getAttribute("y"));
+          if (isFinite(y)) bottom = Math.max(bottom, y + NOTEHEAD_HALF);
+        });
       });
       const floor = box.y + METRICS.ROW_HEIGHT + (this.rowExtra || 0) - 26;
       lanes.set(box.barIndex, Math.min(bottom + 14, floor));
@@ -229,20 +259,44 @@ export class ScoreCanvas {
         svg.appendChild(text);
       }
       if (this.view.offsets && event.horizontal_offset_ms) {
-        const value = event.horizontal_offset_ms;
+        // In milliseconds, and labelled as such.  The number under a notehead
+        // used to be the stored step count, which is a twelfth of what it
+        // does — it read as a nudge in the notation, which it is not: the note
+        // stays exactly where it is written and only sounds early or late.
+        const ms = offsetMs(event);
         const text = el("text", {
-          x: cx, y: baseY + 16, class: `ed-ann ed-ann-offset ${value < 0 ? "early" : "late"}`,
+          x: cx, y: baseY + 16, class: `ed-ann ed-ann-offset ${ms < 0 ? "early" : "late"}`,
           "text-anchor": "middle",
         });
-        text.textContent = `${value > 0 ? "+" : ""}${value}`;
+        text.textContent = `${ms > 0 ? "+" : ""}${ms} ms`;
         svg.appendChild(text);
-        // A tick showing which way the note is nudged, so a line of offsets
-        // reads as a shape rather than as a column of numbers.
+        // A tick showing which way the note is pushed in time, so a line of
+        // offsets reads as a shape rather than as a column of numbers.
+        const throw_ = Math.max(-14, Math.min(14, (ms / MAX_OFFSET_MS) * 14));
         svg.appendChild(el("line", {
-          x1: cx, y1: baseY + 21, x2: cx + Math.max(-14, Math.min(14, value * 1.6)), y2: baseY + 21,
-          class: `ed-ann-offset-tick ${value < 0 ? "early" : "late"}`,
+          x1: cx, y1: baseY + 21, x2: cx + throw_, y2: baseY + 21,
+          class: `ed-ann-offset-tick ${ms < 0 ? "early" : "late"}`,
         }));
       }
+      // A note that has been moved says where it would otherwise have sat: a
+      // tick at its home position, joined to it by a hairline.  Without this
+      // the teacher can see that the spacing looks right but not that they are
+      // the one holding it there — and a nudged note is indistinguishable from
+      // one the formatter happened to place that way, right up until somebody
+      // wonders why editing a neighbour moved it.  Editor-only chrome: the
+      // student sees the result, not the working.
+      const nudge = Number(event.visual_offset_px) || 0;
+      if (nudge) {
+        const home = cx - nudge;
+        const y = baseY - 30;
+        svg.appendChild(el("line", {
+          x1: home, y1: y, x2: cx, y2: y, class: "ed-ann-visual-link",
+        }));
+        svg.appendChild(el("line", {
+          x1: home, y1: y - 4, x2: home, y2: y + 4, class: "ed-ann-visual-home",
+        }));
+      }
+
       if (this.view.volumes) {
         const height = Math.round(((event.volume || 80) / 127) * 22);
         svg.appendChild(el("rect", {
@@ -439,12 +493,16 @@ export class ScoreCanvas {
     const bar = this.doc.bars[note.barIndex];
     const source = bar && bar.events[note.noteIndex];
     if (!source) return;
-    const offsetDrag = event.altKey;
+    // Alt drags the note along the *time* axis (when it sounds); Alt+Shift
+    // drags it along the page (where it is drawn).  Both are sideways
+    // gestures because both are sideways ideas, and the modifier picks which.
+    const offsetDrag = event.altKey && !event.shiftKey;
+    const visualDrag = event.altKey && event.shiftKey;
     const box = this.barBoxes.find((b) => b.barIndex === note.barIndex);
     const lineHeight = box && box.stave
       ? (box.stave.getYForLine(1) - box.stave.getYForLine(0)) : 10;
 
-    this._drag = { position, start, moved: false, offsetDrag, delta: 0 };
+    this._drag = { position, start, moved: false, offsetDrag, visualDrag, delta: 0 };
 
     const onMove = (e) => {
       const dx = e.clientX - start.x;
@@ -453,8 +511,17 @@ export class ScoreCanvas {
       this._drag.moved = true;
       if (offsetDrag) {
         this._drag.delta = Math.round(dx / 6);
-        this._showDragHint(`offset ${this._drag.delta >= 0 ? "+" : ""}${
-          Math.max(-60, Math.min(60, (source.horizontal_offset_ms || 0) + this._drag.delta))}`, e);
+        const next = Math.max(-60, Math.min(60, (source.horizontal_offset_ms || 0) + this._drag.delta));
+        const ms = next * OFFSET_GAIN;
+        this._showDragHint(`sounds ${ms >= 0 ? "+" : ""}${ms} ms`, e);
+      } else if (visualDrag) {
+        // One pixel of pointer travel is one pixel of stave, so the notehead
+        // ends up under the cursor rather than somewhere proportional to it.
+        this._drag.delta = Math.round(dx);
+        const next = Math.max(-MAX_VISUAL_OFFSET_PX, Math.min(
+          MAX_VISUAL_OFFSET_PX, (source.visual_offset_px || 0) + this._drag.delta
+        ));
+        this._showDragHint(`drawn ${next >= 0 ? "+" : ""}${next} px`, e);
       } else {
         this._drag.delta = -Math.round((dy / lineHeight) * 2);
         this._showDragGhost(note, this._drag.delta, e);
@@ -470,6 +537,8 @@ export class ScoreCanvas {
       if (!drag || !drag.moved || !drag.delta) return;
       if (drag.offsetDrag) {
         this.handlers.onOffsetDrag && this.handlers.onOffsetDrag(drag.position, drag.delta);
+      } else if (drag.visualDrag) {
+        this.handlers.onVisualOffsetDrag && this.handlers.onVisualOffsetDrag(drag.position, drag.delta);
       } else {
         this.handlers.onPitchDrag && this.handlers.onPitchDrag(drag.position, drag.delta);
       }

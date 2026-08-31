@@ -23,17 +23,17 @@
  *   sc.leave()  - release the microphone when navigating away.
  */
 
-import { NotationRenderer } from "../components/notationRenderer.js?v=114";
+import { NotationRenderer } from "../components/notationRenderer.js?v=131";
 import {
   PitchDetector, midiToName, hzToMidi, rmsToDb,
   getVoiceOctaveOffset, setVoiceOctaveOffset,
   getInputGain, setInputGain, setNoiseGate, getNoiseGate, hasCalibratedInput,
   setVoiceVibratoCents, setVoiceOnsetFloor,
   INPUT_GAIN_MIN, INPUT_GAIN_MAX,
-} from "../pitchDetector.js?v=114";
+} from "../pitchDetector.js?v=131";
 import {
   SOUND_PRESETS, getCurrentSoundPreset, setSoundPresetById, soundPresetGroups,
-} from "../soundPresets.js?v=114";
+} from "../soundPresets.js?v=131";
 
 // ---------------------------------------------------------------------------
 // The soundcheck run
@@ -312,6 +312,11 @@ export class SoundcheckView {
             '<button type="button" id="sc-mic-toggle" class="sc-btn">Enable microphone</button>' +
           "</div>" +
           '<div class="sc-result-slot" id="sc-run-result"></div>' +
+          // The "keep singing" meter.  See `_renderHold`.
+          '<div class="sc-hold" id="sc-hold" hidden>' +
+            '<div class="sc-hold-track"><div class="sc-hold-fill" id="sc-hold-fill"></div></div>' +
+            '<div class="sc-hold-cap" id="sc-hold-cap">keep singing…</div>' +
+          "</div>" +
         "</div>" +
         // ---- Compact setup card: input level + voice profile + playback sound ----
         '<div class="sc-panel sc-setup">' +
@@ -375,6 +380,9 @@ export class SoundcheckView {
       gainUp: this.container.querySelector("#sc-gain-up"),
       runBtn: this.container.querySelector("#sc-run"),
       runResult: this.container.querySelector("#sc-run-result"),
+      hold: this.container.querySelector("#sc-hold"),
+      holdFill: this.container.querySelector("#sc-hold-fill"),
+      holdCap: this.container.querySelector("#sc-hold-cap"),
       profileCur: this.container.querySelector("#sc-profile-cur"),
       octVal: this.container.querySelector("#sc-oct-val"),
       octDown: this.container.querySelector("#sc-oct-down"),
@@ -509,6 +517,8 @@ export class SoundcheckView {
         this._run.singStartT = performance.now();
         this._setResult(this.els.runResult, "busy", "Now sing it back…",
           "Hold a steady note at the volume you'd actually practise at — whatever octave is comfortable.");
+        this._showHold(true);
+        this._renderHold();
         this._runTimers.push(setTimeout(() => this._finishSoundcheck(), SC_SING_MAX_MS));
       }, SC_REF_MS));
     }, SC_ROOM_MS));
@@ -533,6 +543,7 @@ export class SoundcheckView {
     if (!run) return;
     this._clearRunTimers();
     this._run = null;
+    this._showHold(false);
     if (this.els.runBtn) {
       this.els.runBtn.disabled = false;
       this.els.runBtn.textContent = "Redo soundcheck";
@@ -626,6 +637,7 @@ export class SoundcheckView {
   }
 
   _cancelRun() {
+    this._showHold(false);
     if (this._run) {
       // Interrupted mid-measurement: restore the trim we were asked to replace.
       setInputGain(this._run.previousGain);
@@ -747,6 +759,7 @@ export class SoundcheckView {
     if (run.phase !== "sing") return;    // "listen": REA's own tone is playing
 
     run.voice.push(info.rms || 0);
+    this._renderHold();
     // Articulation-like activity while a note is merely being held.  Sampled
     // from the sustain only (the note's own attack is skipped below), because
     // the question is what this voice and room throw off when nothing is
@@ -758,6 +771,50 @@ export class SoundcheckView {
       if (dt > 0 && dt < 500) run.voicedMs += dt;
       // Steady enough to trust — finish now rather than running the clock out.
       if (this._singingIsSteady()) this._finishSoundcheck();
+    }
+  }
+
+  _showHold(on) {
+    if (this.els && this.els.hold) this.els.hold.hidden = !on;
+  }
+
+  /**
+   * The "keep singing" meter.
+   *
+   * The sing step used to be a sentence and a silence: the singer was told to
+   * hold a note, and then nothing on the screen moved until the card changed
+   * by itself.  There was no way to tell singing that was being counted from
+   * singing that wasn't, so people stopped early, sang too quietly to pass the
+   * gate, or held on well past the point where the run had already got what it
+   * needed — and the run ending felt arbitrary rather than earned.
+   *
+   * So show the thing the run is actually waiting for.  The bar fills with
+   * *voiced* time — the same `voicedMs` that decides when there is enough — so
+   * it advances only while the microphone is really hearing a pitch, and
+   * stalls the moment the voice drops out or falls under the noise gate.  It
+   * stalls rather than resets: the held note so far still counts, and a singer
+   * who takes a breath should see that they have not lost it.  Full means
+   * done, which is why the run can end early: the meter is the control, and
+   * the singer is working it.
+   */
+  _renderHold() {
+    const run = this._run;
+    if (!run || run.phase !== "sing" || !this.els.holdFill) return;
+    const progress = Math.max(0, Math.min(1, run.voicedMs / SC_STEADY_MS));
+    this.els.holdFill.style.width = (progress * 100).toFixed(1) + "%";
+
+    // Three states, in the order a singer meets them: nothing heard yet, a
+    // note being counted, and enough of one.  "Steady" is the same test that
+    // ends the run, so the caption never claims more than the run believes.
+    const heard = run.voicedMs > 0;
+    const steady = this._singingIsSteady();
+    const kind = steady ? "steady" : heard ? "counting" : "waiting";
+    this.els.holdFill.className = "sc-hold-fill " + kind;
+    if (this.els.holdCap) {
+      this.els.holdCap.textContent = steady ? "got it — that's a steady note"
+        : heard ? "keep singing…"
+        : "not hearing a note yet — sing a little louder";
+      this.els.holdCap.className = "sc-hold-cap " + kind;
     }
   }
 

@@ -38,6 +38,11 @@ class NoteBundle:
 @dataclass
 class RawEvent:
     horizontal_offset_ms: int = 0
+    # Where the notehead is drawn, as against when it sounds.  The source
+    # library predates the field and never carries it, so it reads as 0 and
+    # every imported lesson draws exactly as it always did; it is read here so
+    # that a score exported from REA's own editor round-trips.
+    visual_offset_px: int = 0
     duration: float = 0.125
     attack_decay_time: Optional[float] = None
     volume: int = 80
@@ -115,6 +120,7 @@ def parse_music_strain(data: dict) -> RawMusicStrain:
             raw_bar.events.append(
                 RawEvent(
                     horizontal_offset_ms=int(ev.get("horizontal_offset_ms", 0) or 0),
+                    visual_offset_px=int(ev.get("visual_offset_px", 0) or 0),
                     duration=float(ev.get("duration", 0.125) or 0.125),
                     attack_decay_time=(
                         float(ev["attack_decay_time"])

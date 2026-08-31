@@ -11,27 +11,30 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=114";
-import { renderLessonNotation } from "./views/lessonView.js?v=114";
-import { renderScaleNotation } from "./views/scaleView.js?v=114";
-import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=114";
-import { SoundcheckView } from "./views/soundcheckView.js?v=114";
-import { AudioPlayer } from "./audioPlayer.js?v=114";
-import { PracticeController } from "./practiceController.js?v=114";
-import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=114";
+import { API } from "./api.js?v=131";
+import { renderLessonNotation } from "./views/lessonView.js?v=131";
+import { renderScaleNotation } from "./views/scaleView.js?v=131";
+import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=131";
+import { SoundcheckView } from "./views/soundcheckView.js?v=131";
+import { AudioPlayer } from "./audioPlayer.js?v=131";
+import { PracticeController } from "./practiceController.js?v=131";
+import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=131";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=114";
+} from "./chapters.js?v=131";
 import {
   AREAS, AREA_BY_ID, contextFor, kindOf, isPractisable, defaultCategory,
   categoryByUid, firstCategory, pathOf, neighbourCategory,
-} from "./curriculum.js?v=114";
-import { createNav } from "./curriculumNav.js?v=114";
+} from "./curriculum.js?v=131";
+import { createNav } from "./curriculumNav.js?v=131";
 import {
   DIFFICULTIES, DIFFICULTY_LABELS, getDifficulty, setDifficulty,
   adoptAccountDifficulty,
-} from "./difficulty.js?v=114";
+} from "./difficulty.js?v=131";
+import {
+  TEMPO_SCALES, tempoLabel, getTempoScale, setTempoScale,
+} from "./tempo.js?v=131";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -70,10 +73,12 @@ const SYSTEMS = [
 
 // Absolute lesson families: category (Formula / FormulaInverse) x span.
 const ABS_FAMILIES = [
-  { label: "Formula · Quinta", category: "Formula", span: "Quinta" },
+  // "Quinta" is the stored span; "Dominant" is what it is called on the page.
+  // See curriculum.js — the two must agree.
+  { label: "Formula · Dominant", category: "Formula", span: "Quinta" },
   { label: "Formula · Octave", category: "Formula", span: "Octave" },
   { label: "Formula · Extended", category: "Formula", span: "Extended" },
-  { label: "Inverse · Quinta", category: "FormulaInverse", span: "Quinta" },
+  { label: "Inverse · Dominant", category: "FormulaInverse", span: "Quinta" },
   { label: "Inverse · Octave", category: "FormulaInverse", span: "Octave" },
   { label: "Inverse · Extended", category: "FormulaInverse", span: "Extended" },
 ];
@@ -548,7 +553,12 @@ function absPartKey(l) { return l.part || l.grades || ""; }
 
 function absPartLabel(key) {
   if (key === "") return "All";
-  if (/^\dGrades$/.test(key)) return key.replace("Grades", " grades");
+  // "2Grades" / "3Grades" is the stored key, and it says nothing to a singer:
+  // these are the Extended span's two ranges, and what varies between them is
+  // how many octaves the exercise covers — the lesson files themselves are
+  // named `..._2_oct` and `..._3_oct`.  Read them as what they are.
+  const oct = /^(\d)Grades$/.exec(key);
+  if (oct) return oct[1] + " octaves";
   return "Part " + key;
 }
 
@@ -1527,6 +1537,8 @@ const nav = createNav({
   keyValue,
   difficultyOptions: () => DIFFICULTIES.map((d) => ({ value: d, label: DIFFICULTY_LABELS[d] })),
   difficultyValue: () => getDifficulty(),
+  tempoOptions: () => TEMPO_SCALES.map((s) => ({ value: s, label: tempoLabel(s) })),
+  tempoValue: () => getTempoScale(),
   goCategory: (node, part, exercise) => applyCategory(node, part, exercise),
   goPart: (value, exercise) => applyCategory(state.category, value, exercise),
   goExercise: async (i) => {
@@ -1546,6 +1558,19 @@ const nav = createNav({
     setDifficulty(value);
     renderTopbar();
     setStatus("Difficulty: " + DIFFICULTY_LABELS[getDifficulty()]);
+  },
+  // Speed, unlike difficulty, is baked into the playback steps when a chapter
+  // opens — so the chapter has to be reopened for a new one to take.  That
+  // needs no fetch (the lesson is already in hand) and it stops whatever was
+  // running, which is right: a run half at one tempo and half at another is
+  // not a run of anything.
+  goTempo: (value) => {
+    setTempoScale(value);
+    renderTopbar();
+    if (state.activeChapter && state.contextLesson) {
+      practice.openChapter(state.activeChapter, state.contextLesson);
+    }
+    setStatus(tempoLabel(getTempoScale()));
   },
 });
 /** Build one multi-select dropdown control: a compact pill trigger (label +
@@ -1825,6 +1850,7 @@ function renderTopbar() {
   sessionTopbar.innerHTML =
     '<nav class="path" id="path-bar" aria-label="Curriculum path"></nav>' +
     '<div class="path-key" id="path-key"></div>' +
+    '<div class="path-key path-tempo" id="path-tempo"></div>' +
     '<div class="path-key path-difficulty" id="path-difficulty"></div>' +
     // Combination categories keep their multi-select panel: they merge many
     // leaves into one lesson, so they are a selection, not a single path.
