@@ -16,9 +16,18 @@
  * actually edits.
  */
 
-import { DURATIONS, MODIFIERS, MODIFIER_LABELS, describeNote, splitToken, buildToken } from "./scoreDoc.js?v=114";
+import {
+  DURATIONS, MODIFIERS, MODIFIER_LABELS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX,
+  OFFSET_GAIN, describeNote, splitToken, buildToken,
+} from "./scoreDoc.js?v=131";
 
 const MIXED = "—"; // em dash: several selected items, several values
+
+/** Source octave index 0 is the octave a musician calls 3 (see
+ *  `noteTokenToMidi` in notation.js, where index 1 is middle C's octave).
+ *  Everything the teacher sees is in written octaves; the index stays in the
+ *  document. */
+const OCTAVE_BASE = 3;
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -172,8 +181,16 @@ function renderGroup(parent, title, specs, items, onChange) {
   const group = element("div", "ed-group");
   if (title) group.appendChild(element("h3", "ed-group-title", title));
   specs.forEach((spec) => {
-    const value = spec.get ? spec.get(items) : sharedValue(items, spec.key);
-    const { row } = buildControl(spec, value, (next) => onChange(spec.key, next, spec));
+    let value = spec.get ? spec.get(items) : sharedValue(items, spec.key);
+    // `scale` lets a field be *shown* in the unit it means while being stored
+    // in the unit the source library uses.  The playback offset is the case
+    // this exists for: stored in the library's own steps, edited and read in
+    // milliseconds, because milliseconds are what it does.
+    const scale = spec.scale || 1;
+    if (scale !== 1 && value !== MIXED && value != null) value *= scale;
+    const { row } = buildControl(spec, value, (next) => {
+      onChange(spec.key, scale !== 1 ? Math.round(next / scale) : next, spec);
+    });
     group.appendChild(row);
   });
   parent.appendChild(group);
@@ -266,9 +283,17 @@ export class Inspector {
         get: () => (token ? token.letter : MIXED),
       },
       {
-        key: "__octave", label: "Octave", type: "number", min: 0, max: 9,
-        hint: "Source octave index: 0 is the low register, 1 is the middle-C octave.",
-        get: () => (token ? token.octave : MIXED),
+        // Shown as the octave a musician would name — C4 is middle C — rather
+        // than as the source library's index, where middle C lives in octave
+        // 1.  The index is a storage detail: nobody reading a stave thinks
+        // "octave 1", the panel's own summary line above already says "F♯5",
+        // and a control that disagreed with the summary sitting two rows above
+        // it was the surest way to make a teacher mistrust both.  Stored
+        // unchanged; only the number on screen moves.
+        key: "__octave", label: "Octave", type: "number",
+        min: OCTAVE_BASE, max: OCTAVE_BASE + 9,
+        hint: "The octave as it is written: 4 is the middle-C octave.",
+        get: () => (token ? token.octave + OCTAVE_BASE : MIXED),
       },
       {
         key: "__modifier", label: "Accidental", type: "select",
@@ -284,7 +309,7 @@ export class Inspector {
       return this.hooks.onNote(positions, (event) => {
         const parts = splitToken(event.note_name);
         if (key === "__letter") parts.letter = value;
-        if (key === "__octave") parts.octave = Number(value);
+        if (key === "__octave") parts.octave = Number(value) - OCTAVE_BASE;
         if (key === "__modifier") parts.modifier = value || null;
         return { note_name: buildToken(parts) };
       });
@@ -295,10 +320,31 @@ export class Inspector {
         key: "duration", label: "Duration", type: "select",
         options: DURATIONS.map((d) => ({ value: d.value, label: `${d.label} (${d.short})` })),
       },
+    ], events, commit);
+
+    // Not part of Rhythm: an offset is not a note value and does not change
+    // one.  Where the note is written stays exactly where it is written — this
+    // moves only the moment it sounds, which is the thing these exercises use
+    // it for and the thing the field's old name and its nudge-shaped mark on
+    // the stave both managed to hide.
+    renderGroup(body, "Playback timing", [
       {
-        key: "horizontal_offset_ms", label: "Timing offset", type: "range",
-        min: -60, max: 60, step: 1,
-        hint: "Nudges the note earlier (−) or later (+). Playback multiplies it by 12 ms.",
+        key: "horizontal_offset_ms", label: "Playback offset", type: "range",
+        min: -MAX_OFFSET_MS, max: MAX_OFFSET_MS, step: OFFSET_GAIN, scale: OFFSET_GAIN,
+        hint: "Milliseconds. The note sounds earlier (−) or later (+) than it is written; " +
+          "the notation itself does not move.",
+      },
+    ], events, commit);
+
+    // Its counterpart, and deliberately in a group of its own so the two are
+    // never read as one control with two spellings: this one moves the
+    // notehead and leaves the sound alone.
+    renderGroup(body, "Notation", [
+      {
+        key: "visual_offset_px", label: "Visual offset", type: "range",
+        min: -MAX_VISUAL_OFFSET_PX, max: MAX_VISUAL_OFFSET_PX, step: 1,
+        hint: "Pixels. Moves the notehead left (−) or right (+) on the stave — " +
+          "for spacing that reads badly. When it sounds does not change.",
       },
     ], events, commit);
 
@@ -449,7 +495,13 @@ export class Inspector {
         { key: "texture", label: "Texture", type: "select", options: asOptions(absolute.textures) },
         { key: "category", label: "Category", type: "select", options: asOptions(absolute.categories) },
         { key: "span", label: "Span", type: "select", options: [{ value: "", label: "— (harmonic)" }].concat(asOptions(absolute.spans)) },
-        { key: "grades", label: "Grades", type: "text", suggestions: absolute.grades },
+        {
+          key: "grades", label: "Octave range", type: "text", suggestions: absolute.grades,
+          // Stored as "2Grades" / "3Grades", read by everyone as the number of
+          // octaves the Extended span covers.  The field keeps its name (it is
+          // in the data and the API); the label says what it means.
+          hint: "Extended span only: 2Grades / 3Grades — how many octaves the exercise covers.",
+        },
         { key: "quality", label: "Quality", type: "text", suggestions: absolute.qualities },
         { key: "interval_size", label: "Interval size", type: "text", suggestions: absolute.interval_sizes },
         { key: "inversion", label: "Inversion", type: "text", suggestions: absolute.inversions },

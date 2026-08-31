@@ -18,7 +18,8 @@
  *     id, label, group,                 stable id + human name + UI grouping
  *     detune: cents (optional),          global fine detune for richness
  *     voices: [                          one entry per oscillator
- *       { type, ratio, gain, detune }    ratio: multiple of the fundamental
+ *       { type, ratio, gain, detune,     ratio: multiple of the fundamental
+ *         decay, sustain }               optional per-voice decay (see below)
  *     ],
  *     filter: { type, freq, q } (optional), shared biquad filter
  *     tremolo: { rate, depth } (optional), AM LFO (rate Hz, depth 0..1)
@@ -32,6 +33,15 @@
  * their character).  `gain` is per-voice peak gain *before* the master
  * `level`, so presets stay at a comparable loudness.
  *
+ * `decay` / `sustain` on a *voice* give that partial an envelope of its own,
+ * decaying to `sustain` x its peak over `decay` seconds.  Without it every
+ * partial holds its level for as long as the note does, which is what an
+ * organ pipe does and what a struck string emphatically does not: on a real
+ * piano the bright upper partials are gone within a fraction of a second and
+ * the fundamental rings on underneath.  A single shared envelope cannot do
+ * that, and it is the whole difference between a tone that sounds like an
+ * instrument and one that sounds like a test signal.
+ *
  * buildVoice() wires the voices through the (optional) filter + tremolo into
  * the returned input gain, and returns the { input, nodes, stop } the player
  * needs to start/release everything.
@@ -42,6 +52,58 @@
  *  envelope, and a timbre that reads well at the short-to-medium note lengths
  *  the exercises use. */
 export const SOUND_PRESETS = [
+  // ---- Acoustic ------------------------------------------------------------
+  // The plain instruments, first and default.  Everything below them is a
+  // characterful synth voice, which is fine to practise against and wrong to
+  // meet first: an ear-training exercise should sound like music being played,
+  // not like a machine being tested.  These two carry that between them — one
+  // struck and decaying, one sustained and steady — and both put a strong,
+  // unambiguous fundamental in front of the singer, which is the thing they
+  // are actually being asked to match.
+  {
+    id: "grand_piano",
+    label: "Grand Piano",
+    group: "Acoustic",
+    // A struck string: a stack of partials, each quieter and shorter-lived
+    // than the last, over a fundamental that rings on.  The ratios are
+    // stretched very slightly sharp the way real string inharmonicity
+    // stretches them, which is what stops the stack from fusing into an
+    // organ-like buzz.
+    voices: [
+      { type: "sine", ratio: 1, gain: 0.55, decay: 1.8, sustain: 0.3 },
+      { type: "sine", ratio: 2.002, gain: 0.24, decay: 1.1, sustain: 0.16 },
+      { type: "sine", ratio: 3.008, gain: 0.12, decay: 0.7, sustain: 0.08 },
+      { type: "sine", ratio: 4.02, gain: 0.065, decay: 0.45, sustain: 0.05 },
+      { type: "sine", ratio: 5.04, gain: 0.04, decay: 0.3, sustain: 0.03 },
+      { type: "sine", ratio: 6.07, gain: 0.022, decay: 0.22, sustain: 0.02 },
+      { type: "triangle", ratio: 8.13, gain: 0.013, decay: 0.14, sustain: 0.01 },
+    ],
+    // Takes the top off the hammer strike so the attack reads as felt on wire
+    // rather than as a click.
+    filter: { type: "lowpass", freq: 4200, q: 0.7 },
+    attack: 0.004, decay: 1.0, sustain: 0.34, release: 0.28, releasePct: 0.35,
+    level: 0.9,
+  },
+  {
+    id: "chamber_organ",
+    label: "Chamber Organ",
+    group: "Acoustic",
+    // Principal stops: octaves and fifths, no decay, no wobble.  A tone that
+    // holds absolutely still is the easiest thing there is to tune a voice
+    // against, which is exactly what the singing chapters want.
+    voices: [
+      { type: "sine", ratio: 1, gain: 0.5 },
+      { type: "sine", ratio: 2, gain: 0.22 },
+      { type: "sine", ratio: 3, gain: 0.1, detune: 2 },
+      { type: "sine", ratio: 4, gain: 0.07 },
+      { type: "triangle", ratio: 6, gain: 0.025 },
+      { type: "triangle", ratio: 8, gain: 0.018 },
+    ],
+    filter: { type: "lowpass", freq: 5200, q: 0.6 },
+    attack: 0.03, decay: 0.06, sustain: 0.94, release: 0.12, releasePct: 0.3,
+    level: 0.74,
+  },
+
   // ---- Keys / mallets ------------------------------------------------------
   {
     id: "soft_triangle",
@@ -349,10 +411,16 @@ export const SOUND_PRESETS = [
   },
 ];
 
-const DEFAULT_PRESET_ID = "soft_triangle";
+const DEFAULT_PRESET_ID = "grand_piano";
 const STORAGE_KEY = "rea.soundPreset";
 
-let _current = SOUND_PRESETS[0];
+/** The default preset, by id — not by position, so reordering the list above
+ *  can never silently change what a new student hears. */
+function defaultPreset() {
+  return SOUND_PRESETS.find((p) => p.id === DEFAULT_PRESET_ID) || SOUND_PRESETS[0];
+}
+
+let _current = defaultPreset();
 try {
   const saved = localStorage.getItem(STORAGE_KEY);
   if (saved) {
@@ -366,7 +434,7 @@ export function getCurrentSoundPreset() { return _current; }
 
 /** Select a preset by id (persists).  Falls back to the default. */
 export function setSoundPresetById(id) {
-  const p = SOUND_PRESETS.find((x) => x.id === id) || SOUND_PRESETS[0];
+  const p = SOUND_PRESETS.find((x) => x.id === id) || defaultPreset();
   _current = p;
   try { localStorage.setItem(STORAGE_KEY, p.id); } catch (e) {}
   return p;
@@ -451,11 +519,19 @@ export function buildVoice(ctx, freq, t, durSec, vol, preset) {
     const detune = (v.detune || 0) + (p.detune || 0);
     if (detune) osc.detune.setValueAtTime(detune, t);
 
-    // Per-voice gain shapes that voice's contribution.
+    // Per-voice gain shapes that voice's contribution, and — where the preset
+    // asks for one — that voice's own decay on top of the shared envelope.
+    // Clamped inside the note the same way the master ADSR is, so a short note
+    // can never schedule a partial's decay past its own end.
     const vg = ctx.createGain();
     const vPeak = Math.max(0.0001, peak * (v.gain != null ? v.gain : 1));
     vg.gain.setValueAtTime(0.0001, t);
     vg.gain.exponentialRampToValueAtTime(vPeak, t + attackClamp);
+    if (v.decay > 0) {
+      const vSus = Math.max(0.0001, vPeak * (v.sustain != null ? v.sustain : 0));
+      const vEnd = Math.min(t + attackClamp + v.decay, t + durSec);
+      if (vEnd > t + attackClamp + 0.001) vg.gain.exponentialRampToValueAtTime(vSus, vEnd);
+    }
 
     osc.connect(vg).connect(finalVoiceDest);
     osc.start(t);

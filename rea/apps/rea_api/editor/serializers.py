@@ -39,6 +39,14 @@ DURATIONS = (1.0, 0.5, 0.25, 0.125, 0.0625, 0.03125)
 # past anything in the imported library (which spans -13..+7).
 MAX_OFFSET_MS = 60
 
+# The *visual* offset is in stave pixels, and is bounded by what the drawing
+# can absorb.  A notehead's own slot is 26px (`METRICS.NOTE_SLOT`), so ±24 is
+# just under one slot either way: enough to pull a note clear of a neighbour
+# or to give a cramped bar some air, and little enough that a nudged note
+# stays inside its own bar — which the practice view's answer frames, drawn
+# from the bar's geometry rather than its contents, quietly depend on.
+MAX_VISUAL_OFFSET_PX = 24
+
 
 def validate_note_token(value):
     """A note name the parser and the renderer will both accept."""
@@ -63,6 +71,11 @@ class EventSerializer(serializers.Serializer):
     duration = serializers.FloatField(default=0.125)
     horizontal_offset_ms = serializers.IntegerField(
         default=0, min_value=-MAX_OFFSET_MS, max_value=MAX_OFFSET_MS
+    )
+    # Where the note is drawn, which is a different question from when it
+    # sounds — see `MusicEvent.visual_offset_px`.
+    visual_offset_px = serializers.IntegerField(
+        default=0, min_value=-MAX_VISUAL_OFFSET_PX, max_value=MAX_VISUAL_OFFSET_PX
     )
     attack_decay_time = serializers.FloatField(
         required=False, allow_null=True, default=None, min_value=0, max_value=5

@@ -242,6 +242,18 @@ Covers the German note parser, the relative import services, the frontend
 index view, accounts (roles, auth pages, progress) and the editor API — who
 may write, what a saved score keeps, and what an invalid one is refused for.
 
+Two suites are browser JavaScript and run under Node instead:
+
+```bash
+node rea/tests/audio/run.mjs
+node rea/tests/editor/midi.mjs
+```
+
+The first covers the singing exercises' audio path (pitch tracking and note
+segmentation, sung by a synthesiser); the second covers the score editor's
+MIDI import — the pitch spellings it chooses, and what it does with chords,
+gaps, performed note lengths and barlines.
+
 ## Frontend
 
 Vanilla JS (ES modules) + [VexFlow](https://github.com/0xfe/vexflow) for staff
@@ -270,12 +282,26 @@ Two pages share that stack:
 - **`/editor/`** — the **score editor**, for teachers only. Library on the
   left, an editable stave in the middle, property panels on the right. Notes
   are written by clicking empty staff at the pitch you want, dragged
-  vertically to re-pitch and `Alt`-dragged sideways to change their timing
-  offset; the keyboard can do all of it (press `?` or *Shortcuts* for the
-  sheet). Every property the data model carries is editable — degree alias,
-  offset, attack/decay, volume, rests, key-signature notes, pickup bars, bar
-  labels and the exercise's own identity — and the transport previews the
-  result with the same synth and timing rules the students hear.
+  vertically to re-pitch, `Alt`-dragged sideways to change **when they sound**
+  and `Alt`+`Shift`-dragged sideways to change **where they are drawn**; the
+  keyboard can do all of it (press `?` or *Shortcuts* for the sheet). Notes can
+  also arrive wholesale from a MIDI file (*Import MIDI…*), which replaces the
+  bars and leaves the exercise's identity alone. Every property the data model
+  carries is editable — degree alias, both offsets, attack/decay, volume,
+  rests, key-signature notes, pickup bars, bar labels and the exercise's own
+  identity — and the transport previews the result with the same synth and
+  timing rules the students hear.
+
+  The two offsets are separate fields and answer separate questions.
+  `horizontal_offset_ms` moves the moment a note *sounds* and changes nothing
+  on the page — it is how an anticipated or delayed note is written. Stored in
+  the source library's own units, one of which is 12 ms of playback; the editor
+  shows and edits it in milliseconds. `visual_offset_px` moves where the
+  notehead is *drawn* and changes nothing about the sound — it is for spacing
+  that reads badly. It is capped at just under one notehead's width, applies in
+  the practice view as well as the editor (so a student sees the picture the
+  teacher approved), and the editor marks a nudged note with a tick at the
+  position it would otherwise have had.
 
 ## Deployment
 

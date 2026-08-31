@@ -349,6 +349,17 @@ svg.rea-score .vf-stavenote .vf-stem,
 svg.rea-score .vf-stavenote .vf-flag,
 svg.rea-score .vf-beam { display: none !important; }
 
+/* ...with one exception, and only in the editor.  The rule above is right for
+   a student, who is reading for pitch, and wrong for the teacher writing the
+   thing: durations are a real property of these exercises (they are what the
+   playback schedules, and the whole reason the inspector has a Duration
+   field), and with every note drawn as a bare notehead there is no way to see
+   whether a line reads the way it was meant to.  The editor's Rhythm toggle
+   puts the stems back on its own stave — see `ScoreCanvas.view.rhythm`. */
+.shows-rhythm svg.rea-score .vf-stavenote .vf-stem,
+.shows-rhythm svg.rea-score .vf-stavenote .vf-flag,
+.shows-rhythm svg.rea-score .vf-beam { display: inline !important; }
+
 /* Live sung-pitch preview marker (singing exercises). */
 /* Per-note accuracy, left on the stave after singing so a finished run can be
    read back at a glance: which notes landed and which were off.  These use the
@@ -370,6 +381,30 @@ svg.rea-score .vf-beam { display: none !important; }
    below the accuracy rules: same specificity, so source order decides. */
 .notation .vf-stavenote.vf-note-active .vf-notehead text,
 .notation .vf-stavenote.vf-note-active .vf-notehead path { fill: #a76a17 !important; stroke: none !important; }
+
+/* --- Answer marks: the guessing chapters' result, drawn on the score -------
+   A guessing round asks its question on the stave, so it answers there too:
+   the bar you picked and, when that was not it, the bar that was.  Solid
+   frames, where the "sing this" outline is dashed — one is an instruction,
+   these are a verdict.
+
+   `picked` is the receipt for the click and lasts only until the round is
+   judged (a beat later), so it stays neutral: it says "got it", not
+   "right" or "wrong". */
+.notation .vf-bar-result { fill: none; stroke-width: 2.5; }
+.notation .vf-bar-result-picked { stroke: #3d4edb; fill: rgba(61,78,219,0.05); }
+.notation .vf-bar-result-correct { stroke: #17754e; fill: rgba(23,117,78,0.07); }
+.notation .vf-bar-result-wrong { stroke: #b23a2f; fill: rgba(178,58,47,0.07); }
+
+/* ...and the noteheads inside them, so the answer reads at note level too and
+   not only as a box.  Below the accuracy rules, above the playback cursor
+   rules — a guessing chapter never runs both. */
+.notation .vf-stavenote.vf-res-picked .vf-notehead text,
+.notation .vf-stavenote.vf-res-picked .vf-notehead path { fill: #3d4edb !important; stroke: #3d4edb !important; }
+.notation .vf-stavenote.vf-res-correct .vf-notehead text,
+.notation .vf-stavenote.vf-res-correct .vf-notehead path { fill: #17754e !important; stroke: #17754e !important; }
+.notation .vf-stavenote.vf-res-wrong .vf-notehead text,
+.notation .vf-stavenote.vf-res-wrong .vf-notehead path { fill: #b23a2f !important; stroke: #b23a2f !important; }
 
 /* Live sung-pitch preview marker (singing exercises) — floats over the paper
    rather than sitting on it, so it keeps its own outline. */
@@ -458,6 +493,14 @@ svg.rea-score .vf-beam { display: none !important; }
    same specificity, source order decides. */
 .num-note.is-playing { background: #fbf1e2; }
 .num-note.is-playing .num-deg { color: #a76a17 !important; }
+
+/* Answer marks — the numeric twins of the stave's result frames. */
+.num-bar.res-picked { background: #eef0fd; box-shadow: inset 0 0 0 2px #3d4edb; }
+.num-bar.res-correct { background: #eaf5f0; box-shadow: inset 0 0 0 2px #17754e; }
+.num-bar.res-wrong { background: #fbeeec; box-shadow: inset 0 0 0 2px #b23a2f; }
+.num-note.res-picked .num-deg { color: #3d4edb; }
+.num-note.res-correct .num-deg { color: #17754e; }
+.num-note.res-wrong .num-deg { color: #b23a2f; }
 
 /* The live sung-pitch reading.  The stave floats a notehead at the height it
    hears; there is no height here, so the same fact is given as a needle over
@@ -781,6 +824,26 @@ svg.rea-score .vf-beam { display: none !important; }
 .sc-input-fill.good { background: var(--good); }
 .sc-input-fill.hot { background: var(--bad); }
 .sc-input-scale { display: flex; justify-content: space-between; margin-top: 8px; }
+
+/* The "keep singing" meter, shown only while the soundcheck is listening to a
+   held note.  Taller and slower than the input meter above it on purpose: that
+   one is a level, jumping about with every syllable, and this one is a task
+   with an end — it should read as filling up, not as bouncing. */
+.sc-hold { margin-top: 12px; }
+.sc-hold-track {
+  position: relative; height: 10px; border-radius: 999px; overflow: hidden;
+  background: var(--surface-3);
+}
+.sc-hold-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+  border-radius: 999px; background: var(--muted-2);
+  transition: width .12s linear, background .2s;
+}
+.sc-hold-fill.counting { background: var(--accent); }
+.sc-hold-fill.steady { background: var(--good); }
+.sc-hold-cap { margin-top: 7px; font-size: 12.5px; color: var(--muted); }
+.sc-hold-cap.counting { color: var(--ink-2); }
+.sc-hold-cap.steady { color: var(--good); }
 
 /* Calibration outcome card — the "it matched, here's what we measured, you're
    done" signal for Auto gain and Auto-detect.  Sits on its own line under the
@@ -1158,8 +1221,10 @@ svg.rea-score .vf-beam { display: none !important; }
    because it is the same kind of thing — a setting that applies across
    everything rather than to the node you happen to be on — but quieter: the
    key is part of the exercise, and this is a preference about it. */
-.path-difficulty .seg-btn { color: var(--muted); font-weight: 500; }
-.path-difficulty .seg-btn:hover { color: var(--ink); }
+/* Tempo and difficulty are the singer's own two settings, so they read alike
+   and both sit quieter than the tonality chip, which names the material. */
+.path-difficulty .seg-btn, .path-tempo .seg-btn { color: var(--muted); font-weight: 500; }
+.path-difficulty .seg-btn:hover, .path-tempo .seg-btn:hover { color: var(--ink); }
 
 /* --- Previous / Next ------------------------------------------------------ */
 

@@ -11,11 +11,14 @@
  * in `staveLayout.js`, which the score editor draws with too.
  */
 
-import { drawScore, durationToType, resolveVexFlow } from "./staveLayout.js?v=114";
+import { drawScore, durationToType, resolveVexFlow } from "./staveLayout.js?v=131";
 
 /** Accuracy bands for `setNoteAccuracy`.  The thresholds match the per-note
  *  chips in the feedback row, so the stave and the report agree. */
 const ACCURACY_CLASSES = ["vf-acc-good", "vf-acc-ok", "vf-acc-weak", "vf-acc-miss"];
+
+/** Answer marks for `markBarResult`, the guessing chapters' counterpart. */
+const RESULT_CLASSES = ["vf-res-picked", "vf-res-correct", "vf-res-wrong"];
 
 /** The nearest ancestor that actually scrolls — the score panel on a wide
  *  screen, the page on a phone.  Falls back to the document scroller. */
@@ -78,7 +81,12 @@ export class NotationRenderer {
       if (!this._lastDraw) return;
       this._relayouts += 1;
       const { bars, opts } = this._lastDraw;
+      const results = this._barResults;
       this.render(bars, opts, true);
+      // The redraw threw the SVG away, and with it the answer marks — put
+      // them back before the owner re-applies its own highlighting, so a
+      // rotation mid-round doesn't wipe the result the student is reading.
+      if (results) results.forEach((kind, barIndex) => this.markBarResult(barIndex, kind));
       if (this.onRelayout) this.onRelayout();
     });
   }
@@ -100,6 +108,7 @@ export class NotationRenderer {
     this.bars = [];
     this._revealed = null;
     this._outlineEl = null;
+    this._resultEls = [];
     this._sungEl = null;
     this._sungGlobal = null;
     this._currentTargetMidi = null;
@@ -217,14 +226,17 @@ export class NotationRenderer {
     return this.notes;
   }
 
-  /** Highlight all notes in a bar (e.g. when it's the active bar). */
-  highlightBar(barIndex) {
+  /** Highlight all notes in a bar (e.g. when it's the active bar).
+   *
+   *  `opts.reveal === false` leaves the scroll position alone — see
+   *  `_revealBar` for why a guessing chapter wants that. */
+  highlightBar(barIndex, opts = {}) {
     this.notes.forEach((entry) => {
       if (!entry.el) return;
       if (entry.barIndex === barIndex) entry.el.classList.add("vf-bar-active");
       else entry.el.classList.remove("vf-bar-active");
     });
-    this.highlightBarBox(barIndex);
+    this.highlightBarBox(barIndex, opts);
   }
 
   /**
@@ -236,6 +248,11 @@ export class NotationRenderer {
    * `block: "nearest"` scrolls only when the bar is actually out of view, so
    * a score that already fits never twitches, and it walks whichever ancestor
    * is the scroller: the score panel on a wide screen, the page on a phone.
+   *
+   * The guessing chapters switch this off (`highlightBar(i, { reveal: false })`).
+   * There, the bar being marked is the answer, and a score that scrolls itself
+   * to the right place is telling the student where to look before they have
+   * guessed — and it moves the very bars they are trying to click.
    */
   _revealBar(barIndex) {
     if (barIndex == null || barIndex === this._revealed) return;
@@ -280,63 +297,106 @@ export class NotationRenderer {
   }
 
   /** Visually frame a bar's stave box (e.g. the bar to sing). */
-  highlightBarBox(barIndex) {
+  highlightBarBox(barIndex, opts = {}) {
+    const { reveal = true } = opts;
     this.bars.forEach((b) => {
       if (!b.staveEl) return;
       if (b.barIndex === barIndex) b.staveEl.classList.add("vf-bar-sing");
       else b.staveEl.classList.remove("vf-bar-sing");
     });
     this._drawBarOutline(barIndex);
-    this._revealBar(barIndex);
+    if (reveal) this._revealBar(barIndex);
   }
 
   /**
    * Draw a prominent rectangle outline (SVG overlay) around a bar so the user
-   * instantly sees which bar to sing.  The outline wraps the whole bar area
-   * (staff + noteheads/ledger lines) and is vertically centred on the staff,
-   * sitting on top of the notation.  Position is derived from the stave
-   * group's real screen rectangle (converted into SVG user space) so it stays
-   * correct regardless of wrapping/scrolling.
+   * instantly sees which bar the exercise means.  Position is derived from
+   * the bar's real screen rectangle (converted into SVG user space, which the
+   * SVG renders 1:1) so it stays correct regardless of wrapping/scrolling.
+   *
+   * @param {number} barIndex
+   * @param {string} [variant]  extra class: the frame is also the answer
+   *                            marker in the guessing chapters, where it says
+   *                            picked / right / wrong rather than "sing this".
    */
-  _drawBarOutline(barIndex) {
+  _drawBarOutline(barIndex, variant = "") {
     if (this._outlineEl) { this._outlineEl.remove(); this._outlineEl = null; }
     const svg = this.svgEl || this.container.querySelector("svg");
     if (!svg) return;
     const b = this.bars.find((x) => x.barIndex === barIndex);
     if (!b) return;
 
-    // Resolve the bar's vertical extent from the stave group's bounding rect,
-    // mapped back into SVG user units (the SVG renders 1:1, so we just
-    // subtract the SVG origin).  The staff box itself is short; expand it
-    // vertically so the outline also encloses the noteheads & ledger lines,
-    // and centre the outline on the staff's vertical midpoint.
-    let y, h;
-    const staveEl = b.staveEl;
-    if (staveEl && svg.getBoundingClientRect) {
-      const sr = staveEl.getBoundingClientRect();
-      const vr = svg.getBoundingClientRect();
-      const top = sr.top - vr.top;
-      const bottom = sr.bottom - vr.top;
-      const staffMid = (top + bottom) / 2;
-      h = (bottom - top) + 48;          // envelope noteheads + ledger lines
-      y = staffMid - h / 2;             // vertically centred on the staff
-    } else {
-      const pad = 6;
-      y = b.y - pad - 14;
-      h = 84;
-    }
+    const box = this._barContentBox(b, svg);
+    if (!box) return;
 
-    const xpad = 6;
     const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
-    rect.setAttribute("x", b.x - xpad);
-    rect.setAttribute("y", y);
-    rect.setAttribute("width", b.width + xpad * 2);
-    rect.setAttribute("height", h);
+    rect.setAttribute("x", box.x);
+    rect.setAttribute("y", box.y);
+    rect.setAttribute("width", box.width);
+    rect.setAttribute("height", box.height);
     rect.setAttribute("rx", 8);
     rect.setAttribute("ry", 8);
-    rect.setAttribute("class", "vf-bar-outline");
+    rect.setAttribute("class", "vf-bar-outline" + (variant ? " " + variant : ""));
     svg.appendChild(rect);
     this._outlineEl = rect;
+  }
+
+  /**
+   * The rectangle a bar actually occupies, in SVG user units.
+   *
+   * The staff is the same five lines in every bar; the notes are not.  A bar
+   * that sits high above or low below the staff — ledger lines, an accidental,
+   * a note a sixth clear of the top line — is taller than a bar in the middle
+   * of the register, and a fixed allowance around the staff box either clips
+   * those or draws a cavernous frame around these.  So measure it, and frame
+   * the union of the staff and the noteheads.
+   *
+   * The measurement is taken from the noteheads' own `y` attributes rather
+   * than from the note groups' bounding boxes.  A VexFlow notehead is a glyph
+   * in the music font, and the group's box is the font's em box — the same
+   * 161 units tall for every note on the stave, which says nothing about where
+   * that note sits.  The `y` attribute is the glyph's baseline, which is the
+   * notehead's own centre, and the SVG is drawn 1:1 (its viewBox matches its
+   * pixel size), so those numbers are already the units this rectangle wants.
+   *
+   * Horizontally the bar's own geometry still wins.  The frame should line up
+   * with its neighbours' whatever each bar happens to hold, and a glyph can
+   * spill past the barline it is drawn against.
+   */
+  _barContentBox(b, svg) {
+    const staveEl = b.staveEl;
+    if (!staveEl || !svg.getBoundingClientRect) {
+      // No layout to measure (a headless render, or a detached SVG): fall
+      // back to the bar's drawn origin and a staff-sized allowance.
+      return { x: b.x - 6, y: b.y - 20, width: b.width + 12, height: 84 };
+    }
+
+    const vr = svg.getBoundingClientRect();
+    const sr = staveEl.getBoundingClientRect();
+    let top = sr.top - vr.top;
+    let bottom = sr.bottom - vr.top;
+
+    // Half a notehead, plus the room a ledger line needs above the topmost or
+    // below the bottommost one.
+    const HEAD_HALF = 12;
+    this.notes.forEach((entry) => {
+      if (entry.barIndex !== b.barIndex || !entry.el || !entry.el.querySelectorAll) return;
+      entry.el.querySelectorAll(".vf-notehead text").forEach((t) => {
+        const y = parseFloat(t.getAttribute("y"));
+        if (!isFinite(y)) return;
+        top = Math.min(top, y - HEAD_HALF);
+        bottom = Math.max(bottom, y + HEAD_HALF);
+      });
+    });
+
+    const ypad = 6;
+    const xpad = 6;
+    return {
+      x: b.x - xpad,
+      y: top - ypad,
+      width: b.width + xpad * 2,
+      height: (bottom - top) + ypad * 2,
+    };
   }
 
   clearBarHighlight() {
@@ -347,6 +407,90 @@ export class NotationRenderer {
   clearBarBox() {
     this.bars.forEach((b) => b.staveEl && b.staveEl.classList.remove("vf-bar-sing"));
     if (this._outlineEl) { this._outlineEl.remove(); this._outlineEl = null; }
+  }
+
+  /**
+   * Mark a bar with the outcome of a guess.
+   *
+   * This is to the guessing chapters what `setNoteAccuracy` is to the singing
+   * ones: the answer is shown on the score, where the question was asked,
+   * rather than only in the card underneath it.  Three kinds, and they read
+   * in the order they appear:
+   *
+   *   picked   the bar the student just clicked, marked the instant they
+   *            click it so the choice is visibly received before it is judged
+   *   correct  the bar that was actually played
+   *   wrong    a picked bar that turned out not to be it
+   *
+   * Several bars can be marked at once (a wrong pick *and* the right answer),
+   * so unlike the single sing-this frame these accumulate until
+   * `clearBarResults`.
+   *
+   * @param {number} barIndex
+   * @param {"picked"|"correct"|"wrong"} kind
+   */
+  markBarResult(barIndex, kind) {
+    if (barIndex == null) return;
+    if (!this._barResults) this._barResults = new Map();
+    if (!this._resultEls) this._resultEls = [];
+    const prev = this._barResults.get(barIndex);
+    if (prev) this._unmarkBar(barIndex, prev);
+    this._barResults.set(barIndex, kind);
+
+    this.notes.forEach((entry) => {
+      if (entry.barIndex === barIndex && entry.el) entry.el.classList.add("vf-res-" + kind);
+    });
+
+    const svg = this.svgEl || this.container.querySelector("svg");
+    const b = this.bars.find((x) => x.barIndex === barIndex);
+    if (!svg || !b) return;
+    const box = this._barContentBox(b, svg);
+    if (!box) return;
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", box.x);
+    rect.setAttribute("y", box.y);
+    rect.setAttribute("width", box.width);
+    rect.setAttribute("height", box.height);
+    rect.setAttribute("rx", 8);
+    rect.setAttribute("ry", 8);
+    rect.setAttribute("class", "vf-bar-result vf-bar-result-" + kind);
+    rect.dataset.bar = String(barIndex);
+    svg.appendChild(rect);
+    this._resultEls.push(rect);
+  }
+
+  _unmarkBar(barIndex, kind) {
+    this.notes.forEach((entry) => {
+      if (entry.barIndex === barIndex && entry.el) entry.el.classList.remove("vf-res-" + kind);
+    });
+    this._resultEls = (this._resultEls || []).filter((el) => {
+      if (Number(el.dataset.bar) !== barIndex) return true;
+      el.remove();
+      return false;
+    });
+  }
+
+  /**
+   * Scroll a bar into view on purpose.
+   *
+   * `_revealBar` follows the bar that is *sounding*; this is the deliberate
+   * version, for the moment a guessing round gives its answer.  Following the
+   * bar during the question would hand the answer over before the student had
+   * guessed, so the guessing chapters keep the score still until here.
+   */
+  revealBar(barIndex) {
+    this._revealed = null;   // the same bar twice running should still scroll
+    this._revealBar(barIndex);
+  }
+
+  /** Drop every answer mark — the next question starts from a clean score. */
+  clearBarResults() {
+    RESULT_CLASSES.forEach((c) => {
+      this.notes.forEach((entry) => entry.el && entry.el.classList.remove(c));
+    });
+    (this._resultEls || []).forEach((el) => el.remove());
+    this._resultEls = [];
+    this._barResults = new Map();
   }
 
   /**
@@ -386,12 +530,14 @@ export class NotationRenderer {
 
 
 
-  highlightNote(globalIndex) {
+  highlightNote(globalIndex, opts = {}) {
+    const { reveal = true } = opts;
     this.notes.forEach((entry) => {
       if (!entry.el) return;
       if (entry.globalIndex === globalIndex) entry.el.classList.add("vf-note-active");
       else entry.el.classList.remove("vf-note-active");
     });
+    if (!reveal) return;
     const active = this.notes.find((n) => n.globalIndex === globalIndex);
     if (active && active.el && active.el.scrollIntoView) {
       active.el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });

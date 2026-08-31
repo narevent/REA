@@ -1,4 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=114";
+import { NotationRenderer } from "../components/notationRenderer.js?v=131";
 
 let renderer = null;
 
@@ -57,6 +57,7 @@ export function renderScaleNotation(keyModel, onBarClick) {
       is_rest: e.is_rest,
       is_enharmonic: e.is_enharmonic,
       horizontal_offset_ms: e.horizontal_offset_ms,
+      visual_offset_px: e.visual_offset_px,
     })),
   }));
   r.render(bars, { title: keyModel.name || "", onBarClick });

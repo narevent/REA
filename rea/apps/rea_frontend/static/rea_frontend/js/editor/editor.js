@@ -20,15 +20,16 @@
  * exercise half-written is worse than one not written at all.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=114";
-import { EditorAPI } from "./editorApi.js?v=114";
-import { Inspector } from "./inspector.js?v=114";
-import { Library } from "./library.js?v=114";
-import { ScoreCanvas } from "./scoreCanvas.js?v=114";
+import { AudioPlayer } from "../audioPlayer.js?v=131";
+import { EditorAPI } from "./editorApi.js?v=131";
+import { Inspector } from "./inspector.js?v=131";
+import { Library } from "./library.js?v=131";
+import { ScoreCanvas } from "./scoreCanvas.js?v=131";
 import {
-  DURATIONS, LETTERS, MODIFIERS, OFFSET_GAIN, ScoreDoc,
-  buildToken, noteMidi, splitToken, transposeToken,
-} from "./scoreDoc.js?v=114";
+  DURATIONS, LETTERS, MAX_VISUAL_OFFSET_PX, MODIFIERS, ScoreDoc,
+  buildToken, noteMidi, offsetMs, splitToken, transposeToken,
+} from "./scoreDoc.js?v=131";
+import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=131";
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -69,6 +70,7 @@ class Editor {
       onInsert: (where) => this.insertAt(where),
       onPitchDrag: (position, steps) => this.transpose([position], steps),
       onOffsetDrag: (position, delta) => this.nudgeOffset([position], delta),
+      onVisualOffsetDrag: (position, delta) => this.nudgeVisualOffset([position], delta),
     });
     this.inspector = new Inspector(this.dom.inspector, {
       onNote: (positions, changes) => this.updateNotes(positions, changes),
@@ -134,8 +136,19 @@ class Editor {
     }
   }
 
+  /**
+   * Send the score to the server.  Returns whether it got there — callers that
+   * are about to navigate away depend on knowing.
+   *
+   * Saving an exercise that already exists *replaces* it, for everybody: there
+   * are no versions and no drafts, and the students practising it get the new
+   * one the next time they open it.  That is the right behaviour and it is
+   * also the one thing about this editor that can quietly cost somebody else's
+   * work, so it is said out loud — before, in what the button offers to do,
+   * and after, in what the status line reports.
+   */
   async save() {
-    if (!this.doc) return;
+    if (!this.doc) return false;
     const payload = this.doc.payload();
     const wasNew = this.doc.isNew;
     this.status("Saving…");
@@ -147,9 +160,13 @@ class Editor {
       this.library.setCurrent(saved.system, saved.id);
       this.library.refresh();
       this.renderAll();
-      this.status(wasNew ? `Created “${saved.display_name}”.` : `Saved “${saved.display_name}”.`, "good");
+      this.status(wasNew
+        ? `Created “${saved.display_name}” — it is in the library, and students can practise it now.`
+        : `Saved “${saved.display_name}” — this replaces what students practise.`, "good");
+      return true;
     } catch (e) {
-      this.status(e.message, "error");
+      this.status(`Not saved — ${e.message}`, "error");
+      return false;
     }
   }
 
@@ -175,7 +192,15 @@ class Editor {
       return;
     }
     const name = this.doc.doc.display_name;
-    if (!window.confirm(`Delete “${name}”? Students will no longer see it. This cannot be undone.`)) return;
+    const answer = await this.ask({
+      title: `Delete “${name}”?`,
+      body: "Students will no longer see it, and this cannot be undone.",
+      actions: [
+        { key: "delete", label: "Delete it", kind: "danger" },
+        { key: null, label: "Keep it" },
+      ],
+    });
+    if (answer !== "delete") return;
     try {
       await EditorAPI.remove(this.doc.system, this.doc.id);
       this.library.refresh();
@@ -186,12 +211,153 @@ class Editor {
     }
   }
 
-  /** Ask before throwing away unsaved edits.  Returns whether to proceed. */
-  confirmDiscard() {
-    if (!this.doc || !this.doc.isDirty) return Promise.resolve(true);
-    return Promise.resolve(window.confirm(
-      "This exercise has unsaved changes. Discard them?"
-    ));
+  // -- MIDI import -------------------------------------------------------
+
+  /**
+   * Replace the notes of the open exercise with those of a MIDI file.
+   *
+   * The exercise's *identity* is untouched — its category, part, number and
+   * key stay exactly as they are, and only the bars change.  That is the
+   * useful shape: a teacher sets up where an exercise belongs once, and the
+   * music arrives from wherever they already wrote it.
+   *
+   * Nothing is saved.  The import is an ordinary undoable edit sitting in the
+   * document like any other, so it can be played, corrected, undone, or simply
+   * abandoned by opening something else — and it reaches students only when
+   * the teacher presses Save, which is the same bargain every other edit here
+   * makes.
+   */
+  importMidi() {
+    if (!this.doc) return;
+    // The picker is built per use rather than living in the page: a file input
+    // remembers its last file, and a second import of the same filename would
+    // otherwise fire no change event at all.
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".mid,.midi,audio/midi,audio/x-midi";
+    input.addEventListener("change", () => {
+      const file = input.files && input.files[0];
+      if (file) this.applyMidiFile(file);
+    });
+    input.click();
+  }
+
+  async applyMidiFile(file) {
+    this.status(`Reading ${file.name}…`);
+    let parsed;
+    let converted;
+    try {
+      parsed = parseMidi(await file.arrayBuffer());
+      converted = midiToBars(parsed, {
+        system: this.doc.system,
+        keySignature: this.doc.keySignature,
+        // The first bar of the open score is the template: an imported melody
+        // should keep the clef, rhythm mode and key chord the exercise already
+        // uses rather than reverting a carefully set-up score to the defaults.
+        template: this.doc.bar(0),
+      });
+    } catch (e) {
+      this.status(`Could not import ${file.name} — ${e.message}`, "error");
+      return;
+    }
+
+    const summary = describeImport(converted.report);
+    const existing = this.doc.noteCount();
+    const warning = existing
+      ? `\n\nThis replaces the ${existing} note${existing === 1 ? "" : "s"} currently in the score. Undo will bring them back, and nothing is saved until you press Save.`
+      : "";
+    if (!window.confirm(`Import ${file.name}?\n\n${summary}${warning}`)) {
+      this.status("Import cancelled.");
+      return;
+    }
+
+    // One undo step covers the notes and the tempo together — they came from
+    // the same file, and taking back half an import would be a puzzle.
+    this.doc.edit("import MIDI", (doc) => {
+      doc.bars = JSON.parse(JSON.stringify(converted.bars));
+      if (parsed.tempoBpm) doc.meta.tempo = parsed.tempoBpm;
+    });
+    this.selection = { notes: [], bars: [] };
+    this.renderAll();
+    this.status(`Imported ${file.name} — ${summary}. Not saved yet.`, "good");
+  }
+
+  /**
+   * Ask a question with more than two answers.
+   *
+   * `window.confirm` only has OK and Cancel, and the question this editor most
+   * needs to ask — "you have unsaved work and you are about to leave it" — has
+   * three: save it, throw it away, or stay put.  Forced into two, the prompt
+   * had to leave out the one a teacher actually wants, so the only way to keep
+   * the work was to cancel, find Save, press it, and then start the navigation
+   * again.
+   *
+   * @param {object} spec  {title, body, actions: [{key, label, kind}]}
+   * @returns {Promise<string|null>}  the chosen action's key, or null
+   */
+  ask({ title, body, actions }) {
+    return new Promise((resolve) => {
+      const scrim = el("div", "ed-ask-scrim");
+      const box = el("div", "ed-ask");
+      box.appendChild(el("h2", "ed-ask-title", title));
+      if (body) box.appendChild(el("p", "ed-ask-body", body));
+      const row = el("div", "ed-ask-actions");
+
+      let done = false;
+      const close = (key) => {
+        if (done) return;
+        done = true;
+        document.removeEventListener("keydown", onKey, true);
+        scrim.remove();
+        resolve(key);
+      };
+      // Escape is always the safe answer: it cancels, whatever the buttons say.
+      const onKey = (e) => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        close(null);
+      };
+
+      actions.forEach((action) => {
+        const button = el("button", `ed-btn${action.kind ? " ed-btn-" + action.kind : ""}`, action.label);
+        button.type = "button";
+        button.addEventListener("click", () => close(action.key));
+        row.appendChild(button);
+      });
+      box.appendChild(row);
+      scrim.appendChild(box);
+      scrim.addEventListener("click", (e) => { if (e.target === scrim) close(null); });
+      document.addEventListener("keydown", onKey, true);
+      document.body.appendChild(scrim);
+      const first = row.querySelector("button");
+      if (first) first.focus();
+    });
+  }
+
+  /**
+   * Ask before throwing away unsaved edits.  Returns whether to proceed.
+   *
+   * Saving from here counts as proceeding only if the save actually worked —
+   * a server that refused the score is exactly the moment not to walk away
+   * from it.
+   */
+  async confirmDiscard() {
+    if (!this.doc || !this.doc.isDirty) return true;
+    const isNew = this.doc.isNew;
+    const answer = await this.ask({
+      title: "You have unsaved changes",
+      body: isNew
+        ? "This exercise has never been saved. Leaving it now loses it."
+        : `“${this.doc.doc.display_name}” has edits that are not saved yet.`,
+      actions: [
+        { key: "save", label: isNew ? "Create, then continue" : "Save, then continue", kind: "primary" },
+        { key: "discard", label: "Discard the changes" },
+        { key: null, label: "Stay here" },
+      ],
+    });
+    if (answer === "discard") return true;
+    if (answer !== "save") return false;
+    return this.save();
   }
 
   bindGuards() {
@@ -251,9 +417,16 @@ class Editor {
       return node;
     };
 
+    // The button's own words carry the difference between adding something and
+    // replacing something, because that is the difference a teacher has to
+    // know before pressing it and not after.
+    const isNew = this.doc && this.doc.isNew;
+    const saveTitle = isNew
+      ? "Add this exercise to the library (⌘/Ctrl+S)"
+      : `Replace “${this.doc ? this.doc.doc.display_name : ""}” with what is on screen — students get it straight away (⌘/Ctrl+S)`;
     group([
-      button(this.doc && this.doc.isNew ? "Create" : "Save", "Save the exercise (⌘/Ctrl+S)", () => this.save(),
-        { primary: true, disabled: !doc }),
+      button(isNew ? "Create" : this.doc && this.doc.isDirty ? "Save changes" : "Save",
+        saveTitle, () => this.save(), { primary: true, disabled: !doc }),
       button("Undo", "Undo (⌘/Ctrl+Z)", () => this.undo(), { disabled: !doc || !doc.canUndo }),
       button("Redo", "Redo (⌘/Ctrl+Shift+Z)", () => this.redo(), { disabled: !doc || !doc.canRedo }),
     ]);
@@ -270,6 +443,10 @@ class Editor {
     ]);
 
     group([
+      button("Import MIDI…", "Replace the notes with those from a MIDI file", () => this.importMidi(), { disabled: !doc }),
+    ]);
+
+    group([
       button("Copy exercise", "Save a copy of this exercise and open it", () => this.duplicateExercise(), { disabled: !doc }),
       button("Delete exercise", "Delete this exercise", () => this.deleteExercise(), { disabled: !doc }),
     ]);
@@ -277,8 +454,9 @@ class Editor {
     const views = el("div", "ed-tool-group ed-tool-views");
     [
       ["degrees", "Degrees"],
-      ["offsets", "Offsets"],
+      ["offsets", "Playback offsets"],
       ["volumes", "Volumes"],
+      ["rhythm", "Rhythm"],
     ].forEach(([key, label]) => {
       const toggle = el("label", "ed-toggle");
       const input = el("input");
@@ -427,6 +605,24 @@ class Editor {
     if (positions.length === 1) this.previewNote(positions[0]);
   }
 
+  /**
+   * Set the accidental outright, rather than cycling to it.
+   *
+   * Alt+↑/↓ walks a five-state ring, which is fine for exploring and poor for
+   * doing: writing a sharp means knowing where in the ring you currently are
+   * and how many steps away it is, and the note sounds on every step of the
+   * way.  Wanting a sharp is by far the commonest thing a teacher wants here,
+   * and it should cost one key.  `null` means "as the key signature has it".
+   */
+  setAccidental(positions, modifier) {
+    this.doc.updateNotes(positions, (event) => {
+      if (event.is_rest) return {};
+      const parts = splitToken(event.note_name);
+      return { note_name: buildToken(Object.assign(parts, { modifier })) };
+    }, "accidental");
+    if (positions.length === 1) this.previewNote(positions[0]);
+  }
+
   setLetter(positions, letter) {
     this.doc.updateNotes(positions, (event) => {
       const parts = splitToken(event.note_name);
@@ -434,6 +630,16 @@ class Editor {
       return { note_name: buildToken(parts), is_rest: false };
     }, "set pitch");
     if (positions.length === 1) this.previewNote(positions[0]);
+  }
+
+  /** Move where the selected noteheads are *drawn* — see `nudgeOffset` for
+   *  the other one, which moves when they sound. */
+  nudgeVisualOffset(positions, delta) {
+    this.doc.updateNotes(positions, (event) => ({
+      visual_offset_px: Math.max(-MAX_VISUAL_OFFSET_PX, Math.min(
+        MAX_VISUAL_OFFSET_PX, (event.visual_offset_px || 0) + delta
+      )),
+    }), "visual offset");
   }
 
   nudgeOffset(positions, delta) {
@@ -558,7 +764,7 @@ class Editor {
       if (!bar) return;
       let cursor = 0;
       (bar.events || []).forEach((event, noteIndex) => {
-        const offset = (event.horizontal_offset_ms || 0) * OFFSET_GAIN;
+        const offset = offsetMs(event);
         const start = Math.max(0, cursor + offset);
         let duration = event.duration || 0.125;
         if (!event.is_rest && duration < 0.0625) duration = 0.125;
@@ -742,6 +948,13 @@ class Editor {
       return true;
     }
 
+    // The accidental, said outright.  `b` is free as a shortcut because the
+    // letter keys are the German ones (c d e f g a h) — and in German naming
+    // `b` *is* the flat, so the key says what it does.
+    if (key === "#" && notes.length) { this.setAccidental(notes, "#"); return true; }
+    if (key === "b" && notes.length) { this.setAccidental(notes, "b"); return true; }
+    if (key === "n" && notes.length) { this.setAccidental(notes, null); return true; }
+
     if (/^[1-6]$/.test(key) && notes.length) {
       this.setDuration(notes, DURATIONS[Number(key) - 1].value);
       return true;
@@ -754,12 +967,18 @@ class Editor {
       this.toggleEnharmonic(notes);
       return true;
     }
+    // `,` / `.` move the sound; Alt with them moves the picture.  Same pair of
+    // keys because they are the same gesture — nudge this note left or right —
+    // and the modifier says which of the two axes it acts on, the way Alt does
+    // on the drag.
     if ((key === "," || key === "<") && notes.length) {
-      this.nudgeOffset(notes, e.shiftKey ? -5 : -1);
+      if (e.altKey) this.nudgeVisualOffset(notes, e.shiftKey ? -8 : -2);
+      else this.nudgeOffset(notes, e.shiftKey ? -5 : -1);
       return true;
     }
     if ((key === "." || key === ">") && notes.length) {
-      this.nudgeOffset(notes, e.shiftKey ? 5 : 1);
+      if (e.altKey) this.nudgeVisualOffset(notes, e.shiftKey ? 8 : 2);
+      else this.nudgeOffset(notes, e.shiftKey ? 5 : 1);
       return true;
     }
     if ((key === "-" || key === "_") && notes.length) {

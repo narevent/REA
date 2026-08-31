@@ -56,7 +56,15 @@ function parted(name, ctx) {
 
 // The relative mono library stores the "exercise list" level as `variant`:
 // no variant is the plain diatonic formula, AL1 carries the alterations, and
-// SKALA is the scale form.  Formula (Octave / Quinta / Extended) is the span.
+// SKALA is the scale form.  Formula (Octave / Quinta / Extended) is the span
+// — see SPAN_DOMINANT for how the middle one is written on the page.
+// The fifth-span is stored as "Quinta" throughout the lesson library, the API
+// and the JSON on disk.  On the page it is called what it trains: the span
+// from the tonic up to the *dominant*.  Only the writing changes — every ctx
+// value below still carries the stored name, so nothing about which lessons
+// load depends on this.
+const SPAN_DOMINANT = "Dominant";
+
 const REL_MONO_VARIANTS = {
   diatonic: "",
   alterations: "AL1",
@@ -76,7 +84,7 @@ function relMonoFormula(name, keyMode) {
         name: "Numeric",
         children: [
           leaf("Octave", { formula: "Octave", variant: REL_MONO_VARIANTS.diatonic }, "numeric"),
-          leaf("Quinta", { formula: "Quinta", variant: REL_MONO_VARIANTS.diatonic }, "numeric"),
+          leaf(SPAN_DOMINANT, { formula: "Quinta", variant: REL_MONO_VARIANTS.diatonic }, "numeric"),
         ],
       },
       {
@@ -90,7 +98,7 @@ function relMonoFormula(name, keyMode) {
             ],
           },
           {
-            name: "Quinta",
+            name: SPAN_DOMINANT,
             children: [
               leaf("Diatonic", { formula: "Quinta", variant: REL_MONO_VARIANTS.diatonic }),
               leaf("Alterations", { formula: "Quinta", variant: REL_MONO_VARIANTS.alterations }),
@@ -100,7 +108,7 @@ function relMonoFormula(name, keyMode) {
             name: "Scale",
             children: [
               leaf("Octave", { formula: "Octave", variant: REL_MONO_VARIANTS.scale }),
-              leaf("Quinta", { formula: "Quinta", variant: REL_MONO_VARIANTS.scale }),
+              leaf(SPAN_DOMINANT, { formula: "Quinta", variant: REL_MONO_VARIANTS.scale }),
             ],
           },
         ],
@@ -159,9 +167,10 @@ function absMonoFormula(name, category) {
     ctx: { category },
     children: [
       parted("Octave", { span: "Octave" }),
-      parted("Quinta", { span: "Quinta" }),
-      // Extended's "parts" are its grade levels (2Grades / 3Grades) — the
-      // loader already keys parts off `part || grades`, so one level covers it.
+      parted(SPAN_DOMINANT, { span: "Quinta" }),
+      // Extended's "parts" are its octave ranges (stored as 2Grades /
+      // 3Grades, shown as "2 octaves" / "3 octaves") — the loader already
+      // keys parts off `part || grades`, so one level covers it.
       parted("Extended", { span: "Extended" }),
     ],
   };
@@ -300,6 +309,8 @@ const INTONATION = [
 
 const RHYTHM = [soon("Exercises")];
 
+/** The dictation curriculum.  The constant keeps the library's own word for
+ *  it; everything a student reads says "dictation". */
 const DICTATES = [
   {
     name: "From literature",
@@ -347,8 +358,11 @@ const PREPARATIONS = [soon("Exercises")];
 export const AREAS = [
   { id: "intonation", label: "Intonation", tree: INTONATION },
   { id: "rhythm", label: "Rhythm", tree: RHYTHM },
-  { id: "dictates", label: "Dictates", tree: DICTATES },
-  { id: "preparations", label: "Dictate preparations", tree: PREPARATIONS, teacherOnly: true },
+  // The ids are what URLs and stored settings carry (`?area=dictates`), so
+  // they stay as they are; only the labels change.  "Dictation" is the name of
+  // the discipline — a musician takes dictation, they do not do a dictate.
+  { id: "dictates", label: "Dictation", tree: DICTATES },
+  { id: "preparations", label: "Dictation preparation", tree: PREPARATIONS, teacherOnly: true },
 ];
 
 export const AREA_BY_ID = {};

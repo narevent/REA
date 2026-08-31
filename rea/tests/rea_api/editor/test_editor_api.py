@@ -74,7 +74,8 @@ class EditorTestCase(TestCase):
                 "events": [
                     {"note_name": "g1", "alias_degree": "1", "duration": 0.125, "volume": 80},
                     {"note_name": "f2", "alias_degree": "7", "duration": 0.125, "volume": 75,
-                     "horizontal_offset_ms": -4, "is_enharmonic": True},
+                     "horizontal_offset_ms": -4, "visual_offset_px": 9,
+                     "is_enharmonic": True},
                 ],
             }],
         }
@@ -207,6 +208,9 @@ class CreateAndSaveTests(EditorTestCase):
         ).json()
         note = loaded["bars"][0]["events"][1]
         self.assertEqual(note["horizontal_offset_ms"], -4)
+        # The two offsets are separate properties and must stay separate: one
+        # moves when the note sounds, the other where it is drawn.
+        self.assertEqual(note["visual_offset_px"], 9)
         self.assertTrue(note["is_enharmonic"])
         self.assertEqual(note["alias_degree"], "7")
         self.assertEqual(note["volume"], 75)
@@ -280,6 +284,25 @@ class ValidationTests(EditorTestCase):
         self.assertEqual(
             self.post(reverse("editor-create", args=["relative"]), payload).status_code, 400
         )
+
+    def test_visual_offset_beyond_a_notehead_is_refused(self):
+        payload = self.relative_payload()
+        payload["bars"][0]["events"][0]["visual_offset_px"] = 400
+        self.assertEqual(
+            self.post(reverse("editor-create", args=["relative"]), payload).status_code, 400
+        )
+
+    def test_the_two_offsets_do_not_stand_in_for_each_other(self):
+        """A note nudged on the page is not a note nudged in time."""
+        payload = self.relative_payload()
+        payload["bars"][0]["events"][0]["visual_offset_px"] = 12
+        payload["bars"][0]["events"][0]["horizontal_offset_ms"] = 0
+        created = self.post(
+            reverse("editor-create", args=["relative"]), payload
+        ).json()
+        event = RelativeLesson.objects.get(pk=created["id"]).bars.get().events.first()
+        self.assertEqual(event.visual_offset_px, 12)
+        self.assertEqual(event.horizontal_offset_ms, 0, "the drawing must not move the sound")
 
     def test_a_failed_save_leaves_the_stored_score_alone(self):
         created = self.post(

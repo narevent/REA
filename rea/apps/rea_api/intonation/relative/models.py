@@ -269,6 +269,15 @@ class MusicEvent(models.Model):
     bar = models.ForeignKey(Bar, related_name="events", on_delete=models.CASCADE)
     event_index = models.PositiveSmallIntegerField()
     horizontal_offset_ms = models.IntegerField(default=0)
+    # Where the notehead is *drawn*, in stave pixels, relative to where the
+    # layout would otherwise put it.  Nothing to do with
+    # `horizontal_offset_ms`, which moves when the note *sounds*: this moves
+    # only the picture, and the note plays at exactly the same moment either
+    # way.  The two are separate because they answer separate questions — an
+    # anticipated note is a playback offset, and a notehead nudged clear of
+    # its neighbour so a phrase can be read is a visual one — and a single
+    # field could only ever do one of them without lying about the other.
+    visual_offset_px = models.SmallIntegerField(default=0)
     duration = models.FloatField(default=0.125)
     attack_decay_time = models.FloatField(null=True, blank=True)
     volume = models.PositiveSmallIntegerField(default=80)

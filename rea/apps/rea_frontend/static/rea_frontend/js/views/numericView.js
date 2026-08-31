@@ -9,8 +9,8 @@
  * practice controller drives one as readily as the other.
  */
 
-import { NumericRenderer } from "../components/numericRenderer.js?v=114";
-import { keySigMap, midiFromEvent } from "../practiceData.js?v=114";
+import { NumericRenderer } from "../components/numericRenderer.js?v=131";
+import { keySigMap, midiFromEvent } from "../practiceData.js?v=131";
 
 let renderer = null;
 
@@ -41,6 +41,7 @@ function toBars(item) {
       duration: e.duration,
       is_rest: e.is_rest,
       midi: e.is_rest ? null : midiFromEvent(e, ks),
+      visual_offset_px: e.visual_offset_px,
     })),
   }));
 }
