@@ -27,7 +27,7 @@
  * editor's inspector names the sounding pitch for the teacher.
  */
 
-import { noteNameToVexflow, parseNoteToken } from "../notation.js?v=131";
+import { noteNameToVexflow, parseNoteToken } from "../notation.js?v=164";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
 export const METRICS = {
@@ -44,7 +44,47 @@ export const METRICS = {
 const MOD_TO_ACC = { "#": "#", b: "b", x: "##", r: "n" };
 
 /**
- * Move one drawn notehead sideways: the note's *visual* offset.
+ * How far a notehead reaches above and below its own baseline, in SVG units.
+ *
+ * Generous enough to cover the glyph and a ledger line through it, which is
+ * what anything drawing a box around a note actually wants.
+ */
+export const NOTEHEAD_REACH = 11;
+
+/**
+ * The baselines of the noteheads inside a drawn note group.
+ *
+ * Anything that needs to know where a note sits vertically has to ask this
+ * rather than the element's bounding box, and the reason is worth stating
+ * once because it has now caused the same bug three times over.
+ *
+ * A VexFlow notehead is a glyph in the music font, and the browser reports a
+ * `<text>` element's box as the font's *em* box — every note on the stave
+ * measures the same ~161 units tall, starting far above the staff and ending
+ * far below it.  It is a true statement about the font and says nothing
+ * whatever about the note.  Code that believed it drew selection boxes
+ * taller than the canvas, frames that clipped ledger lines, and annotation
+ * lanes that never adapted at all.
+ *
+ * The `y` attribute, by contrast, is the glyph's baseline, which for a
+ * notehead is its own vertical centre — the number these callers meant all
+ * along.  Horizontal measurements are fine from the bounding box (a notehead
+ * really is about 12 units wide); it is only the height that lies.
+ *
+ * @returns {number[]} one baseline per notehead, empty for a rest
+ */
+export function noteHeadYs(noteEl) {
+  if (!noteEl || !noteEl.querySelectorAll) return [];
+  const out = [];
+  noteEl.querySelectorAll(".vf-notehead text").forEach((t) => {
+    const y = parseFloat(t.getAttribute("y"));
+    if (isFinite(y)) out.push(y);
+  });
+  return out;
+}
+
+/**
+ * Move one note sideways: the note's *visual* offset.
  *
  * This is a different thing from `horizontal_offset_ms`, which moves when a
  * note sounds and changes nothing on the page.  This moves the picture and
@@ -54,36 +94,38 @@ const MOD_TO_ACC = { "#": "#", b: "b", x: "##", r: "n" };
  * phrase wanting a little air in the middle — and it is stored per note on the
  * exercise, so a student sees the picture the teacher approved.
  *
- * It is a transform on the drawn group rather than VexFlow's `setXShift`, and
- * that is a deliberate choice between two things that sound alike:
+ * It moves the note's *tick context* between formatting and drawing, and
+ * getting here took three tries, so the two that do not work are worth
+ * recording:
  *
- *   - `setXShift` *before* formatting is an input to the formatter, which then
- *     renegotiates the whole bar — the nudged note ends up somewhere else
- *     entirely and its neighbours move too.  That is spacing advice, not an
- *     offset.
- *   - `setXShift` *after* formatting has no effect at all in the vendored
- *     VexFlow 5 build: the drawn x is fixed by then.
+ *   - `setXShift` before formatting is an input to the formatter, which then
+ *     renegotiates the whole bar around it — the nudged note lands somewhere
+ *     else entirely and its neighbours move too.  That is spacing advice, not
+ *     an offset.
+ *   - `setXShift` after formatting does nothing at all in the vendored
+ *     VexFlow 5 build: the drawn x is settled by then.
+ *   - A transform on the drawn `<g class="vf-stavenote">` moves the notehead
+ *     and, for an unbeamed note, its stem.  But a *beamed* note's stem is not
+ *     in that group: VexFlow draws the stems of a beamed group inside the
+ *     `<g class="vf-beam">` alongside the beam itself.  So a nudged eighth in
+ *     a beamed pair had its notehead slide out from under a stem and beam
+ *     that stayed put.
  *
- * The transform moves that note and only that note, by exactly the number of
- * pixels asked for, which is what a per-note offset has to mean.  It carries
- * the notehead, its stem, its flag and its accidental — everything inside the
- * group — and it moves the group's bounding box with them, which matters
- * beyond looks: both views hit-test clicks against those rectangles, so a
- * note drawn in one place and clickable in another would be worse than no
- * feature at all.
+ * The tick context is what the formatter assigns positions to and what every
+ * later drawing step — stems, beams, accidentals — reads back, so moving it
+ * moves all of them together, and only for this note.
  *
- * The one thing it does not carry is a beam, which VexFlow draws as its own
- * group spanning several notes.  Beams are hidden on every REA stave (see the
- * `svg.rea-score` rule in main.css) and are shown only by the editor's Rhythm
- * toggle, so the cost is that a nudged note under that toggle has a beam that
- * does not follow it.  That is the diagnostic view, not the exercise.
+ * One consequence to know about: a tick context is shared by everything
+ * sounding at the same moment.  These scores are a single voice with one note
+ * per tick, so it is one note per context; if that ever stops being true,
+ * nudging one note of a chord would nudge the chord.
  */
-function applyVisualOffset(el, px) {
+function applyVisualOffset(note, px) {
   const shift = Number(px) || 0;
-  if (!el || !shift) return;
-  const existing = el.getAttribute("transform");
-  const move = `translate(${shift},0)`;
-  el.setAttribute("transform", existing ? `${existing} ${move}` : move);
+  if (!shift || !note.getTickContext) return;
+  const context = note.getTickContext();
+  if (!context || !context.setX) return;
+  context.setX(context.getX() + shift);
 }
 
 /**
@@ -101,6 +143,9 @@ function applyVisualOffset(el, px) {
  * noteheads — is held by ROW_HEIGHT.
  */
 const VF_SPACE_ABOVE_PX = 40;
+
+/** Extra room above the top row for a tuplet bracket and its number. */
+const TUPLET_HEADROOM = 22;
 
 /** VexFlow, however the vendored build exposed itself. */
 export function resolveVexFlow() {
@@ -149,6 +194,19 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
   if (!VF) return null;
 
   const rowHeight = METRICS.ROW_HEIGHT + rowExtra;
+
+  // Room above the first staff line for a tuplet's bracket and its number.
+  //
+  // VexFlow draws a tuplet on the far side of the stems, which for a phrase
+  // lying high on the staff — most of this library — is above the beam and
+  // therefore above the staff.  `STAVE_Y` leaves 26px of room up there, which
+  // a beam over high notes uses most of, so the number was drawn at a
+  // negative y and the SVG simply cut it off.  Only paid for when the score
+  // actually holds a tuplet, so nothing else gains a band of white space.
+  const hasTuplets = bars.some((bar) => (bar.notes || []).some(
+    (n) => n.tuplet_num > 0 && n.tuplet_den > 0
+  ));
+  const topPad = hasTuplets ? TUPLET_HEADROOM : 0;
 
   // --- Measure the available width inside the panel --------------------
   // Bars wrap into rows so a whole score is visible without scrolling
@@ -199,13 +257,13 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
     let x = METRICS.MARGIN;
     row.forEach((i, k) => {
       barWidths[i] = Math.floor(prefWidths[i] * scale);
-      placement[i] = { x, y: r * rowHeight + METRICS.STAVE_Y, row: r };
+      placement[i] = { x, y: r * rowHeight + METRICS.STAVE_Y + topPad, row: r };
       x += barWidths[i] + METRICS.BAR_GAP;
     });
   });
 
   // --- Create the SVG sized for all rows -------------------------------
-  const height = rows.length * rowHeight + 16;
+  const height = rows.length * rowHeight + 16 + topPad;
   const renderer = new VF.Renderer(container, VF.Renderer.Backends.SVG);
   renderer.resize(availWidth, height);
   const context = renderer.getContext();
@@ -217,6 +275,7 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
   let globalIndex = 0;
   const formatted = [];
   const allBeams = [];
+  const allTuplets = [];
 
   bars.forEach((bar, i) => {
     const stave = new VF.Stave(placement[i].x, placement[i].y - VF_SPACE_ABOVE_PX, barWidths[i]);
@@ -262,12 +321,39 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
         }
       }
       note.globalIndex = globalIndex;
-      // Carried here, applied to the drawn group after the draw — see
-      // `applyVisualOffset` for why it cannot be done through VexFlow.
+      // Carried here and applied once the formatter has run — see
+      // `applyVisualOffset` for why it has to happen exactly there.
       note.reaVisualOffset = Number(n.visual_offset_px) || 0;
+      note.reaTuplet = (n.tuplet_num > 0 && n.tuplet_den > 0)
+        ? { num: Number(n.tuplet_num), den: Number(n.tuplet_den) } : null;
       staveNotes.push(note);
       globalIndex += 1;
     });
+
+    // Tuplets: runs of adjacent notes carrying the same ratio, cut into
+    // groups of `num`.  Two triplets in a row are six marked notes and read
+    // as 3 + 3 — see `MusicEvent.tuplet_num` for why the grouping is
+    // positional rather than held by an id.
+    let run = [];
+    const closeRun = () => {
+      if (!run.length) return;
+      const { num, den } = run[0].reaTuplet;
+      for (let i = 0; i + num <= run.length; i += num) {
+        try {
+          allTuplets.push(new VF.Tuplet(run.slice(i, i + num), {
+            num_notes: num, notes_occupied: den,
+          }));
+        } catch (e) { /* a malformed group is not worth losing the score over */ }
+      }
+      run = [];
+    };
+    staveNotes.forEach((note) => {
+      const t = note.reaTuplet;
+      if (!t) { closeRun(); return; }
+      if (run.length && (run[0].reaTuplet.num !== t.num || run[0].reaTuplet.den !== t.den)) closeRun();
+      run.push(note);
+    });
+    closeRun();
 
     // Beaming: eighths and shorter group into beats.
     const beamable = staveNotes.filter((n) => {
@@ -299,8 +385,19 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
     new VF.Formatter().joinVoices([voice]).format([voice], Math.max(40, noteAreaWidth));
   });
 
+  // The per-note visual offsets, applied after the formatter has settled the
+  // spacing and before anything is drawn from it.  See `applyVisualOffset`.
+  formatted.forEach(({ notes }) => notes.forEach((note) => {
+    applyVisualOffset(note, note.reaVisualOffset);
+  }));
+
   formatted.forEach(({ voice, stave }) => voice && voice.draw(context, stave));
   allBeams.forEach((b) => b.setContext(context).draw());
+  // After the beams: a tuplet's bracket is placed against the stems, which
+  // the beam may have moved.
+  allTuplets.forEach((t) => {
+    try { t.setContext(context).draw(); } catch (e) { /* decoration only */ }
+  });
 
   // --- Tie the drawn SVG groups back to positions in the score ---------
   // VexFlow emits note groups in draw order, which is the order fed in.
@@ -315,10 +412,9 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
   let gi = 0;
   formatted.forEach(({ notes, barIndex }) => {
     notes.forEach((note, noteIndex) => {
-      const el = noteGroups[gi] || null;
-      applyVisualOffset(el, note.reaVisualOffset);
       noteEntries.push({
-        barIndex, noteIndex, globalIndex: note.globalIndex, note, el,
+        barIndex, noteIndex, globalIndex: note.globalIndex, note,
+        el: noteGroups[gi] || null,
       });
       gi += 1;
     });

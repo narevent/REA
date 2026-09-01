@@ -309,8 +309,17 @@ const INTONATION = [
 
 const RHYTHM = [soon("Exercises")];
 
-/** The dictation curriculum.  The constant keeps the library's own word for
- *  it; everything a student reads says "dictation". */
+/**
+ * The dictation area's own outline.
+ *
+ * Everything here is a placeholder — dictation has no lesson library behind
+ * it in the way intonation does.  What it *does* have is whatever a teacher
+ * has written on the dictation shelf, and those arrive at runtime: see
+ * `setDictations`, which puts them at the top of this area.  There used to be
+ * a second, teacher-only area called "Dictation preparation" sitting beside
+ * this one in the main switcher; a teacher writing dictations now does it in
+ * the editor, and reads them here alongside their students.
+ */
 const DICTATES = [
   {
     name: "From literature",
@@ -345,15 +354,14 @@ const DICTATES = [
   },
 ];
 
-const PREPARATIONS = [soon("Exercises")];
-
 /**
  * The practice areas.  Each is a curriculum of its own — its own tree, its own
  * ordering, its own Previous/Next — so walking to the end of Intonation does
  * not spill into Rhythm.
  *
  * `teacherOnly` areas are never offered to a student; the app filters them out
- * of the area switcher and refuses to open them.
+ * of the area switcher and refuses to open them.  Nothing uses it at the
+ * moment — the one area that did has become a shelf in the editor instead.
  */
 export const AREAS = [
   { id: "intonation", label: "Intonation", tree: INTONATION },
@@ -362,7 +370,6 @@ export const AREAS = [
   // they stay as they are; only the labels change.  "Dictation" is the name of
   // the discipline — a musician takes dictation, they do not do a dictate.
   { id: "dictates", label: "Dictation", tree: DICTATES },
-  { id: "preparations", label: "Dictation preparation", tree: PREPARATIONS, teacherOnly: true },
 ];
 
 export const AREA_BY_ID = {};
@@ -378,7 +385,7 @@ AREAS.forEach((a) => { AREA_BY_ID[a.id] = a; });
  * end of Intonation stops there rather than spilling into Rhythm.
  */
 let _uid = 0;
-AREAS.forEach((area) => {
+function linkArea(area) {
   area.categories = [];
   (function link(nodes, parent) {
     nodes.forEach((node) => {
@@ -393,7 +400,36 @@ AREAS.forEach((area) => {
       }
     });
   })(area.tree, null);
-});
+}
+AREAS.forEach(linkArea);
+
+/**
+ * Put the teacher's dictations into the Dictation area.
+ *
+ * The rest of this file is the method as written down, and it is static
+ * because the method is.  Dictations are not: they are whatever a teacher has
+ * saved on the dictation shelf, so they arrive from the server and are linked
+ * in when they do.  Each one is a category like any other — it carries the id
+ * of the lesson it plays, and the ten chapters run on it exactly as they run
+ * on an intonation lesson.
+ *
+ * They go at the top of the area, above the outline of dictation types that
+ * is still to be built, because they are the part of it that exists.
+ *
+ * @param {Array<{id, system, name}>} lessons
+ */
+export function setDictations(lessons) {
+  const area = AREA_BY_ID.dictates;
+  if (!area) return;
+  const written = (lessons || []).map((lesson) => ({
+    name: lesson.name,
+    ctx: { dictation: { id: lesson.id, system: lesson.system } },
+  }));
+  area.tree = written.length
+    ? [{ name: "Written for you", children: written }].concat(DICTATES)
+    : DICTATES.slice();
+  linkArea(area);
+}
 
 /** Root → node, inclusive. */
 export function pathOf(node) {

@@ -199,15 +199,55 @@ class Lesson(models.Model):
     mid_bar_time = models.FloatField(default=0.1)
     raw = models.JSONField(default=dict, blank=True)
 
+    class Shelf(models.TextChoices):
+        """Which collection a lesson lives in.
+
+        One question with one answer, rather than a flag per collection: a
+        lesson is filed in the curriculum, or it is a draft, or it is a
+        dictation, and it cannot sensibly be two of those.
+
+        CURRICULUM ("") is the ordinary case — the lesson has been given a
+        place in the method, students meet it there, and its identity must be
+        unique.  DRAFT is work in progress that has not been filed yet.
+        DICTATION is a teacher's own dictation material: filed, but in its own
+        collection rather than in the intonation curriculum, and reached by
+        students through the Dictation area instead.
+
+        Only CURRICULUM lessons are bound by the uniqueness rule below, and
+        only CURRICULUM lessons are served by the intonation endpoints.
+        """
+
+        CURRICULUM = "", "In the curriculum"
+        DRAFT = "draft", "Draft — not filed yet"
+        DICTATION = "dictation", "Dictation"
+
+    shelf = models.CharField(
+        max_length=16, choices=Shelf.choices, default=Shelf.CURRICULUM,
+        blank=True, db_index=True,
+    )
+
     class Meta:
         app_label = "relative"
-        unique_together = (
-            "key_model", "texture", "formula_name",
-            "category", "inversion", "interval_name", "part", "variant",
-        )
+        constraints = [
+            # Uniqueness is about where an exercise is filed, so it binds only
+            # the exercises that have been filed.  Drafts are all equally
+            # uncategorised, and that is not a clash.
+            models.UniqueConstraint(
+                fields=[
+                    "key_model", "texture", "formula_name",
+                    "category", "inversion", "interval_name", "part", "variant",
+                ],
+                condition=models.Q(shelf=""),
+                name="relative_lesson_identity",
+            ),
+        ]
 
     @property
     def display_name(self) -> str:
+        if self.shelf != self.Shelf.CURRICULUM:
+            # Nothing off the curriculum shelf has a filing to be named
+            # after, so it is named by the teacher's own working title.
+            return self.variant.strip() or self.get_shelf_display()
         if self.texture == self.Texture.POLY:
             bits = [self.get_category_display() or self.category]
             if self.inversion:
@@ -279,6 +319,22 @@ class MusicEvent(models.Model):
     # field could only ever do one of them without lying about the other.
     visual_offset_px = models.SmallIntegerField(default=0)
     duration = models.FloatField(default=0.125)
+    # Tuplets: *num* notes played in the time of *den*.
+    #
+    # Both zero means an ordinary note, which is almost all of them.  A triplet
+    # is 3 in the time of 2, so three eighths written here last as long as two
+    # — the written `duration` still says "eighth", and the ratio says what an
+    # eighth means inside this group.  Keeping the written value honest is the
+    # point: the note is notated as an eighth, it is beamed as an eighth, and
+    # only its sounding length is scaled.
+    #
+    # The grouping is positional.  Every note of a tuplet carries the same
+    # pair, and a run of consecutive notes sharing it is cut into groups of
+    # `num` — so two triplets in a row are six marked notes read as 3 + 3,
+    # which needs no group id and cannot be left dangling by an edit that
+    # deletes a note.
+    tuplet_num = models.PositiveSmallIntegerField(default=0)
+    tuplet_den = models.PositiveSmallIntegerField(default=0)
     attack_decay_time = models.FloatField(null=True, blank=True)
     volume = models.PositiveSmallIntegerField(default=80)
     note_name = models.CharField(max_length=16, help_text="Raw token, e.g. 'c1', 'f2#', 'e1r'.")

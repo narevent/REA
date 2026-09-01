@@ -13,7 +13,7 @@
  * teacher edits is what gets stored.
  */
 
-import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=131";
+import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=164";
 
 /** Note letters in staff order.  German naming: `h` is B-natural. */
 export const LETTERS = ["c", "d", "e", "f", "g", "a", "h"];
@@ -135,14 +135,39 @@ export function noteMidi(event, keySignature) {
   return noteNameToMidi(event.note_name, keySignatureMap(keySignature || []));
 }
 
-/** How a note reads to a musician, e.g. "f2# — F♯5". */
+/** The accidental a token's letter needs to reach the pitch it sounds. */
+const ACCIDENTAL_SIGN = { 0: "", 1: "♯", 2: "𝄪", "-1": "♭", "-2": "𝄫" };
+
+/**
+ * How a note reads to a musician, e.g. "f2# — F♯5".
+ *
+ * The international name is built from the token's own letter rather than
+ * from a table of pitch classes.  A table has to choose one spelling per
+ * pitch, so in A major — where a written `g` sounds G♯ — it announced "A♭",
+ * naming a note the teacher had not written and putting the panel at odds
+ * with the letter shown two rows below it.  Spelling from the letter says
+ * what was written and what it sounds, which is the whole job of this line.
+ */
 export function describeNote(event, keySignature) {
   if (!event) return "";
   if (event.is_rest) return "rest";
   const midi = noteMidi(event, keySignature);
   if (midi == null) return event.note_name;
-  const names = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
-  return `${event.note_name} — ${names[midi % 12]}${Math.floor(midi / 12) - 1}`;
+  const { letter } = splitToken(event.note_name);
+  const natural = LETTER_PC[letter];
+  const octave = Math.floor(midi / 12) - 1;
+  let name;
+  if (natural == null) {
+    name = String(midi);
+  } else {
+    // How far the sounding pitch is from the bare letter, as a signed number
+    // of semitones rather than a distance: `h` sounding C is up one and into
+    // the next octave, not down eleven.
+    let delta = ((midi % 12) - natural + 18) % 12 - 6;
+    // German `h` is B; every other letter is itself.
+    name = (letter === "h" ? "B" : letter.toUpperCase()) + (ACCIDENTAL_SIGN[delta] ?? "");
+  }
+  return `${event.note_name} — ${name}${octave}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -165,6 +190,12 @@ export function blankEvent(previous = null, overrides = {}) {
     // a notehead pulled clear of its neighbour there — and copying them onto
     // the next note would spread one deliberate exception down the whole line.
     visual_offset_px: 0,
+    // Nor is a tuplet: it is a statement about a group, and a new note is not
+    // yet in one.  Written out rather than left undefined so a fresh note
+    // reads the same as one that came from the server — the panel's controls
+    // compare against these values, and `undefined` is not `0`.
+    tuplet_num: 0,
+    tuplet_den: 0,
     attack_decay_time: previous ? previous.attack_decay_time : null,
     volume: previous ? previous.volume : 80,
     is_rest: false,
@@ -246,6 +277,44 @@ export class ScoreDoc extends EventTarget {
     this.redoStack = [];
     this._emit("change", { label });
     return true;
+  }
+
+  /**
+   * A continuous edit: one entry in the history, many updates on screen.
+   *
+   * Dragging a note is one action to the person doing it and hundreds of
+   * mouse events to the browser.  Routing each of those through `edit` would
+   * fill the undo stack with a snapshot per pixel; showing nothing until the
+   * mouse comes up — which is what this editor used to do — means dragging a
+   * notehead while the notehead stays where it was.  So the snapshot is taken
+   * once, at the start, and the document is then updated freely until the
+   * gesture ends.
+   *
+   * `endLive` throws the snapshot away again if the drag changed nothing,
+   * so a click that wobbled two pixels does not leave an undo step that
+   * undoes nothing.
+   */
+  beginLive(label) {
+    this._live = { label, before: clone(this.doc) };
+  }
+
+  /** One step of a continuous edit: applied and drawn, but not recorded. */
+  live(mutate) {
+    if (!this._live) return false;
+    mutate(this.doc);
+    this._emit("change", { label: this._live.label, live: true });
+    return true;
+  }
+
+  endLive() {
+    const live = this._live;
+    this._live = null;
+    if (!live) return;
+    if (JSON.stringify(live.before) === JSON.stringify(this.doc)) return;
+    this.undoStack.push({ label: live.label, doc: live.before });
+    if (this.undoStack.length > 200) this.undoStack.shift();
+    this.redoStack = [];
+    this._emit("change", { label: live.label });
   }
 
   undo() {
@@ -356,6 +425,24 @@ export class ScoreDoc extends EventTarget {
       });
       if (!touched) return false;
     });
+  }
+
+  /**
+   * Make the given notes a tuplet, or take them out of one.
+   *
+   * `num` notes in the time of `den` — 3 in the time of 2 is a triplet.  The
+   * whole selection is marked with the same ratio and the drawing cuts it
+   * into groups of `num`, so selecting six notes and asking for a triplet
+   * gives two triplets rather than one impossible group of six.
+   *
+   * Passing `num = 0` clears it.
+   */
+  setTuplet(positions, num, den) {
+    return this.updateNotes(
+      positions,
+      { tuplet_num: num || 0, tuplet_den: num ? den : 0 },
+      num ? "tuplet" : "remove tuplet",
+    );
   }
 
   /** Move a note to another slot — the drag-and-drop path. */

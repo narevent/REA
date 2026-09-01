@@ -246,13 +246,13 @@ Two suites are browser JavaScript and run under Node instead:
 
 ```bash
 node rea/tests/audio/run.mjs
-node rea/tests/editor/midi.mjs
+node rea/tests/editor/run.mjs
 ```
 
 The first covers the singing exercises' audio path (pitch tracking and note
-segmentation, sung by a synthesiser); the second covers the score editor's
+segmentation, sung by a synthesiser). The second covers the score editor: the
 MIDI import — the pitch spellings it chooses, and what it does with chords,
-gaps, performed note lengths and barlines.
+gaps, performed note lengths and barlines — and tuplet timing.
 
 ## Frontend
 
@@ -291,6 +291,15 @@ Two pages share that stack:
   rests, key-signature notes, pickup bars, bar labels and the exercise's own
   identity — and the transport previews the result with the same synth and
   timing rules the students hear.
+
+  Every exercise sits on a **shelf**, which says which collection it belongs
+  to: the curriculum (the default), `draft` for work not yet filed, or
+  `dictation` for a teacher's dictation material. Only curriculum lessons are
+  served by the intonation endpoints and only they are bound by the identity
+  uniqueness rule, so drafts can pile up untitled and a dictation can share a
+  key and formula with a real exercise. Students reach dictations through the
+  Dictation area, which lists them at runtime, and never through an intonation
+  category.
 
   The two offsets are separate fields and answer separate questions.
   `horizontal_offset_ms` moves the moment a note *sounds* and changes nothing

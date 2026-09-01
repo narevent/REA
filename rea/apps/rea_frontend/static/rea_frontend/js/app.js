@@ -11,30 +11,33 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=131";
-import { renderLessonNotation } from "./views/lessonView.js?v=131";
-import { renderScaleNotation } from "./views/scaleView.js?v=131";
-import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=131";
-import { SoundcheckView } from "./views/soundcheckView.js?v=131";
-import { AudioPlayer } from "./audioPlayer.js?v=131";
-import { PracticeController } from "./practiceController.js?v=131";
-import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=131";
+import { API } from "./api.js?v=164";
+import { renderLessonNotation } from "./views/lessonView.js?v=164";
+import { renderScaleNotation } from "./views/scaleView.js?v=164";
+import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=164";
+import { SoundcheckView } from "./views/soundcheckView.js?v=164";
+import { AudioPlayer } from "./audioPlayer.js?v=164";
+import { PracticeController } from "./practiceController.js?v=164";
+import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=164";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=131";
+} from "./chapters.js?v=164";
 import {
-  AREAS, AREA_BY_ID, contextFor, kindOf, isPractisable, defaultCategory,
+  AREAS, AREA_BY_ID, contextFor, kindOf, isPractisable, defaultCategory, setDictations,
   categoryByUid, firstCategory, pathOf, neighbourCategory,
-} from "./curriculum.js?v=131";
-import { createNav } from "./curriculumNav.js?v=131";
+} from "./curriculum.js?v=164";
+import { createNav } from "./curriculumNav.js?v=164";
 import {
   DIFFICULTIES, DIFFICULTY_LABELS, getDifficulty, setDifficulty,
   adoptAccountDifficulty,
-} from "./difficulty.js?v=131";
+} from "./difficulty.js?v=164";
 import {
   TEMPO_SCALES, tempoLabel, getTempoScale, setTempoScale,
-} from "./tempo.js?v=131";
+} from "./tempo.js?v=164";
+// Shared with the score editor's tree, so both call the same thing by the
+// same name.
+import { absPartKey, absPartLabel } from "./lessonNaming.js?v=164";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -549,19 +552,6 @@ async function buildAbsComboLesson(cat, exerciseNumber) {
 const PART_ORDER = ["1", "2", "1-2", "3", "1-3", "4", "1-4"];
 const GRADE_ORDER = ["2Grades", "3Grades"];
 
-function absPartKey(l) { return l.part || l.grades || ""; }
-
-function absPartLabel(key) {
-  if (key === "") return "All";
-  // "2Grades" / "3Grades" is the stored key, and it says nothing to a singer:
-  // these are the Extended span's two ranges, and what varies between them is
-  // how many octaves the exercise covers — the lesson files themselves are
-  // named `..._2_oct` and `..._3_oct`.  Read them as what they are.
-  const oct = /^(\d)Grades$/.exec(key);
-  if (oct) return oct[1] + " octaves";
-  return "Part " + key;
-}
-
 function absPartOrder(key) {
   let i = PART_ORDER.indexOf(key);
   if (i >= 0) return i;
@@ -589,6 +579,8 @@ let state = {
   contextKey: null,
   contextFormula: DEFAULT_FORMULA,
   contextLesson: null,
+  // Set when the open category is a dictation: the lesson it plays.
+  contextDictation: null,
   absFamily: ABS_FAMILIES[1], // Formula · Octave
   absLessons: [],
   absParts: [],
@@ -703,6 +695,10 @@ async function loadKeys() {
 }
 
 async function ensureLesson() {
+  // A dictation names the exact lesson it plays, so there is nothing to
+  // resolve: no key, no formula, no part.  It is the one category whose
+  // context *is* an answer rather than a query.
+  if (state.contextDictation) return ensureDictationLesson();
   if (state.texture === "poly") return ensurePolyLesson();
   if (state.system === "absolute") return ensureAbsoluteLesson();
   if (!state.contextKey) return;
@@ -729,6 +725,20 @@ async function ensureLesson() {
   state.contextLesson = await API.getLesson(state.contextLesson.id);
   state.contextLesson.system = "relative";
   setStatus("Ready");
+}
+
+/** Load the one lesson a dictation category points at. */
+async function ensureDictationLesson() {
+  const { id, system } = state.contextDictation;
+  setStatus("Loading dictation…");
+  try {
+    state.contextLesson = await API.getDictation(id, system);
+    state.contextLesson.system = system;
+    setStatus("Ready");
+  } catch (e) {
+    state.contextLesson = null;
+    setStatus("Could not load that dictation — " + e.message);
+  }
 }
 
 /**
@@ -1405,6 +1415,11 @@ async function applyCategory(node, part, exercise) {
     return;
   }
 
+  // A dictation carries its own lesson; every other category resolves one
+  // from the facets along its path.
+  state.contextDictation = ctx.dictation || null;
+  if (state.contextDictation) state.system = state.contextDictation.system;
+
   const wasSystem = state.system;
   const wasTexture = state.texture;
   if (ctx.system) state.system = ctx.system;
@@ -1513,7 +1528,7 @@ function loadPosition(areaId) {
 }
 
 /** Which area to open: `?area=` when something linked straight to one (the
- *  teacher dashboard does, for its preparations), else the one last
+ *  teacher dashboard used to, for its preparations), else the one last
  *  practised — in both cases only if this user may open it. */
 function openingArea() {
   let asked = null;
@@ -2124,11 +2139,17 @@ viewSession.addEventListener("rea:next-chapter", (e) => {
   footerHint.textContent = "Use headphones for the best intonation practice.";
   await loadKeys();
 
+  // Whatever a teacher has published on the dictation shelf.  Best-effort:
+  // the Dictation area still has its outline without them, and nothing else
+  // in the app depends on the list, so a failure here must not stop a student
+  // reaching their intonation exercises.
+  try {
+    setDictations(await API.listDictations());
+  } catch (e) { /* the area keeps its outline */ }
+
   // Straight into an exercise — where the student left off, or the method's
   // first playable one.  Position zero is the Introduction document, which
   // does not open as an exercise.
-  // The switcher can only be drawn once we know whether this user is a
-  // teacher, since one area is theirs alone.
   renderNav();
   const area = openingArea();
   state.app = area.id;

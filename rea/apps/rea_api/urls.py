@@ -1,6 +1,12 @@
 from django.urls import include, path
 
-from .intonation.views import ChapterListView, ExerciseListView, FacetsView
+from .intonation.views import (
+    ChapterListView,
+    DictationDetailView,
+    DictationListView,
+    ExerciseListView,
+    FacetsView,
+)
 
 urlpatterns = [
     # Teacher-only writes live behind their own prefix: the intonation
@@ -11,4 +17,8 @@ urlpatterns = [
     path("intonation/chapters/", ChapterListView.as_view(), name="intonation-chapters"),
     path("intonation/facets/", FacetsView.as_view(), name="intonation-facets"),
     path("intonation/exercises/", ExerciseListView.as_view(), name="intonation-exercises"),
+    # Not under "intonation/": a dictation is its own collection, not a
+    # facet of the intonation curriculum.
+    path("dictations/", DictationListView.as_view(), name="dictations"),
+    path("dictations/<int:pk>/", DictationDetailView.as_view(), name="dictation-detail"),
 ]

@@ -30,8 +30,11 @@
  * hundred lines, and it runs on a file the user chose from their own disk.
  */
 
-import { LETTER_PC, keySignatureMap } from "../notation.js?v=131";
-import { DURATIONS, LETTERS, blankBar, blankEvent } from "./scoreDoc.js?v=131";
+// `midiToToken` is the inverse of notation.js's own `noteTokenToMidi`, and
+// lives beside it: the editor needs it too, to respell a note it has moved
+// by a semitone.
+import { midiToToken } from "../notation.js?v=164";
+import { DURATIONS, LETTERS, blankBar, blankEvent } from "./scoreDoc.js?v=164";
 
 // ---------------------------------------------------------------------------
 // The file
@@ -151,53 +154,6 @@ export function parseMidi(buffer) {
   if (!notes.length) throw new Error("That MIDI file has no notes in it.");
   notes.sort((a, b) => a.start - b.start || b.midi - a.midi);
   return { ticksPerQuarter, tempoBpm, timeSignature, notes, trackCount };
-}
-
-// ---------------------------------------------------------------------------
-// MIDI pitch -> the score's own note token
-// ---------------------------------------------------------------------------
-
-// Two spellings of every chromatic pitch class.  Which one is used depends on
-// the key: a flat key should read e-flat, a sharp key d-sharp, and writing the
-// wrong one gives a stave full of accidentals that fight the key signature.
-const SHARP_SPELLING = ["c", "c", "d", "d", "e", "f", "f", "g", "g", "a", "a", "h"];
-const FLAT_SPELLING = ["c", "d", "d", "e", "e", "f", "g", "g", "a", "a", "h", "h"];
-
-/**
- * The note token for a MIDI pitch, spelled for this key signature.
- *
- * The octave convention is the source's own and is not the MIDI one: the digit
- * is an octave index where 1 means the middle-C octave, so a bare letter sits
- * an octave below `c1` (see `noteTokenToMidi` in notation.js — this is its
- * inverse, and the two must stay in step).
- *
- * The modifier is then chosen against the key signature rather than against
- * the bare letter, so a note the key already alters needs no accidental, and a
- * note the key alters but this melody does not gets the naturalising `r`.
- */
-export function midiToToken(midi, keySignature) {
-  const map = keySignatureMap(keySignature || []);
-  const flatKey = Object.values(map).some((offset) => offset < 0);
-  const pc = ((midi % 12) + 12) % 12;
-  const letter = (flatKey ? FLAT_SPELLING : SHARP_SPELLING)[pc];
-  const base = LETTER_PC[letter];
-
-  // The octave index, straight out of the pitch.  It needs no correction for
-  // how the note is spelled, because the source's own formula resolves a token
-  // to `12 * (4 + octave) + pitchClass` — the octave digit indexes the pitch,
-  // not the letter.  (One consequence, inherited rather than introduced here:
-  // `h1#` and `c1` name the same sound in this format.  None of the spellings
-  // below reach across an octave, so it never comes up.)
-  const octave = Math.floor(midi / 12) - 4;
-
-  const inKey = (base + (map[letter] || 0) + 12) % 12;
-  let modifier = null;
-  if (inKey !== pc) {
-    const diff = (pc - base + 12) % 12;
-    modifier = diff === 0 ? "r" : diff === 1 ? "#" : diff === 11 ? "b" : diff === 2 ? "x" : null;
-  }
-  if (octave < 0 || octave > 9) return null;   // off the edge of the notation
-  return { letter, octave, modifier, name: letter + (octave === 0 ? "" : String(octave)) + (modifier || "") };
 }
 
 // ---------------------------------------------------------------------------
@@ -354,4 +310,4 @@ export function describeImport(report) {
   return bits.join(" · ");
 }
 
-export { LETTERS };
+export { LETTERS, midiToToken };

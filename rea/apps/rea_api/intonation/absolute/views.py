@@ -27,7 +27,13 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
     Pagination allows a client ``page_size`` (capped at 2000) so the
     combination-category fetch can be done in few round-trips.
     """
-    queryset = Lesson.objects.select_related("base").order_by(
+    # Only what is filed in the curriculum.  Drafts are unfinished and
+    # dictations belong to their own area, and neither may turn up inside
+    # somebody's intonation lesson.  Stated as what is allowed rather than
+    # as a list of exclusions, so a shelf added later is invisible to
+    # students until somebody decides otherwise — and it is on the queryset
+    # rather than on a filter parameter, so no query string can lift it.
+    queryset = Lesson.objects.filter(shelf="").select_related("base").order_by(
         "texture", "category", "span", "grades",
         "quality", "interval_size", "inversion",
         "part", "phase", "exercise_number",

@@ -11,7 +11,9 @@
  * in `staveLayout.js`, which the score editor draws with too.
  */
 
-import { drawScore, durationToType, resolveVexFlow } from "./staveLayout.js?v=131";
+import {
+  NOTEHEAD_REACH, drawScore, durationToType, noteHeadYs, resolveVexFlow,
+} from "./staveLayout.js?v=164";
 
 /** Accuracy bands for `setNoteAccuracy`.  The thresholds match the per-note
  *  chips in the feedback row, so the stave and the report agree. */
@@ -351,13 +353,10 @@ export class NotationRenderer {
    * those or draws a cavernous frame around these.  So measure it, and frame
    * the union of the staff and the noteheads.
    *
-   * The measurement is taken from the noteheads' own `y` attributes rather
-   * than from the note groups' bounding boxes.  A VexFlow notehead is a glyph
-   * in the music font, and the group's box is the font's em box — the same
-   * 161 units tall for every note on the stave, which says nothing about where
-   * that note sits.  The `y` attribute is the glyph's baseline, which is the
-   * notehead's own centre, and the SVG is drawn 1:1 (its viewBox matches its
-   * pixel size), so those numbers are already the units this rectangle wants.
+   * The measurement comes from `noteHeadYs`, which explains why the note
+   * groups' own bounding boxes cannot answer it.  The SVG is drawn 1:1 (its
+   * viewBox matches its pixel size), so those numbers are already the units
+   * this rectangle wants.
    *
    * Horizontally the bar's own geometry still wins.  The frame should line up
    * with its neighbours' whatever each bar happens to hold, and a glyph can
@@ -376,16 +375,11 @@ export class NotationRenderer {
     let top = sr.top - vr.top;
     let bottom = sr.bottom - vr.top;
 
-    // Half a notehead, plus the room a ledger line needs above the topmost or
-    // below the bottommost one.
-    const HEAD_HALF = 12;
     this.notes.forEach((entry) => {
-      if (entry.barIndex !== b.barIndex || !entry.el || !entry.el.querySelectorAll) return;
-      entry.el.querySelectorAll(".vf-notehead text").forEach((t) => {
-        const y = parseFloat(t.getAttribute("y"));
-        if (!isFinite(y)) return;
-        top = Math.min(top, y - HEAD_HALF);
-        bottom = Math.max(bottom, y + HEAD_HALF);
+      if (entry.barIndex !== b.barIndex) return;
+      noteHeadYs(entry.el).forEach((y) => {
+        top = Math.min(top, y - NOTEHEAD_REACH);
+        bottom = Math.max(bottom, y + NOTEHEAD_REACH);
       });
     });
 

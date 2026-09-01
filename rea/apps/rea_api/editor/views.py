@@ -54,6 +54,25 @@ LESSON_MODELS = {"relative": RelativeLesson, "absolute": AbsoluteLesson}
 # the reason a lesson cannot be found.
 BROWSE_LIMIT = 300
 
+# A filter value meaning "this facet must be empty".
+#
+# Most of these facets are blank for most lessons, and blank is a real value:
+# a relative mono lesson with no ``variant`` is the plain diatonic formula,
+# which is a different exercise from the AL1 one beside it.  A missing query
+# parameter has to keep meaning "do not filter on this at all" — that is what
+# every broader view of the library depends on — so the editor's tree says
+# which of the two it means with this instead.
+BLANK = "__blank__"
+
+
+def _facet(qs, field, value):
+    """Apply one facet filter, honouring the explicit-blank sentinel."""
+    if value == BLANK:
+        return qs.filter(**{field: ""})
+    if value:
+        return qs.filter(**{field: value})
+    return qs
+
 
 def lesson_model(system):
     return LESSON_MODELS[system]
@@ -176,6 +195,12 @@ class BrowseView(EditorView):
         p = request.query_params
         qs = lesson_model(system).objects.all()
 
+        # Each shelf is a place of its own in the editor's tree, so one is
+        # asked for explicitly and they are never mixed: an uncategorised
+        # exercise showing up under a category it has not been given would
+        # defeat the point of having somewhere to put it.
+        qs = qs.filter(shelf=p.get("shelf", ""))
+
         if system == "relative":
             qs = qs.select_related("key_model")
             for param, field in (
@@ -184,8 +209,14 @@ class BrowseView(EditorView):
                 ("part", "part"), ("variant", "variant"),
                 ("interval_name", "interval_name"), ("inversion", "inversion"),
             ):
-                if p.get(param):
-                    qs = qs.filter(**{field: p[param]})
+                qs = _facet(qs, field, p.get(param))
+            # The curriculum splits the relative formulas into Major and
+            # Minor, and that split is not a column on the lesson: the same
+            # formula exists in all twenty-four keys, and it is the *key* that
+            # is major or minor.  Without this, opening "Major Formula" listed
+            # every minor key underneath it too.
+            if p.get("key_mode"):
+                qs = qs.filter(key_model__mode=p["key_mode"])
             qs = _narrow(qs, p.get("search", ""), (
                 "formula_name", "variant", "category", "key_model__name",
             ))
@@ -198,8 +229,7 @@ class BrowseView(EditorView):
                 ("part", "part"), ("phase", "phase"),
                 ("exercise_type", "exercise_type"),
             ):
-                if p.get(param):
-                    qs = qs.filter(**{field: p[param]})
+                qs = _facet(qs, field, p.get(param))
             qs = _narrow(qs, p.get("search", ""), (
                 "category", "exercise_type", "span", "quality", "interval_size",
             ))
@@ -209,17 +239,48 @@ class BrowseView(EditorView):
             )
 
         total = qs.count()
-        rows = [
-            {
-                "id": lesson.pk,
-                "system": system,
-                "name": lesson.display_name,
-                "texture": lesson.texture,
-                "bars": lesson.bar_count,
-            }
-            for lesson in qs.annotate(bar_count=Count("bars"))[:BROWSE_LIMIT]
-        ]
+        rows = [self._row(lesson, system) for lesson in qs.annotate(bar_count=Count("bars"))[:BROWSE_LIMIT]]
         return Response({"count": total, "shown": len(rows), "results": rows})
+
+    @staticmethod
+    def _row(lesson, system):
+        """One line of the picker.
+
+        Still ids and names — never bars — but it also carries the few facets
+        the editor's tree groups by.  The picker used to be a flat list of
+        every exercise in the library, which meant every key of every formula
+        in one column; grouping it the way the curriculum is organised needs
+        to know which key and which part each row belongs to, and asking the
+        server for facets it already has in hand is much cheaper than asking
+        it for each group separately.
+        """
+        row = {
+            "id": lesson.pk,
+            "system": system,
+            "name": lesson.display_name,
+            "texture": lesson.texture,
+            "bars": lesson.bar_count,
+            "part": lesson.part,
+            "shelf": lesson.shelf,
+        }
+        if system == "relative":
+            row.update({
+                "key_model": lesson.key_model_id,
+                "key_name": lesson.key_model.name,
+                "formula_name": lesson.formula_name,
+                "variant": lesson.variant,
+                "category": lesson.category,
+            })
+        else:
+            row.update({
+                "category": lesson.category,
+                "span": lesson.span,
+                "grades": lesson.grades,
+                "phase": lesson.phase,
+                "exercise_number": lesson.exercise_number,
+                "exercise_type": lesson.exercise_type,
+            })
+        return row
 
 
 class ScoreDetailView(EditorView):
@@ -402,6 +463,12 @@ class BlankScoreView(EditorView):
     importers use (clef, rhythm, tempo, and — for a relative exercise — the
     key's own ``music_mode_chord``, without which the stave would draw no key
     signature at all).
+
+    It starts as a *draft*.  A teacher opening an empty stave has material in
+    mind and not a filing decision, and making them choose a category, a part
+    and a variant before the first note is the wrong order — so a new exercise
+    goes to the drafts, and saving it into the curriculum is a separate act
+    they make when they know the answer.
     """
 
     def get(self, request, system):
@@ -427,7 +494,7 @@ class BlankScoreView(EditorView):
                     "inversion": "", "interval_name": "", "part": "",
                     "variant": "", "source_file": "", "tempo": 86,
                     "draw_only_note_heads": False, "default_rhythm": "FreeStyle",
-                    "mid_bar_time": 0.1,
+                    "mid_bar_time": 0.1, "shelf": "draft",
                 },
                 "bars": [score.blank_bar(system, mode_chord)],
             }
@@ -446,6 +513,7 @@ class BlankScoreView(EditorView):
                     "timed": False, "chromatic": False, "source_file": "",
                     "tempo": 86, "draw_only_note_heads": False,
                     "default_rhythm": "FreeStyle", "mid_bar_time": 0.1,
+                    "shelf": "draft",
                 },
                 "bars": [score.blank_bar(system, "C_Major")],
             }

@@ -11,8 +11,8 @@
  * without depending on the main app state.
  */
 
-import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=131";
-import { getTempoScale } from "./tempo.js?v=131";
+import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=164";
+import { getTempoScale } from "./tempo.js?v=164";
 
 const DEFAULT_TEMPO = 80;
 // The event's stored offset is a *playback* offset — it moves when a note
@@ -22,6 +22,14 @@ const DEFAULT_TEMPO = 80;
 // exercise and a student practising it must hear the same timing.
 const OFFSET_GAIN = 12;
 const A4_MIDI = 69;
+
+/** How much of its written length a note in a tuplet actually sounds.
+ *  1 for every ordinary note, which is nearly all of them. */
+export function tupletRatio(event) {
+  const num = event && event.tuplet_num;
+  const den = event && event.tuplet_den;
+  return (num > 0 && den > 0) ? den / num : 1;
+}
 
 export function keySigMap(item) {
   // Lessons carry no key_signature of their own - only KeyModels do.
@@ -88,7 +96,11 @@ export function buildBarSteps(item) {
       // plays at normal length.  Legit 1/16 (0.0625) notes are left untouched.
       let dur = ev.duration || 0.125;
       if (!ev.is_rest && dur < 0.0625) dur = 0.125;
-      const durMs = Math.max(20, Math.round(dur * wholeMs));
+      // A tuplet keeps its written note value and sounds a fraction of it:
+      // three eighths in the time of two are each two-thirds of an eighth.
+      // The written value is what the stave draws and what the beaming
+      // groups by; this is the only place the ratio touches the sound.
+      const durMs = Math.max(20, Math.round(dur * wholeMs * tupletRatio(ev)));
       // Prefer the server-resolved pitch_class (correct for enharmonics in
       // lessons) combined with the octave parsed from the note_name; fall
       // back to noteNameToMidi with the key-sig map for key models.

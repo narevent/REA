@@ -19,7 +19,7 @@
 import {
   DURATIONS, MODIFIERS, MODIFIER_LABELS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX,
   OFFSET_GAIN, describeNote, splitToken, buildToken,
-} from "./scoreDoc.js?v=131";
+} from "./scoreDoc.js?v=164";
 
 const MIXED = "—"; // em dash: several selected items, several values
 
@@ -28,6 +28,21 @@ const MIXED = "—"; // em dash: several selected items, several values
  *  Everything the teacher sees is in written octaves; the index stays in the
  *  document. */
 const OCTAVE_BASE = 3;
+
+/** Tuplet ratios, shared with the toolbar's buttons so a "5" means the same
+ *  thing in both places. */
+export const TUPLET_CHOICES = [[3, 2], [5, 4], [6, 4], [7, 4]];
+
+/** The note letters, in staff order, with what each sounds like said out
+ *  loud — `h` is the one that catches everybody. */
+const LETTER_CHOICES = [
+  ["c", "C"], ["d", "D"], ["e", "E"], ["f", "F"],
+  ["g", "G"], ["a", "A"], ["h", "B natural (German h)"],
+];
+
+/** An accidental as its sign rather than its name: the row is read at a
+ *  glance, and a glance does not read "double sharp". */
+const ACCIDENTAL_GLYPH = { null: "—", "#": "♯", b: "♭", x: "𝄪", r: "♮" };
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -99,6 +114,31 @@ function buildControl(spec, value, commit) {
       commit(chosen ? chosen.value : select.value);
     });
     return { row: fieldRow(spec, select), input: select };
+  }
+
+  /**
+   * A row of buttons instead of a dropdown.
+   *
+   * For a short, fixed set of choices this is simply the better control, and
+   * the editor's own toolbar had already proved it: the accidental buttons
+   * there were easier to use than the identical dropdown in this panel,
+   * because every option is visible, the current one is visible, and choosing
+   * costs one click instead of a click-read-click.  Everything with a handful
+   * of options — the letter, the accidental, the note value, the tuplet —
+   * uses it now.  The wordier fields keep their selects.
+   */
+  if (spec.type === "buttons") {
+    const wrap = element("div", "ed-btnset");
+    (spec.options || []).forEach((option) => {
+      const button = element("button", "ed-choice", option.label);
+      button.type = "button";
+      if (option.title) button.title = option.title;
+      button.classList.toggle("is-on", !mixed && String(option.value) === String(value ?? ""));
+      button.addEventListener("click", () => commit(option.value));
+      wrap.appendChild(button);
+    });
+    if (mixed) wrap.classList.add("is-mixed");
+    return { row: fieldRow(spec, wrap), input: wrap };
   }
 
   if (spec.type === "range") {
@@ -211,6 +251,25 @@ export class Inspector {
   setOptions(options) { this.options = options; }
 
   /** Redraw for the current document + selection. */
+  /**
+   * Render just the note panel, into somewhere that is not the sidebar.
+   *
+   * The right-click menu shows the same properties as the Note tab, and shows
+   * them by *being* the Note tab: same field declarations, same commit path,
+   * same validation.  A second compact copy of the panel would be a second
+   * place for a field to be forgotten, and the two would drift the first time
+   * one gained a property.  Only the styling differs, through the class on
+   * the host — see `.ed-menu` in editor.css, which drops the hints and
+   * tightens the spacing.
+   */
+  renderNoteMenu(host, doc, selection) {
+    this.doc = doc;
+    this.selection = selection;
+    host.innerHTML = "";
+    if (!doc || !selection.notes.length) return;
+    this._renderNotes(host);
+  }
+
   render(doc, selection) {
     this.doc = doc;
     this.selection = selection;
@@ -274,12 +333,11 @@ export class Inspector {
     const token = events.length === 1 ? splitToken(events[0].note_name) : null;
     const pitchSpecs = [
       {
-        key: "note_name", label: "Note name", type: "text",
-        hint: "German letters — c d e f g a h. 'h' is B natural.",
-      },
-      {
-        key: "__letter", label: "Letter", type: "select",
-        options: ["c", "d", "e", "f", "g", "a", "h"].map((l) => ({ value: l, label: l })),
+        // "Note", not "Letter": with the note-name field gone these buttons
+        // *are* how the note is chosen, and a teacher picking one is picking
+        // a note, not a character.
+        key: "__letter", label: "Note", type: "buttons",
+        options: LETTER_CHOICES.map(([letter, title]) => ({ value: letter, label: letter, title })),
         get: () => (token ? token.letter : MIXED),
       },
       {
@@ -296,11 +354,27 @@ export class Inspector {
         get: () => (token ? token.octave + OCTAVE_BASE : MIXED),
       },
       {
-        key: "__modifier", label: "Accidental", type: "select",
-        options: MODIFIERS.map((m) => ({ value: m === null ? "" : m, label: MODIFIER_LABELS[m === null ? "null" : m] })),
+        key: "__modifier", label: "Accidental", type: "buttons",
+        options: MODIFIERS.map((m) => ({
+          value: m === null ? "" : m,
+          label: ACCIDENTAL_GLYPH[m === null ? "null" : m],
+          title: MODIFIER_LABELS[m === null ? "null" : m],
+        })),
         get: () => (token ? (token.modifier || "") : MIXED),
       },
     ];
+
+    // The token itself, read-only.  It is what the library stores and worth
+    // seeing, but it is *derived* from the three controls above — typing into
+    // it and then touching a button meant one of the two edits silently won.
+    // The note name now follows the letter, octave and accidental, which is
+    // the direction the teacher actually works in.
+    if (events.length === 1) {
+      const token_row = element("div", "ed-token");
+      token_row.appendChild(element("span", "ed-token-lbl", "Stored as"));
+      token_row.appendChild(element("code", "ed-token-value", events[0].note_name || "—"));
+      body.appendChild(token_row);
+    }
 
     renderGroup(body, "Pitch", pitchSpecs, events, (key, value) => {
       if (key === "note_name") return commit("note_name", value);
@@ -317,10 +391,32 @@ export class Inspector {
 
     renderGroup(body, "Rhythm", [
       {
-        key: "duration", label: "Duration", type: "select",
-        options: DURATIONS.map((d) => ({ value: d.value, label: `${d.label} (${d.short})` })),
+        // Shortest first, matching the toolbar palette and the number keys.
+        key: "duration", label: "Note value", type: "buttons",
+        options: DURATIONS.slice().reverse().map((d) => ({
+          value: d.value, label: d.short, title: d.label,
+        })),
       },
-    ], events, commit);
+      {
+        key: "tuplet_num", label: "Tuplet", type: "buttons",
+        options: [{ value: 0, label: "—", title: "No tuplet" }].concat(
+          TUPLET_CHOICES.map(([num, den]) => ({
+            value: num, label: String(num), title: `${num} in the time of ${den}`,
+          }))
+        ),
+        hint: "The note keeps its written value and sounds a fraction of it.",
+      },
+    ], events, (key, value, spec) => {
+      // The tuplet select carries only the note count; its denominator comes
+      // from the same table the toolbar buttons use, so the two cannot offer
+      // different meanings of "5".
+      if (key !== "tuplet_num") return commit(key, value, spec);
+      const found = TUPLET_CHOICES.find(([num]) => num === Number(value));
+      return this.hooks.onNote(positions, () => ({
+        tuplet_num: found ? found[0] : 0,
+        tuplet_den: found ? found[1] : 0,
+      }));
+    });
 
     // Not part of Rhythm: an offset is not a note value and does not change
     // one.  Where the note is written stays exactly where it is written — this

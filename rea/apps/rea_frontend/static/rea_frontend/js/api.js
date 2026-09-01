@@ -65,6 +65,19 @@ export const API = {
   },
 
   /** Get a single relative lesson with its bars/events. */
+  /** Every dictation a teacher has published, for the Dictation area. */
+  async listDictations() {
+    const data = await fetchJSON("/api/dictations/");
+    return data.results || data;
+  },
+
+  /** One dictation, whole.  Dictations are not served by the intonation
+   *  detail endpoints — those are the curriculum's — so they have a door of
+   *  their own. */
+  async getDictation(id, system = "relative") {
+    return fetchJSON(`/api/dictations/${id}/?system=${encodeURIComponent(system)}`);
+  },
+
   async getLesson(id) {
     return fetchJSON(`${BASE}/lessons/${id}/`);
   },
