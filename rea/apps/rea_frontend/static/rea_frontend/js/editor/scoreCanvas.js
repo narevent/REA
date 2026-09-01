@@ -19,18 +19,18 @@
  * pixel-identical to the practice view.
  */
 
-import { METRICS, drawScore, resolveVexFlow } from "../components/staveLayout.js?v=131";
+import {
+  METRICS, NOTEHEAD_REACH, drawScore, noteHeadYs, resolveVexFlow,
+} from "../components/staveLayout.js?v=164";
 import {
   LETTERS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX, OFFSET_GAIN,
   buildToken, offsetMs, splitToken,
-} from "./scoreDoc.js?v=131";
+} from "./scoreDoc.js?v=164";
 
 /** Vertical room added to each row when annotation lanes are showing. */
 const LANE_SPACE = 58;
 /** Headroom for stems, flags and beams when the Rhythm view is on. */
 const STEM_SPACE = 26;
-/** Half a notehead, for measuring how far down a bar's notes actually reach. */
-const NOTEHEAD_HALF = 12;
 
 /** F5 — VexFlow's top stave line — in the document's own diatonic units. */
 const TOP_LINE_DIATONIC = 2 * 7 + LETTERS.indexOf("f");
@@ -54,17 +54,19 @@ export class ScoreCanvas {
     this.notes = [];   // [{barIndex, noteIndex, el, stave}]
     this.barBoxes = []; // [{barIndex, stave, x, y, width, staveEl}]
     this.doc = null;
-    // `rhythm` is off by default for the same reason the practice stave has no
-    // stems at all: these are intonation exercises and the notation is there
-    // to show where a note sits.  It exists because the *editor* is the one
-    // place the rhythm is being decided — a teacher setting durations has no
-    // other way to see whether the line they are writing reads as they intend,
-    // and a column of identical noteheads shows nothing about it.
-    this.view = { degrees: true, offsets: true, volumes: false, rhythm: false };
+    // Rhythm is *on* here, and off on the practice stave.  The student's view
+    // drops stems on purpose — these are intonation exercises, and the eye
+    // should be on where the note sits — but the editor is the one place the
+    // rhythm is being decided, and a teacher setting durations has no other
+    // way to see whether the line they are writing reads as they intend.  A
+    // column of identical noteheads shows nothing about it.
+    this.view = { degrees: true, offsets: true, volumes: false, rhythm: true };
     this.selection = { notes: [], bars: [] };
     this.playing = null;
+    this.caret = null;
     this.rowExtra = 0;
     this._bindPointer();
+    this._bindContextMenu();
   }
 
   /** VexFlow, however the vendored build exposed itself. */
@@ -110,6 +112,8 @@ export class ScoreCanvas {
         duration: event.duration,
         is_rest: event.is_rest,
         visual_offset_px: event.visual_offset_px,
+        tuplet_num: event.tuplet_num,
+        tuplet_den: event.tuplet_den,
       })),
     }));
 
@@ -133,6 +137,7 @@ export class ScoreCanvas {
     this._decorateBars(this.svg, doc.bars || []);
     this._decorateNotes(this.svg, doc.bars || []);
     this._paintSelection();
+    this._paintCaret();
     if (this.playing) this._paintPlayhead();
   }
 
@@ -224,17 +229,13 @@ export class ScoreCanvas {
       let bottom = span.line4;
       this.notes.forEach((entry) => {
         if (entry.barIndex !== box.barIndex || !entry.el) return;
-        // Measured from the noteheads' own baselines, not from the note
-        // group's bounding box.  A VexFlow notehead is a glyph in the music
-        // font, and the group's box is the font's em box — the same ~160
-        // units tall for every note on the stave.  Using it made this loop
-        // dead code: `bottom` always came out far below the row, the clamp
-        // always won, and the lanes always sat at the bottom of the row
-        // instead of under the notes they label, which on a low-lying phrase
-        // put a bar's degrees closer to the next stave than to its own.
-        entry.el.querySelectorAll(".vf-notehead text").forEach((t) => {
-          const y = parseFloat(t.getAttribute("y"));
-          if (isFinite(y)) bottom = Math.max(bottom, y + NOTEHEAD_HALF);
+        // Measured from the noteheads' own baselines — see `noteHeadYs` for
+        // why the element's bounding box cannot answer this.  Believing it
+        // made this loop dead code: `bottom` always came out far below the
+        // row, the clamp always won, and the lanes always sat at the bottom
+        // of the row instead of under the notes they label.
+        noteHeadYs(entry.el).forEach((y) => {
+          bottom = Math.max(bottom, y + NOTEHEAD_REACH);
         });
       });
       const floor = box.y + METRICS.ROW_HEIGHT + (this.rowExtra || 0) - 26;
@@ -335,13 +336,64 @@ export class ScoreCanvas {
       );
       if (!entry || !entry.el) return;
       entry.el.classList.add("is-selected");
+      // Horizontally the element's own rectangle is honest; vertically it is
+      // the music font's em box, which is the same ~161 units for every note
+      // and made this frame taller than the canvas.  See `noteHeadYs`.
       const rect = entry.el.getBoundingClientRect();
+      const ys = noteHeadYs(entry.el);
+      const pad = 5;
+      const top = (ys.length ? Math.min(...ys) - NOTEHEAD_REACH : rect.top - svgRect.top) - pad;
+      const bottom = (ys.length ? Math.max(...ys) + NOTEHEAD_REACH : rect.bottom - svgRect.top) + pad;
       this.svg.appendChild(el("rect", {
-        x: rect.left - svgRect.left - 6, y: rect.top - svgRect.top - 5,
-        width: rect.width + 12, height: rect.height + 10,
+        x: rect.left - svgRect.left - 6, y: top,
+        width: rect.width + 12, height: Math.max(12, bottom - top),
         rx: 5, class: `ed-sel-box${i === 0 ? " is-anchor" : ""}`,
       }));
     });
+  }
+
+  /** Where the next written note will land, or `null` outside note input. */
+  setCaret(caret) {
+    this.caret = caret;
+    if (this.svg) this._paintCaret();
+  }
+
+  /**
+   * Draw the note-input caret.
+   *
+   * A vertical bar between the notes it sits between, in the accent colour —
+   * the same idea as a text cursor, and read the same way.  A mode that
+   * changes what every letter key does has to be visible on the thing it is
+   * about to change, not only in a toolbar button at the top of the screen.
+   */
+  _paintCaret() {
+    if (!this.svg) return;
+    this.svg.querySelectorAll(".ed-caret").forEach((n) => n.remove());
+    if (!this.caret) return;
+    const box = this.barBoxes.find((b) => b.barIndex === this.caret.barIndex);
+    if (!box) return;
+    const span = this._barSpan(box, 20);
+
+    // Between the note before the caret and the one after it, and at the far
+    // end of a bar just past its last note — so an empty bar shows the caret
+    // where its first note would go rather than nowhere.
+    const inBar = this.notes.filter((n) => n.barIndex === this.caret.barIndex);
+    const svgRect = this.svg.getBoundingClientRect();
+    const edge = (entry, side) => {
+      const r = entry.el.getBoundingClientRect();
+      return (side === "left" ? r.left : r.right) - svgRect.left;
+    };
+    const after = inBar[this.caret.at];
+    const before = inBar[this.caret.at - 1];
+    let x;
+    if (after && before) x = (edge(before, "right") + edge(after, "left")) / 2;
+    else if (after) x = edge(after, "left") - 6;
+    else if (before) x = edge(before, "right") + 6;
+    else x = box.x + 18;
+
+    this.svg.appendChild(el("line", {
+      x1: x, y1: span.top, x2: x, y2: span.bottom, class: "ed-caret",
+    }));
   }
 
   /** Mark the note currently sounding, or clear with `null`. */
@@ -485,6 +537,29 @@ export class ScoreCanvas {
    * across five lines should be one undo step, not five, and the document
    * should never see the pitches the pointer merely passed over.
    */
+  /**
+   * Dragging a note.
+   *
+   * A plain drag does one of two things, decided by which way the hand moves
+   * first and then locked for the rest of the gesture: **up or down** changes
+   * the pitch, **left or right** moves the note along the bar.  Locking the
+   * axis matters because neither gesture is ever meant as a diagonal — a
+   * teacher pulling a note up does not want it to change places on the way.
+   *
+   * Alt drags it along the *time* axis (when it sounds); Alt+Shift drags it
+   * along the page (where it is drawn).  Both are sideways gestures because
+   * both are sideways ideas, and the modifier picks which.
+   *
+   * Everything except the playback offset is applied *as you drag*, through
+   * `ScoreDoc`'s continuous-edit path: the notehead really moves, with its
+   * stem, its beam and its neighbours' spacing all following, because it is
+   * the real score being redrawn and not a preview of one.  This used to be a
+   * translucent ellipse floating at the target pitch while the actual note
+   * sat still — which reads, correctly, as the editor having not understood
+   * the drag.  The playback offset is the one exception: it changes when a
+   * note sounds and nothing about where it is drawn, so a number by the
+   * cursor is the whole of what there is to show.
+   */
   _beginDrag(event, note) {
     const position = { barIndex: note.barIndex, noteIndex: note.noteIndex };
     this.handlers.onSelectNote && this.handlers.onSelectNote(position, event);
@@ -493,54 +568,102 @@ export class ScoreCanvas {
     const bar = this.doc.bars[note.barIndex];
     const source = bar && bar.events[note.noteIndex];
     if (!source) return;
-    // Alt drags the note along the *time* axis (when it sounds); Alt+Shift
-    // drags it along the page (where it is drawn).  Both are sideways
-    // gestures because both are sideways ideas, and the modifier picks which.
     const offsetDrag = event.altKey && !event.shiftKey;
     const visualDrag = event.altKey && event.shiftKey;
     const box = this.barBoxes.find((b) => b.barIndex === note.barIndex);
     const lineHeight = box && box.stave
       ? (box.stave.getYForLine(1) - box.stave.getYForLine(0)) : 10;
 
-    this._drag = { position, start, moved: false, offsetDrag, visualDrag, delta: 0 };
+    // How far the hand must travel before the editor commits to an axis.  Big
+    // enough that a click with a tremor stays a click.
+    const AXIS_THRESHOLD = 4;
+
+    const drag = {
+      position, start, moved: false, delta: 0,
+      offsetDrag, visualDrag,
+      axis: (offsetDrag || visualDrag) ? "modifier" : null,
+      live: false,
+      // Where the note is *now*, which reordering changes under us.
+      at: note.noteIndex,
+    };
+    this._drag = drag;
+
+    const beginLive = (label) => {
+      if (drag.live) return;
+      drag.live = true;
+      this.handlers.onDragBegin && this.handlers.onDragBegin(label);
+    };
 
     const onMove = (e) => {
       const dx = e.clientX - start.x;
       const dy = e.clientY - start.y;
-      if (!this._drag.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
-      this._drag.moved = true;
-      if (offsetDrag) {
-        this._drag.delta = Math.round(dx / 6);
-        const next = Math.max(-60, Math.min(60, (source.horizontal_offset_ms || 0) + this._drag.delta));
+      if (!drag.moved) {
+        if (Math.abs(dx) < AXIS_THRESHOLD && Math.abs(dy) < AXIS_THRESHOLD) return;
+        drag.moved = true;
+        if (!drag.axis) drag.axis = Math.abs(dx) > Math.abs(dy) ? "order" : "pitch";
+      }
+
+      if (drag.offsetDrag) {
+        drag.delta = Math.round(dx / 6);
+        const next = Math.max(-60, Math.min(60, (source.horizontal_offset_ms || 0) + drag.delta));
         const ms = next * OFFSET_GAIN;
         this._showDragHint(`sounds ${ms >= 0 ? "+" : ""}${ms} ms`, e);
-      } else if (visualDrag) {
+        return;
+      }
+      if (drag.visualDrag) {
         // One pixel of pointer travel is one pixel of stave, so the notehead
         // ends up under the cursor rather than somewhere proportional to it.
-        this._drag.delta = Math.round(dx);
-        const next = Math.max(-MAX_VISUAL_OFFSET_PX, Math.min(
-          MAX_VISUAL_OFFSET_PX, (source.visual_offset_px || 0) + this._drag.delta
-        ));
-        this._showDragHint(`drawn ${next >= 0 ? "+" : ""}${next} px`, e);
-      } else {
-        this._drag.delta = -Math.round((dy / lineHeight) * 2);
-        this._showDragGhost(note, this._drag.delta, e);
+        beginLive("nudge note");
+        drag.delta = Math.max(-MAX_VISUAL_OFFSET_PX, Math.min(MAX_VISUAL_OFFSET_PX,
+          (source.visual_offset_px || 0) + Math.round(dx)));
+        this.handlers.onDragVisual && this.handlers.onDragVisual(
+          { barIndex: drag.position.barIndex, noteIndex: drag.at }, drag.delta
+        );
+        this._showDragHint(`drawn ${drag.delta >= 0 ? "+" : ""}${drag.delta} px`, e);
+        return;
       }
+      if (drag.axis === "pitch") {
+        beginLive("drag note");
+        drag.delta = -Math.round((dy / lineHeight) * 2);
+        this.handlers.onDragPitch && this.handlers.onDragPitch(
+          { barIndex: drag.position.barIndex, noteIndex: drag.at }, drag.delta
+        );
+        const moved = this.doc.bars[drag.position.barIndex].events[drag.at];
+        if (moved) this._showDragHint(moved.note_name, e);
+        return;
+      }
+      // Sideways: the note changes places with its neighbours.  The target is
+      // read from the pointer's own x against the bar's current layout, which
+      // has already been redrawn with the note in its last position — so the
+      // note follows the cursor instead of racing ahead of it.
+      beginLive("move note");
+      const to = this.insertIndexAt(drag.position.barIndex, e.clientX);
+      const target = to > drag.at ? to - 1 : to;
+      if (target !== drag.at && target >= 0) {
+        this.handlers.onDragOrder && this.handlers.onDragOrder(
+          { barIndex: drag.position.barIndex, noteIndex: drag.at },
+          { barIndex: drag.position.barIndex, noteIndex: to }
+        );
+        drag.at = target;
+        drag.delta = 1;
+      }
+      this._showDragHint(`note ${drag.at + 1} of ${this.doc.bars[drag.position.barIndex].events.length}`, e);
     };
 
     const onUp = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       this._clearDragChrome();
-      const drag = this._drag;
       this._drag = null;
-      if (!drag || !drag.moved || !drag.delta) return;
+      if (drag.live) {
+        this.handlers.onDragEnd && this.handlers.onDragEnd(
+          { barIndex: drag.position.barIndex, noteIndex: drag.at }
+        );
+        return;
+      }
+      if (!drag.moved || !drag.delta) return;
       if (drag.offsetDrag) {
         this.handlers.onOffsetDrag && this.handlers.onOffsetDrag(drag.position, drag.delta);
-      } else if (drag.visualDrag) {
-        this.handlers.onVisualOffsetDrag && this.handlers.onVisualOffsetDrag(drag.position, drag.delta);
-      } else {
-        this.handlers.onPitchDrag && this.handlers.onPitchDrag(drag.position, drag.delta);
       }
     };
 
@@ -548,35 +671,16 @@ export class ScoreCanvas {
     window.addEventListener("mouseup", onUp);
   }
 
-  _showDragGhost(note, steps, event) {
-    if (!this.svg || !note.el) return;
-    const box = this.barBoxes.find((b) => b.barIndex === note.barIndex);
-    if (!box || !box.stave) return;
-    const svgRect = this.svg.getBoundingClientRect();
-    const rect = note.el.getBoundingClientRect();
-    const lineHeight = box.stave.getYForLine(1) - box.stave.getYForLine(0);
-    const cx = rect.left + rect.width / 2 - svgRect.left;
-    const cy = rect.top + rect.height / 2 - svgRect.top - (steps * lineHeight) / 2;
-    if (!this._ghost) {
-      this._ghost = el("ellipse", { rx: 7, ry: 5.5, class: "ed-drag-ghost" });
-      this.svg.appendChild(this._ghost);
-    }
-    this._ghost.setAttribute("cx", cx);
-    this._ghost.setAttribute("cy", cy);
-    const bar = this.doc.bars[note.barIndex];
-    const source = bar && bar.events[note.noteIndex];
-    if (source) {
-      const { letter, octave } = splitToken(source.note_name);
-      const target = octave * 7 + LETTERS.indexOf(letter) + steps;
-      this._showDragHint(
-        buildToken({
-          letter: LETTERS[((target % 7) + 7) % 7],
-          octave: Math.floor(target / 7),
-          modifier: splitToken(source.note_name).modifier,
-        }),
-        event
+  /** Right-click on a note: the editor answers with its properties. */
+  _bindContextMenu() {
+    this.container.addEventListener("contextmenu", (event) => {
+      const note = this._noteAt(event.clientX, event.clientY);
+      if (!note) return;
+      event.preventDefault();
+      this.handlers.onNoteMenu && this.handlers.onNoteMenu(
+        { barIndex: note.barIndex, noteIndex: note.noteIndex }, event
       );
-    }
+    });
   }
 
   _showDragHint(text, event) {
@@ -591,7 +695,6 @@ export class ScoreCanvas {
   }
 
   _clearDragChrome() {
-    if (this._ghost) { this._ghost.remove(); this._ghost = null; }
     if (this._hint) { this._hint.remove(); this._hint = null; }
   }
 

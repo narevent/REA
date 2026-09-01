@@ -19,12 +19,16 @@ from rest_framework.response import Response
 from rest_framework.reverse import reverse
 from rest_framework.views import APIView
 
+from django.shortcuts import get_object_or_404
+
 from .absolute.models import Lesson as AbsoluteLesson
+from .absolute.serializers import LessonSerializer as AbsoluteLessonSerializer
 from .relative.models import KeyModel, Lesson as RelativeLesson
+from .relative.serializers import LessonSerializer as RelativeLessonSerializer
 
 
 def _relative_groups(texture=None):
-    qs = RelativeLesson.objects.all()
+    qs = RelativeLesson.objects.filter(shelf="")
     if texture:
         qs = qs.filter(texture=texture)
     qs = qs.values("texture", "category").annotate(n=Count("pk")).order_by("texture", "category")
@@ -40,7 +44,7 @@ def _relative_groups(texture=None):
 
 
 def _absolute_groups(texture=None):
-    qs = AbsoluteLesson.objects.all()
+    qs = AbsoluteLesson.objects.filter(shelf="")
     if texture:
         qs = qs.filter(texture=texture)
     qs = qs.values("texture", "category").annotate(n=Count("pk")).order_by("texture", "category")
@@ -170,7 +174,7 @@ class FacetsView(APIView):
         ) if p.get(k) not in (None, "")}
 
         if system == "relative":
-            qs = RelativeLesson.objects.filter(texture=texture)
+            qs = RelativeLesson.objects.filter(shelf="").filter(texture=texture)
             if echo.get("category"):
                 qs = qs.filter(category=echo["category"])
             if echo.get("inversion"):
@@ -207,7 +211,7 @@ class FacetsView(APIView):
             lessons = _relative_facet_results(qs) if include_results else []
 
         else:
-            qs = AbsoluteLesson.objects.filter(texture=texture)
+            qs = AbsoluteLesson.objects.filter(shelf="").filter(texture=texture)
             if echo.get("category"):
                 qs = qs.filter(category=echo["category"])
             if echo.get("inversion"):
@@ -294,7 +298,7 @@ class ExerciseListView(APIView):
         results = []
 
         if system in ("", "relative"):
-            qs = RelativeLesson.objects.select_related("key_model").order_by(
+            qs = RelativeLesson.objects.filter(shelf="").select_related("key_model").order_by(
                 "key_model__name", "texture", "formula_name",
                 "category", "inversion", "interval_name", "part", "variant",
             )
@@ -317,7 +321,7 @@ class ExerciseListView(APIView):
                 })
 
         if system in ("", "absolute"):
-            qs = AbsoluteLesson.objects.order_by(
+            qs = AbsoluteLesson.objects.filter(shelf="").order_by(
                 "texture", "category", "span", "grades",
                 "quality", "interval_size", "inversion",
                 "part", "phase", "exercise_number",
@@ -420,3 +424,59 @@ def _absolute_facet_results(qs):
             "exercise_type": r["exercise_type"], "timed": r["timed"],
         })
     return out
+
+
+class DictationListView(APIView):
+    """The dictations a teacher has written, for the student's Dictation area.
+
+    Dictations are ordinary lessons on their own shelf: the same bars, the
+    same events, played by the same chapters.  What differs is where they are
+    filed — off the intonation curriculum, in a collection a teacher fills
+    directly — so they need a listing of their own rather than a facet on the
+    intonation endpoints, which serve the curriculum and only the curriculum.
+
+    Read-only and open to any signed-in user: a dictation is *published* the
+    moment a teacher saves it there, which is the whole point of the shelf
+    being separate from the drafts.
+    """
+
+    def get(self, request):
+        rows = []
+        for system, model in (("relative", RelativeLesson), ("absolute", AbsoluteLesson)):
+            qs = model.objects.filter(shelf=model.Shelf.DICTATION)
+            if system == "relative":
+                qs = qs.select_related("key_model")
+            for lesson in qs.annotate(bar_count=Count("bars")).order_by("pk"):
+                rows.append({
+                    "id": lesson.pk,
+                    "system": system,
+                    "name": lesson.display_name,
+                    "texture": lesson.texture,
+                    "bars": lesson.bar_count,
+                })
+        return Response({"count": len(rows), "results": rows})
+
+
+class DictationDetailView(APIView):
+    """One dictation, whole — bars, events and all.
+
+    A dictation cannot be fetched through the intonation detail endpoints,
+    and that is deliberate rather than an oversight: those serve the
+    curriculum and filter to it, which is what keeps drafts and dictations out
+    of a student's intonation lessons.  Reaching one therefore needs a door of
+    its own, and this is it — the same serializers, the same shape, so the
+    practice app plays a dictation with exactly the machinery it plays
+    everything else with.
+    """
+
+    def get(self, request, pk):
+        system = request.query_params.get("system", "relative")
+        if system == "absolute":
+            lesson = get_object_or_404(
+                AbsoluteLesson.objects.filter(shelf=AbsoluteLesson.Shelf.DICTATION), pk=pk
+            )
+            return Response(AbsoluteLessonSerializer(lesson).data)
+        lesson = get_object_or_404(
+            RelativeLesson.objects.filter(shelf=RelativeLesson.Shelf.DICTATION), pk=pk
+        )
+        return Response(RelativeLessonSerializer(lesson).data)

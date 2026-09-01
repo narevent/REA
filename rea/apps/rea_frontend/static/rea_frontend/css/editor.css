@@ -55,10 +55,42 @@
 .ed-subtitle { margin: 4px 0 0; font-size: 12.5px; color: var(--muted); }
 
 /* ---------------------------------------------------------------- toolbar */
+/* Two rows: what you do to the exercise, and what you write into it.  The
+   groups inside a row are separated by a hairline rather than by a gap wide
+   enough to read as unrelated — the whole row is one kind of thing. */
 .ed-toolbar {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
-  padding: 0 24px 12px; border-bottom: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 0;
+  padding: 0 24px; border-bottom: 1px solid var(--border);
 }
+.ed-toolbar-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding: 0 0 10px;
+}
+.ed-toolbar-write {
+  padding: 9px 0 11px; border-top: 1px solid var(--border);
+  gap: 4px 14px;
+}
+.ed-tool-group { display: flex; align-items: center; gap: 4px; }
+/* A hairline between groups, never before the first. */
+.ed-toolbar-row .ed-tool-group + .ed-tool-group,
+.ed-toolbar-row .ed-tool-group + .ed-palette,
+.ed-toolbar-row .ed-palette + .ed-palette,
+.ed-toolbar-row .ed-palette + .ed-tool-group {
+  margin-left: 8px; padding-left: 12px; border-left: 1px solid var(--border);
+}
+/* The whole-exercise actions sit away at the end of the row. */
+.ed-tool-rare { margin-left: auto; }
+/* ...and so do the view toggles on the writing row. */
+.ed-toolbar-write .ed-tool-views { margin-left: auto; }
+
+/* A palette is a caption over its choices, so a row of "1/8 1/4 1/2" says
+   what it is without a tooltip. */
+.ed-palette { display: flex; flex-direction: column; gap: 3px; }
+.ed-palette-lbl {
+  font-size: 9px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--muted-2);
+}
+.ed-palette-set { display: flex; gap: 2px; }
 .ed-tool-group { display: flex; gap: 6px; align-items: center; }
 .ed-tool-group + .ed-tool-group { padding-left: 14px; border-left: 1px solid var(--border); }
 .ed-tool-views { margin-left: auto; gap: 12px; }
@@ -75,6 +107,31 @@
 .ed-btn-primary:hover:not(:disabled) { background: var(--accent-ink); border-color: var(--accent-ink); }
 .ed-btn-quiet { background: transparent; border-color: var(--border); color: var(--muted); }
 .ed-btn-danger { border-color: var(--bad); color: var(--bad); }
+/* A toggled-on tool reads as pressed rather than as merely hovered: note
+   input changes what every letter key does, so it has to look different from
+   a button that was clicked a moment ago. */
+.ed-btn.is-on {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.ed-btn-ico { display: inline-flex; margin-right: 6px; vertical-align: -2px; }
+
+/* ------------------------------------------------------- note input tools */
+.ed-dur {
+  font: inherit; font-size: 11px; font-variant-numeric: tabular-nums;
+  min-width: 34px; padding: 6px 4px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--surface);
+  color: var(--muted); border-radius: var(--r-sm);
+}
+.ed-dur:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-2); }
+.ed-dur.is-on { background: var(--accent-tint); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+/* Accidental glyphs want to be bigger than the "1/8" labels beside them and
+   are narrower, so they get their own sizing rather than a shared row style. */
+.ed-accidentals { margin-left: 2px; }
+.ed-acc { min-width: 26px; font-size: 14px; line-height: 1; padding: 4px 2px 6px; }
+.ed-tup { min-width: 24px; font-size: 12px; }
+
+/* The note-input caret: a text cursor, for a stave. */
+.ed-caret { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
 .ed-btn-danger:hover:not(:disabled) { background: var(--bad); border-color: var(--bad); color: #fff; }
 
 /* ------------------------------------------------------------------- ask */
@@ -98,6 +155,85 @@
 /* Reversed, so the least destructive answer sits nearest the cursor's rest
    position and the primary one reads last. */
 .ed-ask-actions { display: flex; flex-direction: row-reverse; flex-wrap: wrap; gap: 8px; }
+.ed-ask-form { display: flex; flex-direction: column; gap: 14px; }
+.ed-ask-form .ed-ask-actions { margin-top: 4px; }
+/* A row of buttons standing in for a dropdown: every option visible, the
+   current one visible, and one click to change it.  Wraps, because the note
+   values are six and the panel is narrow. */
+.ed-btnset { display: flex; flex-wrap: wrap; gap: 3px; }
+.ed-choice {
+  font: inherit; font-size: 11.5px; line-height: 1;
+  min-width: 28px; padding: 6px 6px; cursor: pointer;
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--muted);
+}
+.ed-choice:hover { color: var(--ink); border-color: var(--ink-2); }
+.ed-choice.is-on {
+  background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600;
+}
+/* Several notes selected that do not agree: nothing is shown as current, and
+   the row says so by going quiet rather than by lying about one of them. */
+.ed-btnset.is-mixed .ed-choice { opacity: 0.55; }
+
+/* The stored token, shown but not editable — it follows the buttons above. */
+.ed-token {
+  display: flex; align-items: baseline; gap: 8px;
+  margin: 0 0 10px; font-size: 11px; color: var(--muted-2);
+}
+.ed-token-value { font-family: var(--font-num, monospace); font-size: 12px; color: var(--ink-2); }
+
+/* ------------------------------------------------------------- note menu */
+/* The Note panel, brought to the cursor.  Same fields as the sidebar, said
+   shorter: a menu at the pointer is read by somebody who already knows what
+   these are, so the hints and the group headings come off and the rows draw
+   in tight. */
+.ed-menu {
+  /* Wide enough for the seven letters and the six note values to each sit on
+     one line — a palette that wraps stops reading as a palette. */
+  position: fixed; z-index: 90; width: 268px;
+  max-height: 74vh; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-md); box-shadow: var(--shadow-2);
+  padding: 8px 10px 10px;
+}
+.ed-menu .ed-field-hint,
+.ed-menu .ed-note-place { display: none; }
+.ed-menu .ed-group { margin: 0; }
+.ed-menu .ed-group-title {
+  margin: 8px 0 4px; font-size: 9.5px; letter-spacing: 0.07em;
+}
+.ed-menu .ed-group:first-child .ed-group-title { margin-top: 2px; }
+.ed-menu .ed-field { gap: 3px; margin-bottom: 6px; }
+.ed-menu .ed-field-lbl { font-size: 11px; }
+.ed-menu .ed-input, .ed-menu .ed-input-num { padding: 4px 6px; font-size: 12px; }
+.ed-menu .ed-note-summary { margin-bottom: 6px; padding: 5px 7px; }
+.ed-menu .ed-note-pitch { font-size: 12.5px; }
+.ed-menu .ed-token { margin-bottom: 6px; }
+.ed-menu .ed-choice { min-width: 25px; padding: 5px 3px; font-size: 11px; }
+
+/* The destination picker: a filter over the curriculum's leaves, each shown
+   as its whole path.  A list rather than a dropdown because the path is the
+   information, and a <select> shows one line at a time. */
+.ed-picker { display: flex; flex-direction: column; gap: 6px; }
+.ed-picker-list {
+  max-height: 190px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  background: var(--surface-2); padding: 3px;
+}
+.ed-picker-item {
+  display: block; width: 100%; text-align: left; font: inherit; font-size: 12px;
+  padding: 5px 7px; border: 0; border-radius: 4px; background: transparent;
+  color: var(--ink-2); cursor: pointer;
+}
+.ed-picker-item:hover { background: var(--surface); color: var(--ink); }
+.ed-picker-item.is-on { background: var(--accent); color: #fff; font-weight: 500; }
+
+.ed-ask-error {
+  margin: 0; padding: 9px 11px; border-radius: var(--r-sm);
+  font-size: 12.5px; line-height: 1.5;
+  color: var(--bad); background: var(--bad-tint);
+  border: 1px solid color-mix(in srgb, var(--bad) 25%, transparent);
+}
 
 .ed-toggle {
   display: inline-flex; align-items: center; gap: 6px;
@@ -170,7 +306,6 @@
 .ed-ann-volume { fill: var(--muted-2); stroke: none; opacity: 0.6; }
 .ed-ann-enh { font-size: 9px; fill: var(--accent); font-style: italic; }
 
-.ed-drag-ghost { fill: var(--accent); stroke: none; opacity: 0.55; pointer-events: none; }
 .ed-drag-hint {
   position: fixed; z-index: 50; pointer-events: none;
   background: var(--ink); color: var(--canvas);
@@ -214,18 +349,40 @@
 }
 .ed-seg-btn.is-active { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-1); }
 
-.ed-lib-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.ed-lib-list { display: flex; flex-direction: column; gap: 2px; }
-.ed-lib-count { margin: 2px 0 6px; font-size: 11px; color: var(--muted-2); }
-.ed-lib-item {
-  display: flex; flex-direction: column; gap: 2px; text-align: left;
-  font: inherit; padding: 7px 9px; border: 1px solid transparent; border-radius: var(--r-sm);
+/* The curriculum tree.  One flat column of rows with an indent variable
+   rather than nested containers: the rows come from a recursive walk, and a
+   flat list keeps every row the same height, keeps the hit areas rectangular,
+   and lets a long branch scroll without nested scrollers. */
+.ed-tree { display: flex; flex-direction: column; gap: 1px; min-height: 0; }
+.ed-tree-node {
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  font: inherit; font-size: 12.5px; color: var(--ink);
+  padding: 5px 8px 5px calc(8px + var(--depth, 0) * 13px);
+  border: 1px solid transparent; border-radius: var(--r-sm);
   background: transparent; cursor: pointer;
 }
-.ed-lib-item:hover { background: var(--surface-2); }
-.ed-lib-item.is-current { background: var(--accent-tint); border-color: var(--accent); }
-.ed-lib-name { font-size: 12.5px; color: var(--ink); line-height: 1.35; }
-.ed-lib-meta { font-size: 11px; color: var(--muted-2); }
+.ed-tree-node:hover { background: var(--surface-2); }
+.ed-tree-twist {
+  flex: none; width: 10px; font-size: 9px; color: var(--muted-2); line-height: 1;
+}
+.ed-tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-tree-count {
+  flex: none; font-size: 11px; color: var(--muted-2);
+  font-variant-numeric: tabular-nums;
+}
+/* Branches are structure and read quieter; the exercises themselves are the
+   things you can actually open, so they carry the ink. */
+.ed-tree-node:not(.ed-tree-item) .ed-tree-name { color: var(--ink-2); }
+.ed-tree-node.is-open > .ed-tree-name { color: var(--ink); font-weight: 500; }
+.ed-tree-item .ed-tree-name { color: var(--ink); }
+.ed-tree-item.is-current {
+  background: var(--accent-tint); border-color: var(--accent);
+}
+.ed-tree-item.is-current .ed-tree-name { font-weight: 600; }
+.ed-tree-note {
+  margin: 2px 0 4px; padding-left: calc(8px + var(--depth, 0) * 13px);
+  font-size: 11.5px;
+}
 
 /* -------------------------------------------------------------- inspector */
 .ed-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }

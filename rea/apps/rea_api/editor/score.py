@@ -30,16 +30,18 @@ SYSTEMS = ("relative", "absolute")
 # Lesson fields the editor may set, per system.  Everything else on the row is
 # either derived (``pitch_class``), structural (``bars``), or import-only
 # (``raw``, which is kept untouched so a re-imported lesson keeps its origin).
+# `shelf` travels with the identity because that is what it is about: which
+# collection a lesson is filed in, and whether it has been filed at all.
 RELATIVE_META_FIELDS = (
     "texture", "formula_name", "category", "inversion", "interval_name",
     "part", "variant", "source_file", "tempo", "draw_only_note_heads",
-    "default_rhythm", "mid_bar_time",
+    "default_rhythm", "mid_bar_time", "shelf",
 )
 ABSOLUTE_META_FIELDS = (
     "texture", "category", "span", "grades", "quality", "interval_size",
     "inversion", "part", "phase", "exercise_number", "exercise_type",
     "timed", "chromatic", "source_file", "tempo", "draw_only_note_heads",
-    "default_rhythm", "mid_bar_time",
+    "default_rhythm", "mid_bar_time", "shelf",
 )
 
 BAR_FIELDS = (
@@ -52,6 +54,7 @@ RELATIVE_BAR_FIELDS = ("degree", "quality")
 EVENT_FIELDS = (
     "horizontal_offset_ms", "visual_offset_px", "duration", "attack_decay_time",
     "volume", "note_name", "alias_degree", "is_rest", "is_enharmonic", "event_type",
+    "tuplet_num", "tuplet_den",
 )
 
 
@@ -72,6 +75,8 @@ def event_document(event):
         "duration": event.duration,
         "horizontal_offset_ms": event.horizontal_offset_ms,
         "visual_offset_px": event.visual_offset_px,
+        "tuplet_num": event.tuplet_num,
+        "tuplet_den": event.tuplet_den,
         "attack_decay_time": event.attack_decay_time,
         "volume": event.volume,
         "is_rest": event.is_rest,

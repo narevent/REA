@@ -304,6 +304,79 @@ class ValidationTests(EditorTestCase):
         self.assertEqual(event.visual_offset_px, 12)
         self.assertEqual(event.horizontal_offset_ms, 0, "the drawing must not move the sound")
 
+    def test_a_new_exercise_starts_as_a_draft(self):
+        blank = self.client.get(reverse("editor-blank", args=["relative"])).json()
+        self.assertEqual(blank["meta"]["shelf"], "draft")
+
+    def test_students_never_see_a_draft(self):
+        """The one guarantee drafts have to keep.
+
+        An unfinished exercise appearing in somebody's practice session is the
+        failure this feature could cause, so it is checked against the API the
+        practice app actually reads rather than against the queryset.
+        """
+        payload = self.relative_payload()
+        payload["meta"]["shelf"] = "draft"
+        payload["meta"]["variant"] = "WIP"
+        self.post(reverse("editor-create", args=["relative"]), payload)
+
+        self.client.logout()
+        self.sign_in(self.student)
+        listing = self.client.get("/api/intonation/relative/lessons/?page_size=2000").json()
+        names = [row.get("display_name", "") for row in listing.get("results", listing)]
+        self.assertNotIn("WIP", " ".join(names))
+
+    def test_shelves_are_not_mixed_into_each_other(self):
+        for shelf, name in (("draft", "WIP"), ("dictation", "Dictation one")):
+            payload = self.relative_payload()
+            payload["meta"]["shelf"] = shelf
+            payload["meta"]["variant"] = name
+            self.post(reverse("editor-create", args=["relative"]), payload)
+
+        def names(**params):
+            data = self.client.get(reverse("editor-browse"), dict({"system": "relative"}, **params)).json()
+            return [r["name"] for r in data["results"]]
+
+        self.assertEqual(names(), [], "the curriculum shelf holds neither")
+        self.assertEqual(names(shelf="draft"), ["WIP"])
+        self.assertEqual(names(shelf="dictation"), ["Dictation one"])
+
+    def test_two_untitled_drafts_can_coexist(self):
+        """Uniqueness is about filing, and a draft has not been filed."""
+        for _ in range(2):
+            payload = self.relative_payload()
+            payload["meta"]["shelf"] = "draft"
+            payload["meta"]["variant"] = ""
+            response = self.post(reverse("editor-create", args=["relative"]), payload)
+            self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(RelativeLesson.objects.filter(shelf="draft").count(), 2)
+
+    def test_students_see_dictations_but_not_in_the_curriculum(self):
+        """The two halves of what a dictation shelf is for."""
+        payload = self.relative_payload()
+        payload["meta"]["shelf"] = "dictation"
+        payload["meta"]["variant"] = "Bartok no 3"
+        self.post(reverse("editor-create", args=["relative"]), payload)
+
+        self.client.logout()
+        self.sign_in(self.student)
+        # ...offered under Dictation,
+        listed = self.client.get(reverse("dictations")).json()
+        self.assertEqual([r["name"] for r in listed["results"]], ["Bartok no 3"])
+        # ...and nowhere inside the intonation curriculum.
+        lessons = self.client.get("/api/intonation/relative/lessons/?page_size=2000").json()
+        names = [row.get("display_name", "") for row in lessons.get("results", lessons)]
+        self.assertNotIn("Bartok no 3", " ".join(names))
+
+    def test_filed_exercises_still_have_to_be_unique(self):
+        payload = self.relative_payload()
+        self.assertEqual(
+            self.post(reverse("editor-create", args=["relative"]), payload).status_code, 201
+        )
+        self.assertEqual(
+            self.post(reverse("editor-create", args=["relative"]), payload).status_code, 409
+        )
+
     def test_a_failed_save_leaves_the_stored_score_alone(self):
         created = self.post(
             reverse("editor-create", args=["relative"]), self.relative_payload()

@@ -80,6 +80,10 @@ class EventSerializer(serializers.Serializer):
     attack_decay_time = serializers.FloatField(
         required=False, allow_null=True, default=None, min_value=0, max_value=5
     )
+    # A tuplet is `tuplet_num` notes in the time of `tuplet_den`; both zero is
+    # an ordinary note.  See `MusicEvent.tuplet_num`.
+    tuplet_num = serializers.IntegerField(default=0, min_value=0, max_value=12)
+    tuplet_den = serializers.IntegerField(default=0, min_value=0, max_value=12)
     volume = serializers.IntegerField(default=80, min_value=0, max_value=127)
     is_rest = serializers.BooleanField(default=False)
     is_enharmonic = serializers.BooleanField(default=False)
@@ -94,6 +98,19 @@ class EventSerializer(serializers.Serializer):
         return value
 
     def validate(self, attrs):
+        # A tuplet needs both halves of its ratio or neither: "3 in the time
+        # of nothing" has no length, and a lone denominator says nothing at
+        # all.  Refused rather than repaired, because guessing which half was
+        # meant would silently change how the exercise sounds.
+        num, den = attrs.get("tuplet_num", 0), attrs.get("tuplet_den", 0)
+        if bool(num) != bool(den):
+            raise serializers.ValidationError(
+                "A tuplet needs both a note count and the time it occupies."
+            )
+        if num and num == den:
+            raise serializers.ValidationError(
+                "A tuplet of n notes in the time of n is not a tuplet."
+            )
         if attrs.get("is_rest"):
             # A rest sounds nothing, so its name is noise; drop it rather than
             # validate it, and clear the accidental flags that go with a pitch.

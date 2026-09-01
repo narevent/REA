@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=131" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=131" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=164" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=164" />
 </head>
 <body class="ed-body">
   <header class="app-header">
@@ -51,46 +51,63 @@
       <p class="ed-status" id="ed-status">Loading the editor…</p>
 
       <div class="ed-help" id="ed-help" hidden>
-        <h2>Keyboard</h2>
+        {% comment %}The bindings follow MuseScore wherever MuseScore has an
+        opinion, so that hands trained on the notation program most of these
+        teachers already use do not have to be retrained for this one.
+        {% endcomment %}
+        <h2>Writing notes</h2>
         <dl>
-          <dt>c d e f g a h</dt><dd>set the selected note's letter (<kbd>h</kbd> is B natural)</dd>
-          <dt>Shift + letter</dt><dd>write a new note after the selection</dd>
-          <dt>← →</dt><dd>move through the notes</dd>
-          <dt>Alt + ← →</dt><dd>move the note itself, across bars if need be</dd>
-          <dt>↑ ↓</dt><dd>raise / lower by a step — with Shift, by an octave</dd>
+          <dt>c d e f g a h</dt><dd>write that note at the caret (<kbd>h</kbd> is B natural)</dd>
+          <dt>0</dt><dd>write a rest</dd>
+          <dt>2 – 7</dt><dd>note value: 2 is a thirty-second, 4 an eighth, 5 a quarter, 7 a whole</dd>
+          <dt>← →</dt><dd>move the caret, selecting the note it sits after</dd>
+          <dt>Backspace</dt><dd>rub out the note before the caret</dd>
+          <dt>Delete</dt><dd>delete what is selected</dd>
+          <dt>Esc</dt><dd>drop the selection</dd>
+          <dt>Tuplets</dt><dd>select the notes, then press 3, 5, 6 or 7 in the toolbar — as many notes as the tuplet has, or a multiple of it</dd>
+        </dl>
+        <h2>Changing notes</h2>
+        <dl>
+          <dt>↑ ↓</dt><dd>raise / lower by a semitone, respelled for the key</dd>
+          <dt>⌘/Ctrl + ↑ ↓</dt><dd>by an octave</dd>
+          <dt>Alt + Shift + ↑ ↓</dt><dd>by a step within the key</dd>
           <dt># b n</dt><dd>sharp, flat, or back to whatever the key signature says</dd>
           <dt>Alt + ↑ ↓</dt><dd>cycle the accidental: natural, ♯, ♭, 𝄪, naturalised</dd>
-          <dt>1 – 6</dt><dd>duration, from a whole note to a thirty-second</dd>
+          <dt>r</dt><dd>turn the note into a rest, and back</dd>
+          <dt>Shift + R</dt><dd>repeat the selected note after itself</dd>
+          <dt>k</dt><dd>let the note follow the key signature</dd>
+          <dt>Alt + ← →</dt><dd>move the note itself, across bars if need be</dd>
           <dt>, .</dt><dd>sound the note earlier / later — the playback offset (Shift for bigger steps)</dd>
           <dt>Alt + , .</dt><dd>draw the note further left / right — the visual offset; when it sounds does not change</dd>
           <dt>- =</dt><dd>quieter / louder</dd>
-          <dt>r</dt><dd>turn the note into a rest, and back</dd>
-          <dt>k</dt><dd>let the note follow the key signature</dd>
-          <dt>[ ]</dt><dd>previous / next bar</dd>
+        </dl>
+        <h2>Getting about</h2>
+        <dl>
+          <dt>⌘/Ctrl + ← →</dt><dd>previous / next bar (<kbd>[</kbd> and <kbd>]</kbd> do the same)</dd>
           <dt>Enter</dt><dd>add a bar after the selection</dd>
-          <dt>Delete</dt><dd>delete the selected notes, or the selected bar</dd>
           <dt>Space</dt><dd>play the exercise — with Shift, just this bar</dd>
           <dt>⌘/Ctrl + Z</dt><dd>undo (with Shift, redo)</dd>
-          <dt>⌘/Ctrl + S</dt><dd>save</dd>
+          <dt>⌘/Ctrl + S</dt><dd>save, replacing this exercise</dd>
+          <dt>⌘/Ctrl + Shift + S</dt><dd>save as a new exercise, leaving this one alone</dd>
         </dl>
         <h2>Mouse</h2>
         <dl>
-          <dt>Click empty staff</dt><dd>write a note at that pitch and position</dd>
+          <dt>Click empty staff</dt><dd>write a note at that pitch</dd>
           <dt>Click a note</dt><dd>select it — Shift extends, ⌘/Ctrl adds one</dd>
-          <dt>Drag a note</dt><dd>up or down to change its pitch</dd>
+          <dt>Right-click a note</dt><dd>its properties, at the cursor</dd>
+          <dt>Drag a note</dt><dd>up or down to change its pitch, left or right to move it along the bar — whichever way you start decides which</dd>
           <dt>Alt + drag</dt><dd>sideways to change when it sounds — the playback offset</dd>
           <dt>Alt + Shift + drag</dt><dd>sideways to change where it is drawn — the visual offset</dd>
           <dt>Shift + click staff</dt><dd>select the bar</dd>
         </dl>
-      </div>
     </section>
 
     {# Properties of whatever is selected: note, bar, or the exercise. #}
     <aside class="ed-panel ed-panel-right" id="ed-inspector"></aside>
   </main>
 
-  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=131"></script>
-  <script type="module" src="{% static 'rea_frontend/js/editor/editor.js' %}?v=131"></script>
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=164"></script>
+  <script type="module" src="{% static 'rea_frontend/js/editor/editor.js' %}?v=164"></script>
   <script>
     // The one behaviour that belongs to the page rather than the score: the
     // shortcut sheet.  Keeping it here means the editor module never has to

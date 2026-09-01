@@ -34,7 +34,7 @@
 
 import {
   pathOf, firstCategory, labelFor, kindOf, neighbourCategory,
-} from "./curriculum.js?v=131";
+} from "./curriculum.js?v=164";
 
 function el(tag, cls, html) {
   const n = document.createElement(tag);

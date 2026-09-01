@@ -33,7 +33,13 @@ class LessonViewSet(viewsets.ReadOnlyModelViewSet):
     :class:`LessonSerializer` with nested bars/events.  Pagination allows a
     client ``page_size`` (capped at 2000) for the combination-category fetch.
     """
-    queryset = Lesson.objects.select_related("key_model").order_by(
+    # Only what is filed in the curriculum.  Drafts are unfinished and
+    # dictations belong to their own area, and neither may turn up inside
+    # somebody's intonation lesson.  Stated as what is allowed rather than
+    # as a list of exclusions, so a shelf added later is invisible to
+    # students until somebody decides otherwise — and it is on the queryset
+    # rather than on a filter parameter, so no query string can lift it.
+    queryset = Lesson.objects.filter(shelf="").select_related("key_model").order_by(
         "key_model__name", "texture", "formula_name",
         "category", "inversion", "interval_name", "part", "variant",
     )

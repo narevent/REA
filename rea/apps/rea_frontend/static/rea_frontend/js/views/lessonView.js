@@ -1,4 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=131";
+import { NotationRenderer } from "../components/notationRenderer.js?v=164";
 
 let renderer = null;
 
@@ -71,6 +71,8 @@ export function renderLessonNotation(lesson, onBarClick) {
       is_enharmonic: e.is_enharmonic,
       horizontal_offset_ms: e.horizontal_offset_ms,
       visual_offset_px: e.visual_offset_px,
+      tuplet_num: e.tuplet_num,
+      tuplet_den: e.tuplet_den,
     })),
   }));
   const title = (lesson.key_model_name || "") + " " +
