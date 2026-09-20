@@ -15,6 +15,9 @@ The source JSON uses German note letters and a compact token format::
              ============  =================================================
              ``#``         sharp        (+1 semitone)
              ``b``         flat         (−1 semitone)
+             ``bb``        double-flat  (−2 semitones, the mirror of ``x``:
+                            used where the key signature already flattens the
+                            note and the music flattens it again)
              ``x``         double-sharp (+2 semitones, used in sharp minor
                             keys where the diatonic note is already sharpened
                             by the key signature, e.g. ``f1x`` in Ais-mol)
@@ -53,11 +56,15 @@ LETTER_PC: Mapping[str, int] = {
 MODIFIER_OFFSET: Mapping[str, int] = {
     "#": 1,
     "b": -1,
+    "bb": -2,
     "x": 2,
     "r": 0,  # naturalised – offset is 0 *relative to the natural letter*
 }
 
-_TOKEN_RE = re.compile(r"^([cdefgah])(\d)?(#|b|x|r)?$")
+# ``bb`` is listed before ``b`` so a double flat is not read as a flat with a
+# stray letter after it — which would fail the match and fall back to the bare
+# letter, silently sounding the note a semitone high.
+_TOKEN_RE = re.compile(r"^([cdefgah])(\d)?(bb|#|b|x|r)?$")
 
 
 @dataclass(frozen=True)
@@ -148,7 +155,7 @@ def _key_signature_map(incdec) -> Mapping[str, int]:
 def resolve_pitch_class(token: NoteToken, incdec=None) -> int:
     """Return the absolute pitch class (0-11) for *token* in a key.
 
-    If the token carries an explicit modifier (``#``, ``b``, ``x``, ``r``)
+    If the token carries an explicit modifier (``#``, ``b``, ``bb``, ``x``, ``r``)
     it is applied directly.  Otherwise the key-signature alteration from
     ``incdec`` is inherited (the "enharmonic" case).  ``r`` (naturalised)
     explicitly *cancels* any key-signature flat for that letter.
@@ -183,6 +190,8 @@ def note_name_to_vexflow(token: NoteToken) -> str:
         acc = "#"
     elif token.modifier == "b":
         acc = "b"
+    elif token.modifier == "bb":
+        acc = "bb"
     elif token.modifier == "x":
         acc = "##"
     # 'r' (naturalised) -> no accidental in VexFlow.

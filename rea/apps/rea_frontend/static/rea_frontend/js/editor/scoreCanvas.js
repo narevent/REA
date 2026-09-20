@@ -20,12 +20,12 @@
  */
 
 import {
-  METRICS, NOTEHEAD_REACH, drawScore, noteHeadYs, resolveVexFlow,
-} from "../components/staveLayout.js?v=164";
+  CLEF_TOP_LINE, METRICS, NOTEHEAD_REACH, drawScore, noteHeadYs, resolveVexFlow, vexClef,
+} from "../components/staveLayout.js?v=165";
 import {
   LETTERS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX, OFFSET_GAIN,
   buildToken, offsetMs, splitToken,
-} from "./scoreDoc.js?v=164";
+} from "./scoreDoc.js?v=165";
 
 /** Vertical room added to each row when annotation lanes are showing. */
 const LANE_SPACE = 58;
@@ -107,6 +107,8 @@ export class ScoreCanvas {
     // takes.  Nothing about the drawing is decided here.
     const bars = (doc.bars || []).map((bar) => ({
       label: bar.label || "",
+      clef: bar.music_clef,
+      modeChord: bar.music_mode_chord,
       notes: (bar.events || []).map((event) => ({
         name: event.note_name,
         duration: event.duration,
@@ -209,7 +211,7 @@ export class ScoreCanvas {
           x: (noteStart + box.x + box.width) / 2, y: span.line4 + 22,
           class: "ed-bar-empty", "text-anchor": "middle",
         });
-        hint.textContent = "click to add a note";
+        hint.textContent = "double-click to add a note";
         svg.appendChild(hint);
       }
     });
@@ -414,20 +416,42 @@ export class ScoreCanvas {
 
   // -- pointer -----------------------------------------------------------
 
-  /** The note under a client point, if any. */
+  /**
+   * The note under a client point — meaning under its *notehead*.
+   *
+   * The group VexFlow draws a note into is the size of the music font's em
+   * box: about 160 units tall, starting far above the staff and ending far
+   * below it (see `noteHeadYs`).  Hit-testing against that made the whole
+   * column above and below a note belong to the note, so a click meant for
+   * the empty part of the bar selected whatever was nearest instead — which
+   * is why every click in this editor seemed to land on a note.  A notehead
+   * is about 12 units wide and 11 tall, and that is what is tested here: its
+   * own rectangle, widened by a few pixels of slack for the hand.
+   */
   _noteAt(clientX, clientY) {
+    const svgRect = this.svg ? this.svg.getBoundingClientRect() : null;
+    if (!svgRect) return null;
+    const PAD = 4;
     let best = null;
     let bestDistance = Infinity;
     this.notes.forEach((entry) => {
       if (!entry.el) return;
       const r = entry.el.getBoundingClientRect();
-      const inside = clientX >= r.left - 6 && clientX <= r.right + 6
-        && clientY >= r.top - 6 && clientY <= r.bottom + 6;
-      if (!inside) return;
-      const dx = clientX - (r.left + r.width / 2);
-      const dy = clientY - (r.top + r.height / 2);
-      const distance = dx * dx + dy * dy;
-      if (distance < bestDistance) { bestDistance = distance; best = entry; }
+      if (clientX < r.left - PAD || clientX > r.right + PAD) return;
+      // A rest has no notehead; its glyph really does sit where the box says,
+      // so for a rest the box is the answer.
+      const ys = noteHeadYs(entry.el);
+      const centres = ys.length
+        ? ys.map((y) => y + svgRect.top)
+        : [r.top + r.height / 2];
+      const reach = ys.length ? NOTEHEAD_REACH + PAD : r.height / 2;
+      centres.forEach((cy) => {
+        if (Math.abs(clientY - cy) > reach) return;
+        const dx = clientX - (r.left + r.width / 2);
+        const dy = clientY - cy;
+        const distance = dx * dx + dy * dy;
+        if (distance < bestDistance) { bestDistance = distance; best = entry; }
+      });
     });
     return best;
   }
@@ -466,8 +490,10 @@ export class ScoreCanvas {
     const top = box.stave.getYForLine(0);
     const lineHeight = box.stave.getYForLine(1) - top;
     if (!lineHeight) return "c1";
-    const steps = Math.round(((y - top) / lineHeight) * 2);   // half-lines below F5
-    const diatonic = TOP_LINE_DIATONIC - steps;
+    const steps = Math.round(((y - top) / lineHeight) * 2);   // half-lines below the top line
+    const bar = this.doc && this.doc.bars ? this.doc.bars[box.barIndex] : null;
+    const topLine = CLEF_TOP_LINE[vexClef(bar && bar.music_clef)] ?? TOP_LINE_DIATONIC;
+    const diatonic = topLine - steps;
     const octave = Math.floor(diatonic / 7);
     if (octave < 0 || octave > 9) return "c1";
     return buildToken({ letter: LETTERS[((diatonic % 7) + 7) % 7], octave, modifier: null });
@@ -486,6 +512,20 @@ export class ScoreCanvas {
   _bindPointer() {
     const container = this.container;
 
+    // What the mouse means on a stave, settled once:
+    //
+    //   notehead        select that note (and drag it)
+    //   empty bar       select that bar
+    //   double click    write a note there
+    //   right click     the properties of whatever was pointed at
+    //
+    // It used to be that a single click anywhere in a bar wrote a note, and
+    // that anything within the note's em box — a column the full height of
+    // the row — counted as the note.  Between them, every click either
+    // selected a note nobody pointed at or wrote one nobody asked for, and
+    // there was no way at all to say "this bar".  Writing a note is the one
+    // of these that changes the score, so it is the one that costs a
+    // deliberate gesture.
     container.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
       const note = this._noteAt(e.clientX, e.clientY);
@@ -497,25 +537,19 @@ export class ScoreCanvas {
       const box = this._barAt(e.clientX, e.clientY);
       if (!box) return;
       e.preventDefault();
-      if (e.shiftKey || e.metaKey || e.ctrlKey) {
-        // Modifier-click on empty staff means "select this bar", never
-        // "insert here" — an accidental note is the one edit that is
-        // annoying to undo while reading a score.
-        this.handlers.onSelectBar && this.handlers.onSelectBar(box.barIndex, e);
-        return;
-      }
+      this.handlers.onSelectBar && this.handlers.onSelectBar(box.barIndex, e);
+    });
+
+    container.addEventListener("dblclick", (e) => {
+      if (this._noteAt(e.clientX, e.clientY)) return;
+      const box = this._barAt(e.clientX, e.clientY);
+      if (!box) return;
+      e.preventDefault();
       this.handlers.onInsert && this.handlers.onInsert({
         barIndex: box.barIndex,
         noteIndex: this.insertIndexAt(box.barIndex, e.clientX),
         noteName: this.pitchAt(box, e.clientY),
       });
-    });
-
-    container.addEventListener("dblclick", (e) => {
-      const note = this._noteAt(e.clientX, e.clientY);
-      if (note) return;
-      const box = this._barAt(e.clientX, e.clientY);
-      if (box) this.handlers.onSelectBar && this.handlers.onSelectBar(box.barIndex, e);
     });
 
     container.addEventListener("mousemove", (e) => {
@@ -671,15 +705,22 @@ export class ScoreCanvas {
     window.addEventListener("mouseup", onUp);
   }
 
-  /** Right-click on a note: the editor answers with its properties. */
+  /** Right-click: the properties of whatever is under the cursor — the note
+   *  if it is a notehead, otherwise the bar it happened in. */
   _bindContextMenu() {
     this.container.addEventListener("contextmenu", (event) => {
       const note = this._noteAt(event.clientX, event.clientY);
-      if (!note) return;
+      if (note) {
+        event.preventDefault();
+        this.handlers.onNoteMenu && this.handlers.onNoteMenu(
+          { barIndex: note.barIndex, noteIndex: note.noteIndex }, event
+        );
+        return;
+      }
+      const box = this._barAt(event.clientX, event.clientY);
+      if (!box) return;
       event.preventDefault();
-      this.handlers.onNoteMenu && this.handlers.onNoteMenu(
-        { barIndex: note.barIndex, noteIndex: note.noteIndex }, event
-      );
+      this.handlers.onBarMenu && this.handlers.onBarMenu(box.barIndex, event);
     });
   }
 

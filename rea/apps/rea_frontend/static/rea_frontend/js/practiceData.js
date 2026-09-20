@@ -11,8 +11,8 @@
  * without depending on the main app state.
  */
 
-import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=164";
-import { getTempoScale } from "./tempo.js?v=164";
+import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=165";
+import { getTempoScale } from "./tempo.js?v=165";
 
 const DEFAULT_TEMPO = 80;
 // The event's stored offset is a *playback* offset — it moves when a note
@@ -29,6 +29,40 @@ export function tupletRatio(event) {
   const num = event && event.tuplet_num;
   const den = event && event.tuplet_den;
   return (num > 0 && den > 0) ? den / num : 1;
+}
+
+/** The silence after each bar, in milliseconds — the exercise's own
+ *  `mid_bar_time`, which is stored in seconds. */
+export function barGapMs(item) {
+  const seconds = item && item.mid_bar_time;
+  return Math.max(0, Math.round((Number(seconds) || 0) * 1000));
+}
+
+/**
+ * Close the holes a delayed note leaves behind it.
+ *
+ * A positive playback offset says "sound this note late".  It moves the
+ * note's start and nothing else, so the note before it stops at its written
+ * length and the line breaks in two — which is not what a delay is for.  What
+ * a teacher writes a delay for is a note that leans late while the line goes
+ * on sounding underneath it, and that is what this does: any note whose
+ * neighbour starts after it has finished is held open until the neighbour
+ * arrives.
+ *
+ * It never shortens anything and it never reaches across a rest: a rest is a
+ * silence somebody asked for, and holding a note through it would be the
+ * editor overruling the score.  A negative offset — an anticipation — already
+ * overlaps its neighbour and is left exactly as it is.
+ */
+export function applyLegato(steps) {
+  for (let i = 0; i < steps.length - 1; i += 1) {
+    const step = steps[i];
+    const next = steps[i + 1];
+    if (step.isRest || next.isRest) continue;
+    const gap = next.startMs - (step.startMs + step.durationMs);
+    if (gap > 0) step.durationMs += gap;
+  }
+  return steps;
 }
 
 export function keySigMap(item) {
@@ -83,6 +117,7 @@ export function buildBarSteps(item) {
   const ks = keySigMap(item);
   const tempo = tempoOf(item);
   const wholeMs = (4 * 60000) / tempo;
+  const gapMs = barGapMs(item);
   const allBars = [];
   bars.forEach((bar, barIndex) => {
     const steps = [];
@@ -112,10 +147,15 @@ export function buildBarSteps(item) {
         midi, isRest: !!ev.is_rest, startMs, durationMs: durMs,
         volume: ev.volume || 80, eventIndex: ev.event_index,
         aliasDegree: ev.alias_degree,
+        // The note's own decay, in seconds, or null to let the sound preset
+        // decide.  Carried through to the synth rather than resolved here:
+        // what a decay *sounds* like is the player's business.
+        decaySec: ev.attack_decay_time != null ? Number(ev.attack_decay_time) : null,
       });
       cursorMs = startMs + durMs;
     });
-    allBars.push({ barIndex, steps });
+    applyLegato(steps);
+    allBars.push({ barIndex, steps, gapAfterMs: gapMs });
   });
   return allBars;
 }
@@ -167,7 +207,7 @@ export function barsToFlat(barSteps, order, renderer) {
   const steps = [];
   let cursorMs = 0;
   let noteCount = 0;
-  order.forEach((barIndex) => {
+  order.forEach((barIndex, place) => {
     const bar = barSteps[barIndex];
     const range = renderer ? renderer.getBarNoteRange(barIndex) : null;
     const scoreBase = range ? range.start : noteCount;
@@ -177,13 +217,19 @@ export function barsToFlat(barSteps, order, renderer) {
         startMs: cursorMs + s.startMs,
         durationMs: s.durationMs,
         volume: s.volume,
+        decaySec: s.decaySec,
         barIndex,
         aliasDegree: s.aliasDegree,
         scoreGlobalIndex: scoreBase + localIdx,
       });
       noteCount += 1;
     });
-    cursorMs += barDurationMs(bar);
+    // The exercise's own silence after each bar.  It is what `mid_bar_time`
+    // has always meant and the one place a student could not hear it: the
+    // editor's preview spaced the bars and this — the playback a student
+    // actually practises against — ran them together.
+    const last = place === order.length - 1;
+    cursorMs += barDurationMs(bar) + (last ? 0 : bar.gapAfterMs || 0);
   });
   return { steps };
 }

@@ -19,7 +19,8 @@
 import {
   DURATIONS, MODIFIERS, MODIFIER_LABELS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX,
   OFFSET_GAIN, describeNote, splitToken, buildToken,
-} from "./scoreDoc.js?v=164";
+} from "./scoreDoc.js?v=165";
+import { labelWithDuration } from "./glyphs.js?v=165";
 
 const MIXED = "—"; // em dash: several selected items, several values
 
@@ -40,9 +41,19 @@ const LETTER_CHOICES = [
   ["g", "G"], ["a", "A"], ["h", "B natural (German h)"],
 ];
 
+/** The clefs a bar can be written in, named as the library names them and
+ *  labelled as a musician reads them. */
+const CLEF_CHOICES = [
+  { value: "Violin", label: "Treble (Violin)" },
+  { value: "Bass", label: "Bass" },
+  { value: "Alto", label: "Alto" },
+  { value: "Tenor", label: "Tenor" },
+  { value: "Soprano", label: "Soprano" },
+];
+
 /** An accidental as its sign rather than its name: the row is read at a
  *  glance, and a glance does not read "double sharp". */
-const ACCIDENTAL_GLYPH = { null: "—", "#": "♯", b: "♭", x: "𝄪", r: "♮" };
+const ACCIDENTAL_GLYPH = { null: "—", "#": "♯", b: "♭", bb: "𝄫", x: "𝄪", r: "♮" };
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -133,6 +144,8 @@ function buildControl(spec, value, commit) {
       const button = element("button", "ed-choice", option.label);
       button.type = "button";
       if (option.title) button.title = option.title;
+      // A note value is labelled with the note, not with its fraction.
+      if (option.duration != null) labelWithDuration(button, option.duration, option.label);
       button.classList.toggle("is-on", !mixed && String(option.value) === String(value ?? ""));
       button.addEventListener("click", () => commit(option.value));
       wrap.appendChild(button);
@@ -270,6 +283,16 @@ export class Inspector {
     this._renderNotes(host);
   }
 
+  /** The Bar tab, rendered into a popup at the cursor — the note menu's
+   *  counterpart, and the same panel for the same reason. */
+  renderBarMenu(host, doc, selection) {
+    this.doc = doc;
+    this.selection = selection;
+    host.innerHTML = "";
+    if (!doc || !selection.bars.length) return;
+    this._renderBars(host);
+  }
+
   render(doc, selection) {
     this.doc = doc;
     this.selection = selection;
@@ -311,7 +334,7 @@ export class Inspector {
     if (!events.length) {
       body.appendChild(element(
         "p", "ed-hint",
-        "Select a note to edit it — click one on the stave, or click empty staff to write a new one."
+        "Select a note to edit it — click a notehead, or double-click empty staff to write a new one."
       ));
       return;
     }
@@ -394,7 +417,7 @@ export class Inspector {
         // Shortest first, matching the toolbar palette and the number keys.
         key: "duration", label: "Note value", type: "buttons",
         options: DURATIONS.slice().reverse().map((d) => ({
-          value: d.value, label: d.short, title: d.label,
+          value: d.value, label: d.short, title: `${d.label} — ${d.short}`, duration: d.value,
         })),
       },
       {
@@ -479,7 +502,7 @@ export class Inspector {
     const bars = indices.map((i) => this.doc.bars[i]).filter(Boolean);
 
     if (!bars.length) {
-      body.appendChild(element("p", "ed-hint", "Select a bar — shift-click empty staff, or select a note in it."));
+      body.appendChild(element("p", "ed-hint", "Select a bar — click the empty part of one, or select a note in it."));
       return;
     }
 
@@ -497,8 +520,19 @@ export class Inspector {
         hint: "German root + mode, e.g. As_Major. Sets the key signature the stave draws.",
       },
       {
-        key: "music_clef", label: "Clef", type: "text",
-        suggestions: options.clefs || [],
+        // A choice, not a typed name.  The library is written entirely in
+        // `Violin`, so the field had never had to be anything else and a free
+        // text box was as good as a list of one; now that the stave actually
+        // draws the clef, choosing another is a real edit and the panel has to
+        // say which ones exist.  Anything the import brings in that is not on
+        // this list is kept as an extra option rather than silently changed.
+        key: "music_clef", label: "Clef", type: "select",
+        options: CLEF_CHOICES.concat(
+          (options.clefs || [])
+            .filter((name) => !CLEF_CHOICES.some((c) => c.value === name))
+            .map((name) => ({ value: name, label: name })),
+        ),
+        hint: "Drawn at the start of every line, and wherever it changes.",
       },
       {
         key: "music_rhythm", label: "Rhythm", type: "text",
@@ -617,11 +651,9 @@ export class Inspector {
       ], [meta], commit);
     }
 
+    // Tempo is not here: it lives on the toolbar, beside the Play button, for
+    // the same reason it is not a typed number — it is set by ear.
     renderGroup(body, "Playback", [
-      {
-        key: "tempo", label: "Tempo", type: "range", min: 20, max: 200, step: 1,
-        hint: "Beats per minute. Harmonic lessons are played at half this tempo.",
-      },
       {
         key: "mid_bar_time", label: "Gap between bars", type: "number",
         min: 0, max: 5, step: 0.01, hint: "Seconds of silence after each bar.",

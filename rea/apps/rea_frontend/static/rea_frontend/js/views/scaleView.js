@@ -1,4 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=164";
+import { NotationRenderer } from "../components/notationRenderer.js?v=165";
 
 let renderer = null;
 
@@ -50,6 +50,9 @@ export function renderScaleNotation(keyModel, onBarClick) {
   const r = getRenderer();
   const bars = (keyModel.bars || []).map((b) => ({
     clef: b.music_clef,
+    // The key the bar is in, so the stave can draw its signature and read the
+    // notes against it — see `staveLayout`.
+    modeChord: b.music_mode_chord,
     notes: (b.events || []).map((e) => ({
       name: e.note_name,
       alias: e.alias_degree,

@@ -30,8 +30,8 @@
  * Nothing here loads a lesson's notes; opening one does that.
  */
 
-import { AREAS } from "../curriculum.js?v=164";
-import { absPartKey, absPartLabel } from "../lessonNaming.js?v=164";
+import { AREAS } from "../curriculum.js?v=165";
+import { absPartKey, absPartLabel } from "../lessonNaming.js?v=165";
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);

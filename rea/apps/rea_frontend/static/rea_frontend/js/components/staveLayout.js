@@ -12,22 +12,28 @@
  * wrapping, the accidental rules and the drawing live here, and each caller
  * adds only its own interaction layer on top.
  *
- * What is drawn is deliberately spare: five lines, barlines, and noteheads.
- * No clef (the library is single-clef), no time signature (its bars are
- * phrases, not metrical measures), no key signature, and — through the CSS
- * that styles `svg.rea-score` — no stems, flags or beams.  These are
- * intonation exercises: the eye should be on where the note sits and nothing
- * else.  Rhythm still exists, in the playback and in the editor's inspector;
- * it is simply not drawn.
+ * What is drawn is deliberately spare: five lines, barlines, noteheads, and
+ * the two things a musician needs before they can read a single one of them —
+ * the clef, and the key signature the bar is in.  No time signature (these
+ * bars are phrases, not metrical measures) and — through the CSS that styles
+ * `svg.rea-score` — no stems, flags or beams.  These are intonation
+ * exercises: the eye should be on where the note sits and nothing else.
+ * Rhythm still exists, in the playback and in the editor's inspector; it is
+ * simply not drawn.
  *
- * Accidentals are therefore only ever the ones a note carries in its own
- * token.  With no key signature on the stave there is nothing to inherit
- * from, so a written `f` shows a plain notehead even in a sharp key — it
- * still *sounds* F# (the pitch is resolved from the key server-side), and the
- * editor's inspector names the sounding pitch for the teacher.
+ * The key signature comes from the bar's own `music_mode_chord`, which is why
+ * it needs no separate switch per system: a relative exercise is in a real key
+ * and gets its sharps or flats, while every absolute one is in C and gets
+ * none.  Accidentals are then read against it the way a musician reads them —
+ * an `f` in G major is the F♯ the signature already promised and is drawn
+ * plain, an `fr` cancels it and is drawn with a natural.  Before the signature
+ * was there, that natural had nothing to contradict and so was never drawn at
+ * all: the note sounded natural and looked sharp.
  */
 
-import { noteNameToVexflow, parseNoteToken } from "../notation.js?v=164";
+import {
+  keyAccidentalCount, keyAccidentals, modeChordToVexKey, noteNameToVexflow, parseNoteToken,
+} from "../notation.js?v=165";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
 export const METRICS = {
@@ -39,9 +45,56 @@ export const METRICS = {
   ROW_HEIGHT: 100,   // vertical pitch of each wrapped row
   MARGIN: 10,        // left margin inside the SVG
   NOTE_SLOT: 26,     // horizontal room reserved per notehead
+  CLEF_WIDTH: 32,    // room a drawn clef takes before the first note
+  KEY_ACC_WIDTH: 10, // room each key-signature accidental takes
 };
 
-const MOD_TO_ACC = { "#": "#", b: "b", x: "##", r: "n" };
+/** The accidental glyph for a sounded alteration, in semitones. */
+const ALTERATION_TO_ACC = { "-2": "bb", "-1": "b", 0: "n", 1: "#", 2: "##" };
+
+/**
+ * Source clef names, as the library spells them, to VexFlow's own.
+ *
+ * The imported library is written entirely in `Violin`, so for years the clef
+ * was a constant and the stave drew none.  It is a field on every bar all the
+ * same, and an exercise that sits two octaves under the staff is a bass-clef
+ * exercise whatever the import happened to say — so the name is honoured,
+ * and an unknown one reads as a treble rather than as nothing.
+ */
+export const CLEF_MAP = {
+  Violin: "treble", Treble: "treble", G: "treble",
+  Bass: "bass", F: "bass",
+  Alto: "alto", Viola: "alto",
+  Tenor: "tenor",
+  Soprano: "soprano",
+  MezzoSoprano: "mezzo-soprano",
+  Baritone: "baritone-f",
+};
+
+/**
+ * The pitch on each clef's top line, as a diatonic index in the document's
+ * own units: `octave * 7 + letter`, where octave index 1 is middle C's.
+ *
+ * It is what turns a click at a height into a note, so it has to be stated
+ * per clef rather than assumed: the same y that means F5 in a treble bar
+ * means A3 in a bass one, and an editor that writes the treble answer into a
+ * bass bar is off by two octaves and a third.
+ */
+export const CLEF_TOP_LINE = {
+  treble: 2 * 7 + 3,   // F5
+  bass: 0 * 7 + 5,     // A3
+  alto: 1 * 7 + 4,     // G4
+  tenor: 1 * 7 + 2,    // E4
+  soprano: 2 * 7 + 1,  // D5
+  "mezzo-soprano": 1 * 7 + 6,  // B4
+  "baritone-f": 1 * 7 + 0,     // C4
+};
+
+/** The clef a bar is drawn in, as VexFlow names it. */
+export function vexClef(name) {
+  if (!name) return "treble";
+  return CLEF_MAP[name] || (Object.values(CLEF_MAP).includes(name) ? name : "treble");
+}
 
 /**
  * How far a notehead reaches above and below its own baseline, in SVG units.
@@ -171,8 +224,22 @@ export function accidentalValue(token) {
   if (!token.modifier || token.modifier === "r") return 0;
   if (token.modifier === "#") return 1;
   if (token.modifier === "b") return -1;
+  if (token.modifier === "bb") return -2;
   if (token.modifier === "x") return 2;
   return 0;
+}
+
+/**
+ * The alteration a note actually sounds, in semitones from its bare letter.
+ *
+ * A token with a modifier says so itself.  A token without one inherits the
+ * key signature — that is what "enharmonic" means in this library — so in E
+ * major a written `f` sounds F♯ and must be read against a stave that already
+ * says F♯, not against a bare F.
+ */
+export function soundedAlteration(token, keyMap) {
+  if (token.modifier) return accidentalValue(token);
+  return (keyMap && keyMap[token.letter]) || 0;
 }
 
 /**
@@ -222,14 +289,39 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
   // Harmonic bars pack many short notes whose total duration is small but
   // which still need room, so reserve a minimum slot per notehead and take
   // whichever estimate is larger.  These are upper bounds; rows scale down.
-  const prefWidths = bars.map((bar) => {
+  // What each bar is written in.  Resolved once, up front, because the
+  // wrapping needs to know which bars will carry a clef and a key signature
+  // before it can decide how wide they are.
+  const heads = bars.map((bar) => ({
+    clef: vexClef(bar.clef),
+    key: modeChordToVexKey(bar.modeChord || ""),
+  }));
+
+  const prefWidths = bars.map((bar, i) => {
     const notes = bar.notes || [];
     const totalWhole = notes.reduce((sum, n) => sum + (n.duration || 0.125), 0);
     const durArea = Math.ceil(totalWhole * METRICS.PX_PER_WHOLE);
     const countArea = notes.length * METRICS.NOTE_SLOT;
     const noteArea = Math.max(durArea, countArea) + METRICS.STAVE_PADDING * 2;
+    // The clef and key signature are added below, to the bars that actually
+    // draw them — which is not known until the bars have been wrapped.
     return Math.max(METRICS.MIN_BAR_WIDTH, noteArea);
   });
+
+  /** The room a bar's clef and key signature need before its first note. */
+  const headWidth = (i) => (
+    METRICS.CLEF_WIDTH + keyAccidentalCount(heads[i].key) * METRICS.KEY_ACC_WIDTH
+  );
+
+  // Which bars restate what they are written in.  A musician needs the clef
+  // and the key at the start of every line and whenever either changes, and
+  // nowhere else: restating them on every bar of a phrase is noise, and a
+  // wrapped row that begins without them cannot be read at all.  The changes
+  // are known now; the line beginnings are known once the bars are wrapped.
+  const showHead = bars.map((_, i) => (
+    i === 0 || heads[i].clef !== heads[i - 1].clef || heads[i].key !== heads[i - 1].key
+  ));
+  bars.forEach((_, i) => { if (showHead[i]) prefWidths[i] += headWidth(i); });
 
   // --- Flow-wrap bars into rows ----------------------------------------
   const rows = [];
@@ -251,6 +343,17 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
   // lay its bars out left to right.
   const barWidths = new Array(bars.length);
   const placement = new Array(bars.length);
+  // The first bar of every row says what it is written in, whether or not
+  // anything changed — a row is a line of music, and a line of music starts
+  // with a clef.  Its room is taken out of the row it is on, so the row stays
+  // the width it was and its bars give up a few pixels each.
+  rows.forEach((row) => {
+    const first = row[0];
+    if (showHead[first]) return;
+    showHead[first] = true;
+    prefWidths[first] += headWidth(first);
+  });
+
   rows.forEach((row, r) => {
     const pref = row.reduce((sum, i, k) => sum + prefWidths[i] + (k ? METRICS.BAR_GAP : 0), 0);
     const scale = pref > availWidth ? availWidth / pref : 1;
@@ -279,6 +382,12 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
 
   bars.forEach((bar, i) => {
     const stave = new VF.Stave(placement[i].x, placement[i].y - VF_SPACE_ABOVE_PX, barWidths[i]);
+    if (showHead[i]) {
+      try {
+        stave.addClef(heads[i].clef);
+        if (heads[i].key) stave.addKeySignature(heads[i].key);
+      } catch (e) { /* an unknown clef or key is not worth losing the score over */ }
+    }
     stave.setContext(context).draw();
     const noteStart = globalIndex;
 
@@ -300,22 +409,36 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
 
     // Accidentals carry within a bar: an alteration is drawn where it first
     // appears and not restated on the same letter afterwards.  The state
-    // starts empty every bar because no key signature is drawn.
-    const barStart = {};
+    // starts at whatever the key signature has already said, so a note that
+    // agrees with the key is drawn plain and one that departs from it — a
+    // natural cancelling a sharp, most often — is drawn with the accidental
+    // that says so.
+    const keyMap = keyAccidentals(heads[i].key);
+    const barStart = Object.assign({}, keyMap);
     const staveNotes = [];
     (bar.notes || []).forEach((n) => {
       const durType = durationToType(n.duration || 0.125);
       let note;
       if (n.is_rest || !n.name) {
-        note = new VF.StaveNote({ keys: ["b/4"], duration: durType + "r", clef: "treble" });
+        note = new VF.StaveNote({ keys: ["b/4"], duration: durType + "r", clef: heads[i].clef });
       } else {
         const tok = parseNoteToken(n.name);
         note = new VF.StaveNote({
-          keys: [noteNameToVexflow(tok)], duration: durType, clef: "treble", auto_stem: true,
+          keys: [noteNameToVexflow(tok)], duration: durType, clef: heads[i].clef, auto_stem: true,
         });
-        const accVal = accidentalValue(tok);
+        // Drawn from what the note *sounds* against what the stave has said
+        // so far, rather than from the token's own modifier.  The two differ
+        // in exactly the case that was silently wrong: `fr` in G major sounds
+        // F natural, carries the modifier `r`, and needs a ♮ that the old
+        // rule — which read `r` as "no alteration", the same as a plain `f` —
+        // never drew.
+        // Against the *key*, never against the running state: a plain `f`
+        // after an `f#` earlier in the bar still means "as the key has it",
+        // which is how this library spells an enharmonic note and why such a
+        // note needs a natural drawn to cancel the sharp before it.
+        const accVal = soundedAlteration(tok, keyMap);
         if (accVal !== (barStart[tok.letter] || 0)) {
-          const accStr = MOD_TO_ACC[tok.modifier];
+          const accStr = ALTERATION_TO_ACC[String(accVal)];
           if (accStr) note.addModifier(new VF.Accidental(accStr), 0);
           barStart[tok.letter] = accVal;
         }

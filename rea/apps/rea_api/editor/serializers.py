@@ -27,7 +27,7 @@ from . import score
 # a good token looks like.
 NOTE_TOKEN_HELP = (
     "a note is a German letter (c d e f g a h), an optional octave digit, "
-    "and an optional modifier (# b x r) — e.g. 'c1', 'f2#', 'e1r'"
+    "and an optional modifier (# b bb x r) — e.g. 'c1', 'f2#', 'e1r', 'h1bb'"
 )
 
 # Durations the notation renderer can draw.  Anything else would sound but
@@ -58,7 +58,7 @@ def validate_note_token(value):
         raise serializers.ValidationError(f"'{token}' is not a note — {NOTE_TOKEN_HELP}.")
     if rest and rest[0].isdigit():
         rest = rest[1:]
-    if rest and rest not in ("#", "b", "x", "r"):
+    if rest and rest not in ("#", "b", "bb", "x", "r"):
         raise serializers.ValidationError(f"'{token}' is not a note — {NOTE_TOKEN_HELP}.")
     return token
 

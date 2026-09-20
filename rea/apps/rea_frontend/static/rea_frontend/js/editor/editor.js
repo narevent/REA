@@ -20,20 +20,21 @@
  * exercise half-written is worse than one not written at all.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=164";
-import { EditorAPI } from "./editorApi.js?v=164";
-import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=164";
+import { AudioPlayer } from "../audioPlayer.js?v=165";
+import { EditorAPI } from "./editorApi.js?v=165";
+import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=165";
 import {
   Library, SHELF_DESTINATIONS, destinations, metaFromCtx,
-} from "./library.js?v=164";
-import { ScoreCanvas } from "./scoreCanvas.js?v=164";
+} from "./library.js?v=165";
+import { labelWithDuration } from "./glyphs.js?v=165";
+import { ScoreCanvas } from "./scoreCanvas.js?v=165";
 import {
   DURATIONS, LETTERS, MAX_VISUAL_OFFSET_PX, MODIFIERS, MODIFIER_LABELS, ScoreDoc,
   buildToken, noteMidi, offsetMs, splitToken, transposeToken,
-} from "./scoreDoc.js?v=164";
-import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=164";
-import { midiToToken } from "../notation.js?v=164";
-import { tupletRatio } from "../practiceData.js?v=164";
+} from "./scoreDoc.js?v=165";
+import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=165";
+import { midiToToken } from "../notation.js?v=165";
+import { applyLegato, tupletRatio } from "../practiceData.js?v=165";
 
 /** The accidentals offered as buttons, in the order a musician reaches for
  *  them.  `null` is "whatever the key signature says", which is the state a
@@ -41,8 +42,10 @@ import { tupletRatio } from "../practiceData.js?v=164";
  *  cancels a key signature, which is a different statement and needs its own
  *  button. */
 const ACCIDENTAL_BUTTONS = [
+  ["x", "𝄪", "Double sharp"],
   ["#", "♯", "Sharp (#)"],
   ["b", "♭", "Flat (b)"],
+  ["bb", "𝄫", "Double flat"],
   ["r", "♮", "Natural — cancels the key signature"],
   [null, "—", "As the key signature has it (n)"],
 ];
@@ -102,6 +105,7 @@ class Editor {
       onDragOrder: (from, to) => this.dragOrder(from, to),
       onDragEnd: (position) => this.endDrag(position),
       onNoteMenu: (position, event) => this.openNoteMenu(position, event),
+      onBarMenu: (barIndex, event) => this.openBarMenu(barIndex, event),
     });
     this.inspector = new Inspector(this.dom.inspector, {
       onNote: (positions, changes) => this.updateNotes(positions, changes),
@@ -688,7 +692,13 @@ class Editor {
     // The menu is showing the note that just changed, so it has to be redrawn
     // from the new document — otherwise its own controls would go on showing
     // what they said before the edit they made.
-    if (this._menu) this.inspector.renderNoteMenu(this._menu, this.doc.doc, this.selection);
+    if (this._menu) {
+      if (this._menu.classList.contains("ed-menu-bar")) {
+        this.inspector.renderBarMenu(this._menu, this.doc.doc, this.selection);
+      } else {
+        this.inspector.renderNoteMenu(this._menu, this.doc.doc, this.selection);
+      }
+    }
   }
 
   renderHeader() {
@@ -705,6 +715,11 @@ class Editor {
   }
 
   renderToolbar() {
+    // A control being dragged must not be rebuilt under the pointer: every
+    // step of a tempo drag is a change to the document, and redrawing the
+    // toolbar on each one would hand the mouse a brand-new slider that has
+    // never heard of the gesture in progress.
+    if (this._liveControl) return;
     const bar = this.dom.toolbar;
     bar.innerHTML = "";
     const doc = this.doc;
@@ -777,6 +792,13 @@ class Editor {
       button("Play bar", "Play the selected bar (Shift+Space)", () => this.playBar(), { disabled: !doc }),
     ]);
 
+    // The tempo, beside the transport.  It was a field in the Exercise panel,
+    // which is where an exercise's *identity* is edited — and tempo is not
+    // identity, it is the thing a teacher adjusts by ear, playing the phrase
+    // again after every nudge.  Three clicks away from the Play button is
+    // three clicks too many for that loop.
+    if (doc) rows[0].appendChild(this.tempoControl());
+
     group(0, [
       button("Add bar", "Add a bar after the selection (Enter)", () => this.addBar(), { disabled: !doc }),
       button("Copy bar", "Duplicate the selected bar", () => this.duplicateBar(), { disabled: !doc }),
@@ -796,11 +818,13 @@ class Editor {
     // number keys agree about which is which.
     rows[1].appendChild(palette("Value", DURATIONS.slice().reverse().map((d) => {
       const key = Object.entries(Editor.DURATION_KEYS).find(([, v]) => v === d.value);
-      return choice(d.short, key ? `${d.label} (${key[0]})` : d.label,
+      const button = choice(d.short, key ? `${d.label} (${key[0]}) — ${d.short}` : `${d.label} — ${d.short}`,
         this.writeDuration === d.value, !doc, () => {
           this.setWriteDuration(d.value);
           if (this.selection.notes.length) this.setDuration(this.selection.notes, d.value);
         });
+      // The note itself rather than its fraction — see `glyphs.js`.
+      return labelWithDuration(button, d.value, d.short);
     })));
 
     // With a note selected these change it; in note input they arm the next
@@ -843,6 +867,52 @@ class Editor {
       views.appendChild(item);
     });
     rows[1].appendChild(views);
+  }
+
+  /**
+   * The tempo slider: one undo step for a drag, not one per pixel.
+   *
+   * It edits the document live so the number beside it and the subtitle above
+   * it follow the thumb, and records the whole gesture as a single change when
+   * the mouse comes up — the same bargain dragging a notehead makes.
+   */
+  tempoControl() {
+    const meta = this.doc.doc.meta;
+    const wrap = el("div", "ed-tool-group ed-tempo");
+    wrap.appendChild(el("span", "ed-palette-lbl", "Tempo"));
+    const slider = el("input");
+    slider.type = "range";
+    slider.min = 20;
+    slider.max = 200;
+    slider.step = 1;
+    slider.value = meta.tempo > 10 ? meta.tempo : 80;
+    slider.title = "Beats per minute. Harmonic lessons are played at half this tempo.";
+    const readout = el("span", "ed-tempo-value", `${slider.value} bpm`);
+
+    const begin = () => {
+      if (this._liveControl) return;
+      this._liveControl = "tempo";
+      this.doc.beginLive("tempo");
+    };
+    const end = () => {
+      if (this._liveControl !== "tempo") return;
+      this._liveControl = null;
+      this.doc.endLive();
+      this.renderToolbar();
+    };
+    slider.addEventListener("pointerdown", begin);
+    slider.addEventListener("keydown", begin);
+    slider.addEventListener("input", () => {
+      begin();
+      const tempo = Number(slider.value);
+      readout.textContent = `${tempo} bpm`;
+      this.doc.live((document) => { document.meta.tempo = tempo; });
+    });
+    slider.addEventListener("change", end);
+    slider.addEventListener("blur", end);
+    wrap.appendChild(slider);
+    wrap.appendChild(readout);
+    return wrap;
   }
 
   status(message, tone = "") {
@@ -904,6 +974,15 @@ class Editor {
       const at = this.selection.bars.indexOf(barIndex);
       if (at >= 0) this.selection.bars.splice(at, 1);
       else this.selection.bars.push(barIndex);
+    } else if (event.shiftKey && this.selection.bars.length) {
+      // A run of bars, from the first one selected to this one — the same
+      // gesture the notes answer to, and what a teacher means by "these
+      // bars": the ones they are about to edit, or play, together.
+      const anchor = this.selection.bars[0];
+      const [lo, hi] = anchor < barIndex ? [anchor, barIndex] : [barIndex, anchor];
+      const span = [];
+      for (let i = lo; i <= hi; i += 1) if (i !== anchor) span.push(i);
+      this.selection.bars = [anchor].concat(span);
     } else {
       this.selection.bars = [barIndex];
     }
@@ -1009,9 +1088,10 @@ class Editor {
     this.previewNote(position);
   }
 
-  /** A click on empty staff writes a note at that pitch, at the armed note
-   *  value, and leaves the caret after it.  Clicking a *note* selects it
-   *  instead — see `selectNote`. */
+  /** A double click on empty staff writes a note at that pitch, at the armed
+   *  note value, and leaves the caret after it.  A single click selects the
+   *  bar, and a click on a notehead selects the note — see `_bindPointer` in
+   *  `scoreCanvas` for why writing is the gesture that costs two clicks. */
   staffClick(where) {
     const position = this.doc.insertNote(where.barIndex, where.noteIndex, {
       note_name: where.noteName,
@@ -1037,8 +1117,31 @@ class Editor {
 
     const menu = el("div", "ed-menu");
     this.inspector.renderNoteMenu(menu, this.doc.doc, this.selection);
-    document.body.appendChild(menu);
+    this.showMenu(menu, event);
+  }
 
+  /**
+   * The right-click menu for a bar: the Bar tab, at the cursor.
+   *
+   * Same panel, same commit path, same reasoning as the note menu it sits
+   * beside — a bar's clef, its key, its label and its pickup count are
+   * decided while looking at the bar, and the sidebar is across the screen.
+   */
+  openBarMenu(barIndex, event) {
+    this.closeNoteMenu();
+    if (!this.selection.bars.includes(barIndex)) {
+      this.selection = { notes: [], bars: [barIndex] };
+      this.inspector.tab = "bar";
+      this.renderAll();
+    }
+    const menu = el("div", "ed-menu ed-menu-bar");
+    this.inspector.renderBarMenu(menu, this.doc.doc, this.selection);
+    this.showMenu(menu, event);
+  }
+
+  /** Place a menu at the cursor and arrange for it to go away again. */
+  showMenu(menu, event) {
+    document.body.appendChild(menu);
     // Placed at the cursor, then pulled back inside the window — a menu that
     // opens half off-screen is worse than no menu.
     const pad = 8;
@@ -1050,8 +1153,8 @@ class Editor {
 
     this._menu = menu;
     // Anything that is not the menu closes it, including a scroll: the menu
-    // is anchored to a point in the window, and the note moves out from under
-    // it the moment the score scrolls.
+    // is anchored to a point in the window, and the score moves out from
+    // under it the moment the page scrolls.
     this._menuAway = (e) => { if (!menu.contains(e.target)) this.closeNoteMenu(); };
     this._menuKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); this.closeNoteMenu(); } };
     setTimeout(() => {
@@ -1477,6 +1580,7 @@ class Editor {
     barIndices.forEach((barIndex) => {
       const bar = doc.bars[barIndex];
       if (!bar) return;
+      const from = steps.length;
       let cursor = 0;
       (bar.events || []).forEach((event, noteIndex) => {
         const offset = offsetMs(event);
@@ -1490,14 +1594,20 @@ class Editor {
         steps.push({
           midi: noteMidi(event, doc.key_signature),
           isRest: !!event.is_rest,
-          startMs: barStart + start,
+          startMs: start,
           durationMs,
           volume: event.volume || 80,
+          decaySec: event.attack_decay_time != null ? Number(event.attack_decay_time) : null,
           barIndex,
           noteIndex,
         });
         cursor = start + durationMs;
       });
+      // Held notes are closed up inside the bar, exactly as the student's
+      // player does it — see `applyLegato`.  Bar by bar, so a gap between
+      // bars stays a gap.
+      applyLegato(steps.slice(from));
+      steps.slice(from).forEach((step) => { step.startMs += barStart; });
       barStart += cursor + gapMs;
     });
     return steps;

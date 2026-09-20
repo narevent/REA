@@ -13,7 +13,7 @@
  * highlight the sounding note.  Pass -1 to clear (on stop).
  */
 
-import { buildVoice, getCurrentSoundPreset } from "./soundPresets.js?v=164";
+import { buildVoice, getCurrentSoundPreset } from "./soundPresets.js?v=165";
 
 const A4_HZ = 440;
 const A4_MIDI = 69;
@@ -57,6 +57,14 @@ export class AudioPlayer {
    * measured from the beginning of the piece (accumulated offsets + durations).
    */
   play(steps, { onStep = null } = {}) {
+    // The stop below belongs to *this* play — it clears whatever the last one
+    // left running — and it is not the end of the last piece.  Leaving the
+    // previous callback in place let that stop report "finished" to a caller
+    // that was in the middle of starting, which is how the editor's transport
+    // came to think it was idle while the score was sounding: its button then
+    // said Play, and pressing it started the piece again instead of stopping
+    // it.  Dropping the callback first makes a restart silent to the caller.
+    this.onStep = null;
     this.stop();
     if (!this._ensureCtx() || !steps || !steps.length) return false;
     this.onStep = onStep;
@@ -78,7 +86,14 @@ export class AudioPlayer {
         const freq = midiToFreq(step.midi);
         const vol = (step.volume || 80) / 127;
         const preset = getCurrentSoundPreset();
-        const voice = buildVoice(ctx, freq, t, durSec, vol, preset);
+        // A note may carry a decay of its own (`attack_decay_time` in the
+        // score).  It is the tail the note rings for, and it is the property
+        // the imported library uses to make one note ring on while the next
+        // one starts — so it is handed to the voice rather than left as a
+        // number nobody reads.
+        const voice = buildVoice(ctx, freq, t, durSec, vol, preset, {
+          release: step.decaySec != null ? step.decaySec : null,
+        });
         voice.input.connect(ctx.destination);
         // Start scheduling is done inside buildVoice; track for stop().
         const oscs = voice.nodes.map((n) => n.osc);
@@ -112,6 +127,10 @@ export class AudioPlayer {
     });
     this.scheduled = [];
     this.isPlaying = false;
-    if (this.onStep) this.onStep(-1);
+    const done = this.onStep;
+    // Said once: a second stop (the guard at the top of `play`, a double
+    // click on the transport) is not a second ending.
+    this.onStep = null;
+    if (done) done(-1);
   }
 }

@@ -8,7 +8,9 @@ export const LETTER_PC = {
   c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, h: 11,
 };
 
-const TOKEN_RE = /^([cdefgah])(\d)?(#|b|x|r)?$/;
+// `bb` before `b`, or the double flat would parse as a flat with a stray
+// letter after it and fall through to the fallback branch below.
+const TOKEN_RE = /^([cdefgah])(\d)?(bb|#|b|x|r)?$/;
 
 export function parseNoteToken(token) {
   if (!token) return { letter: "", octave: null, modifier: null };
@@ -22,7 +24,7 @@ export function parseNoteToken(token) {
 }
 
 // Modifier -> semitone offset.
-const MOD_OFFSET = { "#": 1, b: -1, x: 2, r: 0 };
+const MOD_OFFSET = { "#": 1, b: -1, bb: -2, x: 2, r: 0 };
 
 /**
  * Convert a token to a VexFlow note key, e.g. `c/4`, `f#/5`.
@@ -36,6 +38,7 @@ export function noteNameToVexflow(tok) {
   let acc = "";
   if (tok.modifier === "#") acc = "#";
   else if (tok.modifier === "b") acc = "b";
+  else if (tok.modifier === "bb") acc = "bb";
   else if (tok.modifier === "x") acc = "##";
   // 'r' (naturalised) -> no accidental in VexFlow key (handled via key sig).
   return letter + acc + "/" + vexOct;
@@ -115,7 +118,8 @@ export function midiToToken(midi, keySignature) {
   let modifier = null;
   if (inKey !== pc) {
     const diff = (pc - base + 12) % 12;
-    modifier = diff === 0 ? "r" : diff === 1 ? "#" : diff === 11 ? "b" : diff === 2 ? "x" : null;
+    modifier = diff === 0 ? "r" : diff === 1 ? "#" : diff === 11 ? "b"
+      : diff === 2 ? "x" : diff === 10 ? "bb" : null;
   }
   if (octave < 0 || octave > 9) return null;   // off the edge of the notation
   return { letter, octave, modifier, name: letter + (octave === 0 ? "" : String(octave)) + (modifier || "") };
@@ -136,6 +140,43 @@ export function keySignatureMap(keySignature) {
     if (k.letter) out[k.letter] = k.offset;
   });
   return out;
+}
+
+// The order a key signature is written in — F C G D A E B going sharp, and
+// its reverse going flat — in the library's own German letters, where `h` is
+// B.  The first *n* of them are exactly what a key of *n* sharps or flats
+// alters.
+const SHARP_ORDER = ["f", "c", "g", "d", "a", "e", "h"];
+const FLAT_ORDER = ["h", "e", "a", "d", "g", "c", "f"];
+
+/** How many sharps (+) or flats (−) each VexFlow key name carries. */
+const KEY_ACCIDENTAL_COUNT = {
+  C: 0, G: 1, D: 2, A: 3, E: 4, B: 5, "F#": 6, "C#": 7,
+  F: -1, Bb: -2, Eb: -3, Ab: -4, Db: -5, Gb: -6, Cb: -7,
+  Am: 0, Em: 1, Bm: 2, "F#m": 3, "C#m": 4, "G#m": 5, "D#m": 6, "A#m": 7,
+  Dm: -1, Gm: -2, Cm: -3, Fm: -4, Bbm: -5, Ebm: -6, Abm: -7,
+};
+
+/**
+ * The letters a key signature alters, and by how much.
+ *
+ * `{letter: semitones}` in German letters, so the map reads straight against
+ * a note token: `{f: 1, c: 1}` for D major.  Empty for C major and A minor,
+ * and for a key name nothing recognises.
+ */
+export function keyAccidentals(vexKey) {
+  const count = KEY_ACCIDENTAL_COUNT[vexKey];
+  if (!count) return {};
+  const order = count > 0 ? SHARP_ORDER : FLAT_ORDER;
+  const out = {};
+  for (let i = 0; i < Math.abs(count); i += 1) out[order[i]] = count > 0 ? 1 : -1;
+  return out;
+}
+
+/** How many accidentals a key signature draws — what a stave has to leave
+ *  room for before its first note. */
+export function keyAccidentalCount(vexKey) {
+  return Math.abs(KEY_ACCIDENTAL_COUNT[vexKey] || 0);
 }
 
 // Map a source `music_mode_chord` (e.g. "G_Major", "As_Minor", "Cis_Major")
