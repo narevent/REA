@@ -29,7 +29,7 @@
  *    the wrong octave, 0 otherwise.
  */
 
-import { tuning } from "./difficulty.js?v=165";
+import { tuning } from "./difficulty.js?v=166";
 
 /** Gap cost used by the DTW alignment when a sung note has no reference
  *  counterpart (insertion) or a reference note has no sung counterpart

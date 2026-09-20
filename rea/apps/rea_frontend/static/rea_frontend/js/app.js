@@ -11,36 +11,36 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=165";
-import { renderLessonNotation } from "./views/lessonView.js?v=165";
-import { renderScaleNotation } from "./views/scaleView.js?v=165";
-import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=165";
+import { API } from "./api.js?v=166";
+import { renderLessonNotation } from "./views/lessonView.js?v=166";
+import { renderScaleNotation } from "./views/scaleView.js?v=166";
+import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=166";
 import {
   renderLessonInstrument, renderScaleInstrument, resetRenderer as resetInstrument,
-} from "./views/instrumentView.js?v=165";
-import { SoundcheckView } from "./views/soundcheckView.js?v=165";
-import { AudioPlayer } from "./audioPlayer.js?v=165";
-import { PracticeController } from "./practiceController.js?v=165";
-import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=165";
+} from "./views/instrumentView.js?v=166";
+import { SoundcheckView } from "./views/soundcheckView.js?v=166";
+import { AudioPlayer } from "./audioPlayer.js?v=166";
+import { PracticeController } from "./practiceController.js?v=166";
+import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=166";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=165";
+} from "./chapters.js?v=166";
 import {
   AREAS, AREA_BY_ID, contextFor, kindOf, isPractisable, defaultCategory, setDictations,
   categoryByUid, firstCategory, pathOf, neighbourCategory,
-} from "./curriculum.js?v=165";
-import { createNav } from "./curriculumNav.js?v=165";
+} from "./curriculum.js?v=166";
+import { createNav } from "./curriculumNav.js?v=166";
 import {
   DIFFICULTIES, DIFFICULTY_LABELS, getDifficulty, setDifficulty,
   adoptAccountDifficulty,
-} from "./difficulty.js?v=165";
+} from "./difficulty.js?v=166";
 import {
   TEMPO_SCALES, tempoLabel, getTempoScale, setTempoScale,
-} from "./tempo.js?v=165";
+} from "./tempo.js?v=166";
 // Shared with the score editor's tree, so both call the same thing by the
 // same name.
-import { absPartKey, absPartLabel } from "./lessonNaming.js?v=165";
+import { absPartKey, absPartLabel } from "./lessonNaming.js?v=166";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
