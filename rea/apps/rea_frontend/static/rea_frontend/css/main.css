@@ -664,6 +664,37 @@ svg.rea-score .vf-bar-number {
 .sn-cell.ok { border-color: var(--border-strong); color: var(--ink-2); }
 .sn-cell.weak, .mg-cell.wrong { border-color: color-mix(in srgb, var(--bad) 35%, transparent); color: var(--bad); background: var(--bad-tint); }
 .sn-cell.pending, .mg-cell.pending { border-style: dashed; color: var(--muted-2); background: transparent; }
+/* A bar the student has singled out to practise.  Quieter than an answer
+   mark and longer-lived than a highlight: it says "this is the set", and it
+   stays until they say otherwise. */
+svg.rea-score .vf-bar-focus path,
+svg.rea-score .vf-bar-focus rect { stroke: var(--accent); }
+.focus-note {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 8px; font-size: 12px; color: var(--ink-2);
+}
+.focus-clear {
+  font: inherit; font-size: 12px; cursor: pointer;
+  padding: 3px 8px; border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink-2);
+}
+.focus-clear:hover { border-color: var(--ink-2); color: var(--ink); }
+
+/* The accidental a student puts on their answer, beside the degrees they are
+   answering with.  Three buttons rather than a menu: there are three, and a
+   guessing round is answered in a hurry. */
+.mg-acc { display: flex; gap: 4px; margin-top: 8px; }
+.mg-acc-btn {
+  font: inherit; font-size: 15px; line-height: 1; cursor: pointer;
+  min-width: 32px; padding: 5px 6px 7px;
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--ink-2);
+}
+.mg-acc-btn:hover { border-color: var(--ink-2); color: var(--ink); }
+.mg-acc-btn.is-on {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+
 /* The reference note the singer is on right now, in the live per-note strip.
    A ring rather than a glow — it has to be findable at a glance mid-phrase. */
 .sn-cell.pending.active {
