@@ -26,19 +26,19 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=166";
+import { AudioPlayer } from "./audioPlayer.js?v=167";
 import {
   PitchDetector, midiToName, getVoiceVibratoCents, getVoiceOnsetFloor,
-} from "./pitchDetector.js?v=166";
-import { API } from "./api.js?v=166";
+} from "./pitchDetector.js?v=167";
+import { API } from "./api.js?v=167";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt, tempoOf,
-} from "./practiceData.js?v=166";
+} from "./practiceData.js?v=167";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=166";
-import { tuning } from "./difficulty.js?v=166";
+} from "./practiceScore.js?v=167";
+import { tuning } from "./difficulty.js?v=167";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 // Above this many rounds the per-round pips stop being readable (a 39-bar

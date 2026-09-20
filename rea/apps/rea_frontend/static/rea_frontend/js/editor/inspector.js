@@ -19,8 +19,8 @@
 import {
   DURATIONS, MODIFIERS, MODIFIER_LABELS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX,
   OFFSET_GAIN, describeNote, splitToken, buildToken,
-} from "./scoreDoc.js?v=166";
-import { labelWithDuration } from "./glyphs.js?v=166";
+} from "./scoreDoc.js?v=167";
+import { labelWithDuration } from "./glyphs.js?v=167";
 
 const MIXED = "—"; // em dash: several selected items, several values
 
@@ -471,15 +471,15 @@ export class Inspector {
         hint: "The note keeps its written value and sounds a fraction of it.",
       },
     ], events, (key, value, spec) => {
-      // The tuplet select carries only the note count; its denominator comes
-      // from the same table the toolbar buttons use, so the two cannot offer
-      // different meanings of "5".
+      // A tuplet is the one property here that is not a property of a note:
+      // it is a statement about a group of them, and only the editor knows
+      // whether this selection is a group the stave can actually draw.  So
+      // it goes back through the same door the toolbar's buttons use rather
+      // than being written onto the notes from here — writing it directly is
+      // how a lone note came to be marked as a triplet, which nothing could
+      // draw and which the playback shortened all the same.
       if (key !== "tuplet_num") return commit(key, value, spec);
-      const found = TUPLET_CHOICES.find(([num]) => num === Number(value));
-      return this.hooks.onNote(positions, () => ({
-        tuplet_num: found ? found[0] : 0,
-        tuplet_den: found ? found[1] : 0,
-      }));
+      return this.hooks.onTuplet(positions, Number(value));
     });
 
     // Not part of Rhythm: an offset is not a note value and does not change

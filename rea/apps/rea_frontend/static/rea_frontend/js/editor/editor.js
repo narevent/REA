@@ -20,23 +20,23 @@
  * exercise half-written is worse than one not written at all.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=166";
-import { EditorAPI } from "./editorApi.js?v=166";
-import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=166";
+import { AudioPlayer } from "../audioPlayer.js?v=167";
+import { EditorAPI } from "./editorApi.js?v=167";
+import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=167";
 import {
   Library, SHELF_DESTINATIONS, destinations, metaFromCtx,
-} from "./library.js?v=166";
-import { labelWithDuration } from "./glyphs.js?v=166";
-import { ScoreCanvas } from "./scoreCanvas.js?v=166";
+} from "./library.js?v=167";
+import { labelWithDuration } from "./glyphs.js?v=167";
+import { ScoreCanvas } from "./scoreCanvas.js?v=167";
 import {
   DURATIONS, LETTERS, MAX_VISUAL_OFFSET_PX, MODIFIERS, MODIFIER_LABELS, ScoreDoc,
   buildToken, noteMidi, offsetMs, splitToken, transposeToken,
-} from "./scoreDoc.js?v=166";
-import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=166";
-import { midiToToken } from "../notation.js?v=166";
+} from "./scoreDoc.js?v=167";
+import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=167";
+import { midiToToken } from "../notation.js?v=167";
 import {
   applyLegato, barGapMs, separatorGapMs, tupletRatio,
-} from "../practiceData.js?v=166";
+} from "../practiceData.js?v=167";
 
 /** The accidentals offered as buttons, in the order a musician reaches for
  *  them.  `null` is "whatever the key signature says", which is the state a
@@ -127,6 +127,7 @@ class Editor {
     });
     this.inspector = new Inspector(this.dom.inspector, {
       onNote: (positions, changes) => this.updateNotes(positions, changes),
+      onTuplet: (positions, num) => this.setTuplet(positions, num),
       onBar: (indices, changes) => this.updateBars(indices, changes),
       onMeta: (changes) => this.updateMeta(changes),
       onKey: (key) => this.setKey(key),
@@ -1304,22 +1305,76 @@ class Editor {
     });
   }
 
+  /**
+   * Why these notes cannot be a tuplet of `num`, or "" when they can.
+   *
+   * The drawing groups notes that are *next to each other in one bar* and
+   * carry the same ratio, and cuts that run into groups of `num`.  A
+   * selection it cannot group that way — one with a gap in it, or one whose
+   * share of some bar is not a whole number of groups — would still be
+   * marked, and so would still be shortened in the playback, while the stave
+   * showed nothing at all.  A teacher hearing a change they cannot see is
+   * worse off than one who is told no, so these are refused and named.
+   */
+  _tupletComplaint(notes, num) {
+    const byBar = new Map();
+    notes.forEach(({ barIndex, noteIndex }) => {
+      if (!byBar.has(barIndex)) byBar.set(barIndex, []);
+      byBar.get(barIndex).push(noteIndex);
+    });
+    const spread = byBar.size > 1;
+    for (const [barIndex, indices] of byBar) {
+      indices.sort((a, b) => a - b);
+      const run = indices.every((n, i) => i === 0 || n === indices[i - 1] + 1);
+      if (!run) {
+        return `A tuplet is a run of notes next to each other, and bar ${barIndex + 1} has a gap in the selection.`;
+      }
+      if (indices.length % num !== 0) {
+        // A tuplet belongs to one bar — a run of them across a barline is
+        // several tuplets, and each bar's share has to add up on its own.
+        return spread
+          ? `A ${num}-note tuplet is drawn inside one bar, so every bar needs a multiple of ${num} notes — bar ${barIndex + 1} has ${indices.length}.`
+          : `A ${num}-note tuplet needs a multiple of ${num} notes — ${indices.length} selected.`;
+      }
+    }
+    return "";
+  }
+
+  /**
+   * Set a tuplet on given notes, or clear it — the inspector's path.
+   *
+   * The same rule the toolbar applies, because it is the same act: the panel
+   * offers a ratio per note only because that is where the ratio is stored,
+   * and a note marked on its own is one the stave cannot draw.
+   */
+  setTuplet(positions, num) {
+    const found = TUPLET_CHOICES.find(([n]) => n === Number(num));
+    if (!found) {
+      this.doc.setTuplet(positions, 0, 0);
+      this.status("Tuplet removed.");
+      return;
+    }
+    const complaint = this._tupletComplaint(positions, found[0]);
+    if (complaint) {
+      this.status(complaint, "error");
+      return;
+    }
+    this.doc.setTuplet(positions, found[0], found[1]);
+    this.status(`${positions.length} note${positions.length === 1 ? "" : "s"} as ${found[0]} in the time of ${found[1]}.`);
+  }
+
   /** Make the selection a tuplet, or — if it already is one — an ordinary
    *  run of notes again. */
   toggleTuplet(num, den) {
     const notes = this.selection.notes;
     if (!notes.length) return;
     const already = this._selectionIsTuplet(num, den);
-    if (!already && notes.length % num !== 0) {
-      // The drawing cuts a marked run into groups of `num`, so a selection
-      // that is not a whole number of groups would leave notes marked as
-      // part of a tuplet that no bracket covers and no ratio explains.
-      // Refused with the number needed, rather than half-applied.
-      this.status(
-        `A ${num}-note tuplet needs a multiple of ${num} notes — ${notes.length} selected.`,
-        "error",
-      );
-      return;
+    if (!already) {
+      const complaint = this._tupletComplaint(notes, num);
+      if (complaint) {
+        this.status(complaint, "error");
+        return;
+      }
     }
     this.doc.setTuplet(notes, already ? 0 : num, den);
     this.status(already

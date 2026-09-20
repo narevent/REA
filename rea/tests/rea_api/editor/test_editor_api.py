@@ -222,6 +222,31 @@ class CreateAndSaveTests(EditorTestCase):
         self.assertEqual(note["alias_degree"], "7")
         self.assertEqual(note["volume"], 75)
 
+    def test_round_trip_keeps_a_tuplet(self):
+        """A tuplet is the group's ratio and both halves of it have to travel.
+
+        The editor writes `tuplet_num` and `tuplet_den` onto every note of the
+        group, and the drawing reads both — a note that came back with the
+        count but not the time it occupies would be drawn, and sounded, as
+        something nobody asked for.
+        """
+        payload = self.relative_payload()
+        payload["bars"][0]["events"] = [
+            {"note_name": "g1", "duration": 0.125, "tuplet_num": 5, "tuplet_den": 4},
+            {"note_name": "a1", "duration": 0.125, "tuplet_num": 5, "tuplet_den": 4},
+            {"note_name": "h1", "duration": 0.125, "tuplet_num": 5, "tuplet_den": 4},
+            {"note_name": "c2", "duration": 0.125, "tuplet_num": 5, "tuplet_den": 4},
+            {"note_name": "d2", "duration": 0.125, "tuplet_num": 5, "tuplet_den": 4},
+        ]
+        created = self.post(
+            reverse("editor-create", args=["relative"]), payload
+        ).json()
+        loaded = self.client.get(
+            reverse("editor-detail", args=["relative", created["id"]])
+        ).json()
+        ratios = [(e["tuplet_num"], e["tuplet_den"]) for e in loaded["bars"][0]["events"]]
+        self.assertEqual(ratios, [(5, 4)] * 5)
+
     def test_rest_loses_its_pitch(self):
         payload = self.relative_payload()
         payload["bars"][0]["events"] = [

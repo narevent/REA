@@ -10,8 +10,8 @@
  * drawn at all.
  */
 
-import { InstrumentRenderer } from "../components/instrumentRenderer.js?v=166";
-import { keySigMap, midiFromEvent } from "../practiceData.js?v=166";
+import { InstrumentRenderer } from "../components/instrumentRenderer.js?v=167";
+import { keySigMap, midiFromEvent } from "../practiceData.js?v=167";
 
 let renderer = null;
 let current = null;
