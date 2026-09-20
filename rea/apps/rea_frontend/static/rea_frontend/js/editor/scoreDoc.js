@@ -13,7 +13,7 @@
  * teacher edits is what gets stored.
  */
 
-import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=167";
+import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=168";
 
 /** Note letters in staff order.  German naming: `h` is B-natural. */
 export const LETTERS = ["c", "d", "e", "f", "g", "a", "h"];
@@ -446,6 +446,75 @@ export class ScoreDoc extends EventTarget {
       { tuplet_num: num || 0, tuplet_den: num ? den : 0 },
       num ? "tuplet" : "remove tuplet",
     );
+  }
+
+  /** The written value each note of a `num`-in-the-time-of-`den` tuplet takes
+   *  if the group is to last exactly as long as a note of `duration`, or null
+   *  when that is not a note this library can write.
+   *
+   *  Three eighths in the time of two *are* a quarter, so a quarter asked to
+   *  become a triplet divides into eighths.  A sixteenth asked to become a
+   *  quintuplet would need a sixty-fourth, and there is no such note here. */
+  static tupletUnit(duration, den) {
+    const each = (duration || 0.125) / den;
+    const found = DURATIONS.find((d) => Math.abs(d.value - each) < 1e-9);
+    return found ? found.value : null;
+  }
+
+  /**
+   * Turn each of `positions` into a tuplet of `num` notes in its own time.
+   *
+   * The gesture every notation editor has, and the one a teacher reaches for
+   * first: put the cursor on a note, ask for a triplet, and the note becomes
+   * three in the time it used to take.  Without it the only way to write a
+   * tuplet was to have already written exactly three notes and then say so,
+   * which is not how anybody thinks about it.
+   *
+   * The bar keeps its length, because each group is the note it replaced.
+   *
+   * One entry in the history however many notes were divided — it is one act
+   * to the teacher who asked for it.  Returns the positions it wrote, or null
+   * when nothing could be divided.
+   */
+  divideIntoTuplets(positions, num, den) {
+    let written = null;
+    const done = this.edit(`${num}-note tuplet`, (doc) => {
+      // Back to front, so dividing an earlier note does not move the index of
+      // a later one still to be done.
+      const sorted = positions.slice().sort(
+        (a, b) => b.barIndex - a.barIndex || b.noteIndex - a.noteIndex,
+      );
+      const out = [];
+      sorted.forEach(({ barIndex, noteIndex }) => {
+        const bar = doc.bars[barIndex];
+        const event = bar && bar.events[noteIndex];
+        if (!event) return;
+        const each = ScoreDoc.tupletUnit(event.duration, den);
+        if (each == null) return;
+        const copies = [];
+        for (let i = 0; i < num; i += 1) {
+          // The pitch, the loudness, the decay and the notehead are the
+          // note's and belong to all of it.  The two offsets and the
+          // separator are about one moment in the bar rather than about the
+          // note, so they are not copied onto every member of the group: an
+          // anticipation written once would otherwise be written three times,
+          // and a breath drawn after the note would be drawn inside it.
+          copies.push(Object.assign({}, event, {
+            duration: each,
+            tuplet_num: num,
+            tuplet_den: den,
+            horizontal_offset_ms: i === 0 ? event.horizontal_offset_ms : 0,
+            visual_offset_px: 0,
+            separator: i === num - 1 ? event.separator : "",
+          }));
+        }
+        bar.events.splice(noteIndex, 1, ...copies);
+        copies.forEach((_, i) => out.push({ barIndex, noteIndex: noteIndex + i }));
+      });
+      if (!out.length) return false;
+      written = out.sort((a, b) => a.barIndex - b.barIndex || a.noteIndex - b.noteIndex);
+    });
+    return done ? written : null;
   }
 
   /** Move a note to another slot — the drag-and-drop path. */

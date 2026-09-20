@@ -20,23 +20,23 @@
  * exercise half-written is worse than one not written at all.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=167";
-import { EditorAPI } from "./editorApi.js?v=167";
-import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=167";
+import { AudioPlayer } from "../audioPlayer.js?v=168";
+import { EditorAPI } from "./editorApi.js?v=168";
+import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=168";
 import {
   Library, SHELF_DESTINATIONS, destinations, metaFromCtx,
-} from "./library.js?v=167";
-import { labelWithDuration } from "./glyphs.js?v=167";
-import { ScoreCanvas } from "./scoreCanvas.js?v=167";
+} from "./library.js?v=168";
+import { labelWithDuration } from "./glyphs.js?v=168";
+import { ScoreCanvas } from "./scoreCanvas.js?v=168";
 import {
   DURATIONS, LETTERS, MAX_VISUAL_OFFSET_PX, MODIFIERS, MODIFIER_LABELS, ScoreDoc,
   buildToken, noteMidi, offsetMs, splitToken, transposeToken,
-} from "./scoreDoc.js?v=167";
-import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=167";
-import { midiToToken } from "../notation.js?v=167";
+} from "./scoreDoc.js?v=168";
+import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=168";
+import { midiToToken } from "../notation.js?v=168";
 import {
   applyLegato, barGapMs, separatorGapMs, tupletRatio,
-} from "../practiceData.js?v=167";
+} from "../practiceData.js?v=168";
 
 /** The accidentals offered as buttons, in the order a musician reaches for
  *  them.  `null` is "whatever the key signature says", which is the state a
@@ -1341,11 +1341,60 @@ class Editor {
   }
 
   /**
+   * Write a tuplet over the given notes, by whichever of the two gestures
+   * fits what is selected.  Both the toolbar and the panel come through here.
+   *
+   * *Marking* comes first: notes already written as a run of the right length
+   * are notes the teacher means to be read together, and saying "these three
+   * are a triplet" must not rewrite them.
+   *
+   * Otherwise the notes are *divided*: each becomes a tuplet in its own time,
+   * which is what a teacher asking for a triplet on a single note means, and
+   * what every notation program does with that gesture.  The editor used to
+   * refuse it — the toolbar said so and the panel silently wrote a ratio no
+   * group could carry — and between them a tuplet was very nearly unwritable.
+   */
+  applyTuplet(positions, num, den) {
+    if (!positions.length) return;
+    if (!this._tupletComplaint(positions, num)) {
+      this.doc.setTuplet(positions, num, den);
+      this.status(`${positions.length} note${positions.length === 1 ? "" : "s"} as ${num} in the time of ${den}.`);
+      return;
+    }
+    // Every note has to be divisible, or the selection would come back as a
+    // mixture of what was asked for and what was left alone.
+    const short = positions.find((position) => {
+      const event = this.doc.event(position.barIndex, position.noteIndex);
+      return !event || ScoreDoc.tupletUnit(event.duration, den) == null;
+    });
+    if (short) {
+      const event = this.doc.event(short.barIndex, short.noteIndex);
+      this.status(
+        `A ${this._durationLabel(event ? event.duration : 0)} note does not divide into ${num} — `
+        + `there is no shorter note to write them in.`,
+        "error",
+      );
+      return;
+    }
+    const written = this.doc.divideIntoTuplets(positions, num, den);
+    if (!written) {
+      this.status(`Those notes could not be divided into ${num}.`, "error");
+      return;
+    }
+    // The new notes are what the teacher is now looking at, so they are what
+    // is selected: the next thing they do applies to the group they just made.
+    this.selection.notes = written;
+    this.renderAll();
+    this.status(positions.length === 1
+      ? `One note divided into ${num} in the time of ${den}.`
+      : `${positions.length} notes each divided into ${num} in the time of ${den}.`);
+  }
+
+  /**
    * Set a tuplet on given notes, or clear it — the inspector's path.
    *
-   * The same rule the toolbar applies, because it is the same act: the panel
-   * offers a ratio per note only because that is where the ratio is stored,
-   * and a note marked on its own is one the stave cannot draw.
+   * The same act the toolbar performs, so it goes the same way: the panel
+   * offers a ratio per note only because per note is where it is stored.
    */
   setTuplet(positions, num) {
     const found = TUPLET_CHOICES.find(([n]) => n === Number(num));
@@ -1354,13 +1403,7 @@ class Editor {
       this.status("Tuplet removed.");
       return;
     }
-    const complaint = this._tupletComplaint(positions, found[0]);
-    if (complaint) {
-      this.status(complaint, "error");
-      return;
-    }
-    this.doc.setTuplet(positions, found[0], found[1]);
-    this.status(`${positions.length} note${positions.length === 1 ? "" : "s"} as ${found[0]} in the time of ${found[1]}.`);
+    this.applyTuplet(positions, found[0], found[1]);
   }
 
   /** Make the selection a tuplet, or — if it already is one — an ordinary
@@ -1368,18 +1411,12 @@ class Editor {
   toggleTuplet(num, den) {
     const notes = this.selection.notes;
     if (!notes.length) return;
-    const already = this._selectionIsTuplet(num, den);
-    if (!already) {
-      const complaint = this._tupletComplaint(notes, num);
-      if (complaint) {
-        this.status(complaint, "error");
-        return;
-      }
+    if (this._selectionIsTuplet(num, den)) {
+      this.doc.setTuplet(notes, 0, 0);
+      this.status("Tuplet removed.");
+      return;
     }
-    this.doc.setTuplet(notes, already ? 0 : num, den);
-    this.status(already
-      ? "Tuplet removed."
-      : `${notes.length} note${notes.length === 1 ? "" : "s"} as ${num} in the time of ${den}.`);
+    this.applyTuplet(notes, num, den);
   }
 
   /** The note value the next written note will take. */
