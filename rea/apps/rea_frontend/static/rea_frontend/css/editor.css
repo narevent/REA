@@ -195,6 +195,13 @@
    the row says so by going quiet rather than by lying about one of them. */
 .ed-btnset.is-mixed .ed-choice { opacity: 0.55; }
 
+/* Choosing a style, and keeping one: one row, because they are one thought —
+   "make this exercise look like that", and "let something else look like
+   this". */
+.ed-style-row { display: flex; gap: 6px; align-items: center; }
+.ed-style-row .ed-input { flex: 1 1 auto; min-width: 0; }
+.ed-style-row .ed-btn { flex: 0 0 auto; white-space: nowrap; }
+
 /* The stored token, shown but not editable — it follows the buttons above. */
 .ed-token {
   display: flex; align-items: baseline; gap: 8px;

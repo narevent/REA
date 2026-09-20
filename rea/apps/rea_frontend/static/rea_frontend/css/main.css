@@ -345,9 +345,9 @@ body {
    and beams only adds clutter around the one thing being trained, which is
    where the note sits.  The rule keys off the class `staveLayout` puts on
    every score it draws, so neither view has to remember to ask. */
-svg.rea-score .vf-stavenote .vf-stem,
-svg.rea-score .vf-stavenote .vf-flag,
-svg.rea-score .vf-beam { display: none !important; }
+svg.rea-score.heads-only .vf-stavenote .vf-stem,
+svg.rea-score.heads-only .vf-stavenote .vf-flag,
+svg.rea-score.heads-only .vf-beam { display: none !important; }
 
 /* ...with one exception, and only in the editor.  The rule above is right for
    a student, who is reading for pitch, and wrong for the teacher writing the
@@ -359,6 +359,16 @@ svg.rea-score .vf-beam { display: none !important; }
 .shows-rhythm svg.rea-score .vf-stavenote .vf-stem,
 .shows-rhythm svg.rea-score .vf-stavenote .vf-flag,
 .shows-rhythm svg.rea-score .vf-beam { display: inline !important; }
+
+/* A separator: a breath, a phrase end, a tick over the note before it.  Drawn
+   into the score by `staveLayout`, and coloured here so both views agree. */
+svg.rea-score .vf-separator { stroke: var(--ink, #16171a); fill: none; }
+svg.rea-score .vf-separator-glyph { fill: var(--ink, #16171a); stroke: none; }
+svg.rea-score .vf-note-label,
+svg.rea-score .vf-bar-number {
+  font-size: 10px; fill: var(--muted, #6b6f76); stroke: none;
+  font-family: "Instrument Sans", system-ui, sans-serif;
+}
 
 /* Live sung-pitch preview marker (singing exercises). */
 /* Per-note accuracy, left on the stave after singing so a finished run can be

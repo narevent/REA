@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from ...style import style_from_source
 from ..models import Bar, Lesson, KeyModel, MusicEvent
 from ..utils.note_parser import parse_note, resolve_pitch_class
 from .json_import import (
@@ -157,9 +158,8 @@ def import_lesson(data: dict, filename: str, *, clear: bool = True) -> Optional[
         variant=variant,
         source_file=filename,
         tempo=int(data.get("tempo", 86) or 86),
-        draw_only_note_heads=bool(data.get("draw_only_note_heads", False)),
         default_rhythm=data.get("default_music_rhythm", "FreeStyle"),
-        mid_bar_time=float(data.get("mid_bar_time", 0.1) or 0.1),
+        **style_from_source(data),
         raw=data,
     )
 
@@ -194,6 +194,8 @@ def import_lesson(data: dict, filename: str, *, clear: bool = True) -> Optional[
                 tuplet_den=ev.tuplet_den,
                 duration=ev.duration,
                 attack_decay_time=ev.attack_decay_time,
+                separator=ev.separator,
+                notehead=ev.notehead,
                 volume=ev.volume,
                 note_name=note.name,
                 alias_degree=_normalize_degree_label(note.alias),
@@ -287,6 +289,8 @@ def generate_lesson_for_key(
                 tuplet_den=src_ev.tuplet_den,
                 duration=src_ev.duration,
                 attack_decay_time=src_ev.attack_decay_time,
+                separator=src_ev.separator,
+                notehead=src_ev.notehead,
                 volume=src_ev.volume,
                 note_name=base_note,
                 alias_degree=label,

@@ -142,7 +142,7 @@ export class NotationRenderer {
    * that answer to a click, and the highlighting the practice session drives.
    */
   render(bars, opts = {}, isRelayout = false) {
-    const { clef = "treble", title = "", onBarClick = null } = opts;
+    const { clef = "treble", title = "", onBarClick = null, style = null } = opts;
     this.clear();
     if (!isRelayout) this._relayouts = 0;
     this._lastDraw = { bars, opts };
@@ -153,7 +153,11 @@ export class NotationRenderer {
     }
     this.onBarClick = onBarClick;
 
-    const drawn = drawScore(this.container, bars);
+    // The exercise's own style — how far apart its bars sit, whether its
+    // stems are drawn, what is written under its notes.  A student sees the
+    // exercise as the teacher set it, which is the whole point of the
+    // settings being on the exercise.
+    const drawn = drawScore(this.container, bars, { style });
     if (!drawn) return [];
     this._drawnFor = this.container.clientWidth;
 

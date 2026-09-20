@@ -63,8 +63,10 @@ export function renderScaleNotation(keyModel, onBarClick) {
       visual_offset_px: e.visual_offset_px,
       tuplet_num: e.tuplet_num,
       tuplet_den: e.tuplet_den,
+      separator: e.separator,
+      notehead: e.notehead,
     })),
   }));
-  r.render(bars, { title: keyModel.name || "", onBarClick });
+  r.render(bars, { title: keyModel.name || "", onBarClick, style: keyModel });
   return r;
 }

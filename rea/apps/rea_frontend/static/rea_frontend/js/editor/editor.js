@@ -34,7 +34,9 @@ import {
 } from "./scoreDoc.js?v=165";
 import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=165";
 import { midiToToken } from "../notation.js?v=165";
-import { applyLegato, tupletRatio } from "../practiceData.js?v=165";
+import {
+  applyLegato, barGapMs, separatorGapMs, tupletRatio,
+} from "../practiceData.js?v=165";
 
 /** The accidentals offered as buttons, in the order a musician reaches for
  *  them.  `null` is "whatever the key signature says", which is the state a
@@ -61,6 +63,22 @@ const el = (tag, className, text) => {
   if (text != null) node.textContent = text;
   return node;
 };
+
+/**
+ * The settings a style carries, and therefore the ones applying one replaces.
+ *
+ * Kept in step with `STYLE_FIELDS` in `intonation/style.py` — the server is
+ * where the list is decided, and this is the editor's copy of it.  A field
+ * missing here would simply not travel; a field here that the server does not
+ * know is refused by the style serializer, which is the safer direction.
+ */
+const STYLE_KEYS = [
+  "mid_bar_space", "bars_per_row", "align_to_center", "auto_align",
+  "draw_only_note_heads", "are_all_notes_same_duration", "separator_space",
+  "note_label_type", "bar_number_type",
+  "mid_bar_time", "mute_last_played_notes_after_bar_finishes",
+  "separator_time", "separator_cancel_previous_note",
+];
 
 /** Letter keys write notes; the top-row digits pick durations. */
 const LETTER_KEYS = new Set(LETTERS);
@@ -112,6 +130,8 @@ class Editor {
       onBar: (indices, changes) => this.updateBars(indices, changes),
       onMeta: (changes) => this.updateMeta(changes),
       onKey: (key) => this.setKey(key),
+      onStyle: (style) => this.applyStyle(style),
+      onSaveStyle: () => this.saveStyle(),
     });
   }
 
@@ -1402,8 +1422,74 @@ class Editor {
     this.doc.updateBars(indices, changes);
   }
 
-  updateMeta(changes) {
-    this.doc.updateMeta(changes);
+  updateMeta(changes, label) {
+    this.doc.updateMeta(changes, label);
+  }
+
+  /**
+   * Apply a named style to the open exercise.
+   *
+   * One undo step, and nothing saved: a style is a large edit like any other
+   * and a teacher should be able to try one, hear it, and take it back.
+   */
+  applyStyle(style) {
+    if (!this.doc || !style) return;
+    const values = {};
+    STYLE_KEYS.forEach((key) => {
+      if (style[key] !== undefined) values[key] = style[key];
+    });
+    this.doc.updateMeta(values, `apply ${style.name}`);
+    this.status(`${style.name} applied — not saved yet.`, "good");
+  }
+
+  /**
+   * Keep the settings on screen as a named style.
+   *
+   * Saved from the exercise rather than edited in a dialog of its own,
+   * because the moment a teacher knows what they want a style to be is the
+   * moment an exercise in front of them looks right.
+   */
+  async saveStyle() {
+    if (!this.doc) return;
+    const meta = this.doc.doc.meta;
+    const existing = (this.options && this.options.styles) || [];
+    const house = existing.find((s) => s.is_default);
+    const answer = await this.askForm({
+      title: "Save these settings as a style",
+      body: "A style is a starting point: applying it copies these settings onto "
+        + "an exercise, and the exercise keeps them from then on.",
+      fields: [
+        { key: "name", label: "Name", value: "", hint: "Saving over a name replaces that style." },
+        { key: "description", label: "What it is for", value: "" },
+        {
+          key: "is_default", label: "Make it the house style",
+          options: [{ value: "no", label: "No" }, { value: "yes", label: "Yes" }],
+          value: "no",
+          hint: house ? `${house.name} is the house style now.` : "Nothing is the house style yet.",
+        },
+      ],
+      confirm: "Save style",
+    });
+    if (!answer) return;
+    const payload = { name: answer.values.name.trim(), description: answer.values.description };
+    STYLE_KEYS.forEach((key) => { payload[key] = meta[key]; });
+    payload.is_default = answer.values.is_default === "yes";
+    try {
+      const saved = await EditorAPI.saveStyle(payload);
+      // The options carry the style list the panel offers, so the new one has
+      // to reach them or it would not appear until the page was reloaded.
+      this.options.styles = (this.options.styles || [])
+        .filter((s) => s.id !== saved.id)
+        .concat([saved]);
+      if (saved.is_default) {
+        this.options.styles.forEach((s) => { s.is_default = s.id === saved.id; });
+      }
+      this.inspector.setOptions(this.options);
+      this.renderAll();
+      this.status(`Saved the style “${saved.name}”.`, "good");
+    } catch (e) {
+      answer.fail(e.message);
+    }
   }
 
   setKey(key) {
@@ -1574,7 +1660,10 @@ class Editor {
     const doc = this.doc.doc;
     const tempo = (doc.meta.tempo > 10 ? doc.meta.tempo : 80) / (doc.meta.texture === "poly" ? 2 : 1);
     const wholeMs = (4 * 60000) / tempo;
-    const gapMs = Math.round((doc.meta.mid_bar_time || 0) * 1000);
+    const gapMs = barGapMs(doc.meta);
+    const separatorMs = separatorGapMs(doc.meta);
+    const cutAtSeparator = !!doc.meta.separator_cancel_previous_note;
+    const holdAcrossBars = !doc.meta.mute_last_played_notes_after_bar_finishes;
     const steps = [];
     let barStart = 0;
     barIndices.forEach((barIndex) => {
@@ -1598,18 +1687,30 @@ class Editor {
           durationMs,
           volume: event.volume || 80,
           decaySec: event.attack_decay_time != null ? Number(event.attack_decay_time) : null,
+          separator: event.separator || "",
           barIndex,
           noteIndex,
         });
-        cursor = start + durationMs;
+        cursor = start + durationMs + (event.separator ? separatorMs : 0);
       });
       // Held notes are closed up inside the bar, exactly as the student's
       // player does it — see `applyLegato`.  Bar by bar, so a gap between
-      // bars stays a gap.
-      applyLegato(steps.slice(from));
+      // bars stays a gap until the rule below decides otherwise.
+      applyLegato(steps.slice(from), { cutAtSeparator });
       steps.slice(from).forEach((step) => { step.startMs += barStart; });
       barStart += cursor + gapMs;
     });
+    // ...and the note that ends a bar rings into that gap unless the exercise
+    // says to cut it at the barline.
+    if (holdAcrossBars) {
+      for (let i = 0; i < steps.length - 1; i += 1) {
+        const step = steps[i];
+        const next = steps[i + 1];
+        if (step.barIndex === next.barIndex || step.isRest || next.isRest) continue;
+        const gap = next.startMs - (step.startMs + step.durationMs);
+        if (gap > 0) step.durationMs += gap;
+      }
+    }
     return steps;
   }
 

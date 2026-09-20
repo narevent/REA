@@ -72,6 +72,47 @@ export const CLEF_MAP = {
 };
 
 /**
+ * A score's *style*: how it is laid out, as opposed to what is in it.
+ *
+ * The fields arrive from the server under their stored names (see
+ * `intonation/style.py`) and are translated once, here, into the shorter ones
+ * the drawing reads — so every caller can hand this an exercise's `meta`, a
+ * lesson, or nothing at all, and get a complete style either way.
+ */
+export const STYLE_DEFAULTS = {
+  barGap: 22,           // mid_bar_space: whitespace between bars, in pixels
+  barsPerRow: 0,        // 0 = as many as the width allows
+  centre: false,        // align_to_center
+  stretch: false,       // auto_align: fill the line, or leave natural widths
+  headsOnly: true,      // draw_only_note_heads
+  sameDuration: false,  // are_all_notes_same_duration
+  separatorSpace: 14,   // whitespace a separator opens up
+  noteLabel: "",        // "", degree, letter, letter_octave, roman
+  barNumber: "none",    // none, all, row
+};
+
+export function scoreStyle(source) {
+  const s = source || {};
+  const pick = (key, fallback) => (s[key] == null ? fallback : s[key]);
+  return {
+    barGap: Number(pick("mid_bar_space", STYLE_DEFAULTS.barGap)),
+    barsPerRow: Number(pick("bars_per_row", STYLE_DEFAULTS.barsPerRow)) || 0,
+    centre: !!pick("align_to_center", STYLE_DEFAULTS.centre),
+    stretch: !!pick("auto_align", STYLE_DEFAULTS.stretch),
+    headsOnly: !!pick("draw_only_note_heads", STYLE_DEFAULTS.headsOnly),
+    sameDuration: !!pick("are_all_notes_same_duration", STYLE_DEFAULTS.sameDuration),
+    separatorSpace: Number(pick("separator_space", STYLE_DEFAULTS.separatorSpace)),
+    noteLabel: String(pick("note_label_type", STYLE_DEFAULTS.noteLabel) || ""),
+    barNumber: String(pick("bar_number_type", STYLE_DEFAULTS.barNumber) || "none"),
+  };
+}
+
+/** VexFlow's notehead codes, by the name the score stores. */
+const NOTEHEAD_CODES = {
+  cross: "x2", diamond: "d", triangle: "tu", square: "sq", slash: "s",
+};
+
+/**
  * The pitch on each clef's top line, as a diatonic index in the document's
  * own units: `octave * 7 + letter`, where octave index 1 is middle C's.
  *
@@ -243,6 +284,153 @@ export function soundedAlteration(token, keyMap) {
 }
 
 /**
+ * The note value most of the score is written in.
+ *
+ * What "all notes the same duration" draws them *as*.  Taking the commonest
+ * rather than the first means an exercise with a long final note still reads
+ * as the run of eighths it mostly is, and an exercise with a pickup does not
+ * take its look from the pickup.
+ */
+function commonDuration(bars) {
+  const counts = new Map();
+  (bars || []).forEach((bar) => (bar.notes || []).forEach((n) => {
+    const d = n.duration || 0.125;
+    counts.set(d, (counts.get(d) || 0) + 1);
+  }));
+  let best = 0.125;
+  let most = 0;
+  counts.forEach((count, duration) => {
+    if (count > most) { most = count; best = duration; }
+  });
+  return best;
+}
+
+/**
+ * The marks between notes: a breath, a phrase end, a tick.
+ *
+ * Drawn after the notes and in the same pass as them, because a separator
+ * belongs to the gap the spacing above has just opened — it is placed halfway
+ * across that gap rather than at a fixed distance from either neighbour, so
+ * it stays put when the row is rescaled.
+ *
+ * The apostrophe and the marker sit above the staff where they do not collide
+ * with a notehead; the barlines go through it, because that is what they
+ * mean.
+ */
+function drawSeparators(context, stave, notes, look) {
+  const top = stave.getYForLine(0);
+  const bottom = stave.getYForLine(4);
+  notes.forEach((note, index) => {
+    const kind = note.reaSeparator;
+    if (!kind) return;
+    let x;
+    try {
+      const here = note.getAbsoluteX() + (note.getWidth ? note.getWidth() : 12);
+      const next = notes[index + 1];
+      x = next ? (here + next.getAbsoluteX()) / 2 : here + look.separatorSpace / 2;
+    } catch (e) {
+      return; // no geometry, no mark — never at the cost of the score
+    }
+    context.save();
+    context.setStrokeStyle("#16171a");
+    context.setFillStyle("#16171a");
+    const line = (dx, dashed = false) => {
+      context.beginPath();
+      if (dashed && context.setLineDash) context.setLineDash([4, 3]);
+      context.moveTo(x + dx, top);
+      context.lineTo(x + dx, bottom);
+      context.stroke();
+      if (dashed && context.setLineDash) context.setLineDash([]);
+    };
+    if (kind === "apostrophe") {
+      // A comma above the top line — the breath mark a singer reads.
+      context.setFont("Arial", 17);
+      context.fillText("\u2019", x - 3, top - 4);
+    } else if (kind === "marker") {
+      context.beginPath();
+      context.moveTo(x - 4, top - 10);
+      context.lineTo(x + 4, top - 10);
+      context.lineTo(x, top - 3);
+      context.closePath();
+      context.fill();
+    } else if (kind === "dashed") {
+      context.setLineWidth(1.2);
+      line(0, true);
+    } else if (kind === "thick") {
+      context.setLineWidth(3.2);
+      line(0);
+    } else if (kind === "double") {
+      context.setLineWidth(1.2);
+      line(-2);
+      line(2);
+    } else {
+      context.setLineWidth(1.2);
+      line(0);
+    }
+    context.restore();
+  });
+}
+
+/** Roman numerals, for the degree labels that ask for them. */
+const ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
+
+/**
+ * What is written under one notehead, for a given label style.
+ *
+ * The degree is the exercise's own `alias`; the letters are read off the
+ * written token, so what is printed is what is written rather than a
+ * re-spelling of the pitch it sounds.
+ */
+export function noteLabelText(note, kind, keyMap) {
+  if (!note || note.is_rest) return "";
+  const degree = note.alias != null && note.alias !== "" ? String(note.alias) : "";
+  if (kind === "degree") return degree;
+  if (kind === "roman") {
+    const number = parseInt(degree, 10);
+    if (!Number.isFinite(number)) return degree;
+    // A degree can be written an octave up or down — 5' and 5, — and the
+    // numeral is the same function either way, so the marks are kept.
+    return (ROMAN[number] || degree) + degree.replace(/^\d+/, "");
+  }
+  if (kind !== "letter" && kind !== "letter_octave") return "";
+  const tok = parseNoteToken(note.name || "");
+  if (!tok.letter) return "";
+  // Named for what it sounds, not for the letter it is spelled with: in A
+  // major a written `f` is the F♯ the key signature already said, and a label
+  // reading "F" under it would teach the wrong name — which is the one thing
+  // a naming label must not do.
+  const sign = { "-2": "\u266d\u266d", "-1": "\u266d", 0: "", 1: "\u266f", 2: "\u00d7" };
+  const letter = (tok.letter === "h" ? "B" : tok.letter.toUpperCase())
+    + (sign[String(soundedAlteration(tok, keyMap))] || "");
+  if (kind === "letter") return letter;
+  // The octave as a musician names it: index 1 is the middle-C octave.
+  return letter + String((tok.octave ?? 0) + 3);
+}
+
+/** Write the style's label under each note in a bar. */
+function drawNoteLabels(context, stave, notes, look, keyMap) {
+  if (!look.noteLabel) return;
+  let floor = stave.getYForLine(4);
+  notes.forEach((note) => {
+    try {
+      (note.getYs() || []).forEach((y) => { floor = Math.max(floor, y); });
+    } catch (e) { /* a note with no geometry cannot push the lane down */ }
+  });
+  const y = floor + 20;
+  context.save();
+  context.setFont("Instrument Sans, sans-serif", 10);
+  context.setFillStyle("#6b6f76");
+  notes.forEach((note) => {
+    const text = noteLabelText(note.reaLabel, look.noteLabel, keyMap);
+    if (!text) return;
+    try {
+      context.fillText(text, note.getAbsoluteX() - text.length * 2.6, y);
+    } catch (e) { /* decoration only */ }
+  });
+  context.restore();
+}
+
+/**
  * Draw a score into *container* and hand back everything needed to interact
  * with it.
  *
@@ -256,11 +444,21 @@ export function soundedAlteration(token, keyMap) {
  *   `bars`  [{barIndex, stave, staveEl, x, y, width, row, noteStart, noteEnd}]
  *   `notes` [{barIndex, noteIndex, globalIndex, note, el}]
  */
-export function drawScore(container, bars, { rowExtra = 0 } = {}) {
+export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) {
   const VF = resolveVexFlow();
   if (!VF) return null;
 
+  const look = scoreStyle(style);
   const rowHeight = METRICS.ROW_HEIGHT + rowExtra;
+
+  // Every note drawn as the same value, when the exercise asks for it: these
+  // are intonation exercises, and one written in sixteenths for the sake of
+  // the playback reads better as a row of equal noteheads.  What is *played*
+  // is untouched — the durations are still there, this is only the picture.
+  const drawnDuration = (note) => (
+    look.sameDuration ? uniformDuration : (note.duration || 0.125)
+  );
+  const uniformDuration = look.sameDuration ? commonDuration(bars) : 0.125;
 
   // Room above the first staff line for a tuplet's bracket and its number.
   //
@@ -280,8 +478,8 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
   // sideways, however many bars it has.  `clientWidth` includes the
   // element's padding, so subtract it: measuring without would draw an SVG
   // wider than its box.
-  const style = window.getComputedStyle(container);
-  const padding = parseFloat(style.paddingLeft || 0) + parseFloat(style.paddingRight || 0);
+  const box = window.getComputedStyle(container);
+  const padding = parseFloat(box.paddingLeft || 0) + parseFloat(box.paddingRight || 0);
   const availWidth = Math.max(320, Math.floor(container.clientWidth - padding - 4));
 
   // --- Natural (preferred) bar widths from note content ----------------
@@ -302,7 +500,9 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
     const totalWhole = notes.reduce((sum, n) => sum + (n.duration || 0.125), 0);
     const durArea = Math.ceil(totalWhole * METRICS.PX_PER_WHOLE);
     const countArea = notes.length * METRICS.NOTE_SLOT;
-    const noteArea = Math.max(durArea, countArea) + METRICS.STAVE_PADDING * 2;
+    const separators = notes.filter((n) => n.separator).length;
+    const noteArea = Math.max(durArea, countArea)
+      + separators * look.separatorSpace + METRICS.STAVE_PADDING * 2;
     // The clef and key signature are added below, to the bars that actually
     // draw them — which is not known until the bars have been wrapped.
     return Math.max(METRICS.MIN_BAR_WIDTH, noteArea);
@@ -328,14 +528,21 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
   let cur = [];
   let curW = 0;
   bars.forEach((bar, i) => {
-    const w = prefWidths[i] + (cur.length ? METRICS.BAR_GAP : 0);
-    if (cur.length && curW + w > availWidth) {
+    const w = prefWidths[i] + (cur.length ? look.barGap : 0);
+    // A fixed number of bars per line when the exercise asks for one — four
+    // bars to a line is a shape a student learns to read, and letting the
+    // window width decide it means the same exercise looks different on
+    // every screen.  Otherwise, as many as fit.
+    const full = look.barsPerRow
+      ? cur.length >= look.barsPerRow
+      : cur.length && curW + w > availWidth;
+    if (full) {
       rows.push(cur);
       cur = [];
       curW = 0;
     }
     cur.push(i);
-    curW += (cur.length > 1 ? METRICS.BAR_GAP : 0) + prefWidths[i];
+    curW += (cur.length > 1 ? look.barGap : 0) + prefWidths[i];
   });
   if (cur.length) rows.push(cur);
 
@@ -355,13 +562,21 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
   });
 
   rows.forEach((row, r) => {
-    const pref = row.reduce((sum, i, k) => sum + prefWidths[i] + (k ? METRICS.BAR_GAP : 0), 0);
-    const scale = pref > availWidth ? availWidth / pref : 1;
+    const pref = row.reduce((sum, i, k) => sum + prefWidths[i] + (k ? look.barGap : 0), 0);
+    // Stretched to the line, or left at its natural width.  Stretching is the
+    // right default for a score that is read at a distance; a teacher setting
+    // out a worksheet wants the bars the size they wrote them, and then
+    // wants the short last line centred rather than adrift on the left.
+    const scale = (look.stretch || pref > availWidth) ? availWidth / pref : 1;
+    const width = row.reduce(
+      (sum, i, k) => sum + Math.floor(prefWidths[i] * scale) + (k ? look.barGap : 0), 0,
+    );
     let x = METRICS.MARGIN;
+    if (look.centre && width < availWidth) x += Math.floor((availWidth - width) / 2);
     row.forEach((i, k) => {
       barWidths[i] = Math.floor(prefWidths[i] * scale);
       placement[i] = { x, y: r * rowHeight + METRICS.STAVE_Y + topPad, row: r };
-      x += barWidths[i] + METRICS.BAR_GAP;
+      x += barWidths[i] + look.barGap;
     });
   });
 
@@ -417,15 +632,27 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
     const barStart = Object.assign({}, keyMap);
     const staveNotes = [];
     (bar.notes || []).forEach((n) => {
-      const durType = durationToType(n.duration || 0.125);
+      const durType = durationToType(drawnDuration(n));
       let note;
       if (n.is_rest || !n.name) {
         note = new VF.StaveNote({ keys: ["b/4"], duration: durType + "r", clef: heads[i].clef });
       } else {
         const tok = parseNoteToken(n.name);
-        note = new VF.StaveNote({
-          keys: [noteNameToVexflow(tok)], duration: durType, clef: heads[i].clef, auto_stem: true,
-        });
+        // A notehead shape is part of the key in VexFlow: `c/4/x2` is a
+        // cross.  Asked for in a try, because a build that does not know a
+        // shape should cost the note its decoration and not the score.
+        const head = NOTEHEAD_CODES[n.notehead];
+        const key = noteNameToVexflow(tok);
+        try {
+          note = new VF.StaveNote({
+            keys: [head ? `${key}/${head}` : key],
+            duration: durType, clef: heads[i].clef, auto_stem: true,
+          });
+        } catch (e) {
+          note = new VF.StaveNote({
+            keys: [key], duration: durType, clef: heads[i].clef, auto_stem: true,
+          });
+        }
         // Drawn from what the note *sounds* against what the stave has said
         // so far, rather than from the token's own modifier.  The two differ
         // in exactly the case that was silently wrong: `fr` in G major sounds
@@ -449,6 +676,8 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
       note.reaVisualOffset = Number(n.visual_offset_px) || 0;
       note.reaTuplet = (n.tuplet_num > 0 && n.tuplet_den > 0)
         ? { num: Number(n.tuplet_num), den: Number(n.tuplet_den) } : null;
+      note.reaSeparator = n.separator || "";
+      note.reaLabel = n;
       staveNotes.push(note);
       globalIndex += 1;
     });
@@ -508,13 +737,43 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
     new VF.Formatter().joinVoices([voice]).format([voice], Math.max(40, noteAreaWidth));
   });
 
-  // The per-note visual offsets, applied after the formatter has settled the
-  // spacing and before anything is drawn from it.  See `applyVisualOffset`.
+  // A separator opens a hole in the bar: every note after it moves along by
+  // the style's separator space.  Done the same way a visual offset is done —
+  // by moving the tick context, so the stems, beams and accidentals move with
+  // the notehead — and before the offsets, because the two are additive and a
+  // teacher's own nudge should land on top of the spacing rather than under
+  // it.  See `applyVisualOffset` for why this cannot be a transform.
+  formatted.forEach(({ notes }) => {
+    let shift = 0;
+    notes.forEach((note) => {
+      if (shift) applyVisualOffset(note, shift);
+      if (note.reaSeparator) shift += look.separatorSpace;
+    });
+  });
   formatted.forEach(({ notes }) => notes.forEach((note) => {
     applyVisualOffset(note, note.reaVisualOffset);
   }));
 
   formatted.forEach(({ voice, stave }) => voice && voice.draw(context, stave));
+  formatted.forEach(({ notes, stave }) => drawSeparators(context, stave, notes, look));
+  formatted.forEach(({ notes, stave, barIndex }) => drawNoteLabels(
+    context, stave, notes, look, keyAccidentals(heads[barIndex].key),
+  ));
+
+  // Bar numbers, where the style asks for them: on every bar, or once at the
+  // start of each line — which is how a score is numbered when the numbers
+  // are there to find a place in a rehearsal rather than to count bars.
+  if (look.barNumber !== "none") {
+    context.save();
+    context.setFont("Instrument Sans, sans-serif", 10);
+    context.setFillStyle("#6b6f76");
+    formatted.forEach(({ stave, barIndex }) => {
+      const first = rows[placement[barIndex].row][0] === barIndex;
+      if (look.barNumber === "row" && !first) return;
+      context.fillText(String(barIndex + 1), stave.getX() + 2, placement[barIndex].y - 10);
+    });
+    context.restore();
+  }
   allBeams.forEach((b) => b.setContext(context).draw());
   // After the beams: a tuplet's bracket is placed against the stems, which
   // the beam may have moved.
@@ -527,7 +786,12 @@ export function drawScore(container, bars, { rowExtra = 0 } = {}) {
   const svg = container.querySelector("svg");
   // The class every REA stave carries: what makes the stems, flags and beams
   // disappear, in both views, from one rule in main.css.
-  if (svg) svg.classList.add("rea-score");
+  if (svg) {
+    svg.classList.add("rea-score");
+    // Whether the stems are drawn is the exercise's own decision now, rather
+    // than a rule that applied to every REA stave — see `main.css`.
+    svg.classList.toggle("heads-only", look.headsOnly);
+  }
   const noteGroups = container.querySelectorAll("svg g.vf-stavenote");
   const staveGroups = container.querySelectorAll("svg g.vf-stave");
 

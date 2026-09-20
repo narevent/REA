@@ -76,10 +76,12 @@ export function renderLessonNotation(lesson, onBarClick) {
       visual_offset_px: e.visual_offset_px,
       tuplet_num: e.tuplet_num,
       tuplet_den: e.tuplet_den,
+      separator: e.separator,
+      notehead: e.notehead,
     })),
   }));
   const title = (lesson.key_model_name || "") + " " +
     (lesson.formula_name || lesson.category || "");
-  r.render(bars, { title, onBarClick });
+  r.render(bars, { title, onBarClick, style: lesson });
   return r;
 }

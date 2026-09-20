@@ -43,8 +43,12 @@ from ..intonation.relative.models import (
     Lesson as RelativeLesson,
     ScaleModel,
 )
+from ..intonation.style import (
+    BarNumber, Notehead, NoteLabel, STYLE_FIELDS, Separator,
+)
+from ..models import ScoreStyle
 from . import score
-from .serializers import NOTE_TOKEN_HELP, ScoreDocumentSerializer
+from .serializers import NOTE_TOKEN_HELP, ScoreDocumentSerializer, StyleSerializer
 
 LESSON_MODELS = {"relative": RelativeLesson, "absolute": AbsoluteLesson}
 
@@ -176,7 +180,68 @@ class OptionsView(EditorView):
                 distinct(RelativeBar, "music_rhythm") + distinct(AbsoluteBar, "music_rhythm")
             )),
             "mode_chords": distinct(RelativeBar, "music_mode_chord"),
+            # What a note can carry that has no pitch in it, and the named
+            # sets of layout settings a teacher can apply to an exercise.
+            "separators": [{"value": v, "label": l} for v, l in Separator.choices],
+            "noteheads": [{"value": v, "label": l} for v, l in Notehead.choices],
+            "note_labels": [{"value": v, "label": l} for v, l in NoteLabel.choices],
+            "bar_numbers": [{"value": v, "label": l} for v, l in BarNumber.choices],
+            "styles": [style_document(style) for style in ScoreStyle.objects.all()],
         })
+
+
+def style_document(style):
+    """One named style, as the editor reads it."""
+    document = {
+        "id": style.pk, "name": style.name,
+        "description": style.description, "is_default": style.is_default,
+    }
+    document.update(style.values())
+    return document
+
+
+class StylesView(EditorView):
+    """The named styles, and the making of new ones.
+
+    A style is saved *from* an exercise — a teacher sets an exercise up until
+    it looks right and then says "keep this as a style", which is the only
+    moment they actually know what they want the style to be.  There is no
+    separate style editor, and that is the point: the preview for a style is
+    the exercise in front of them.
+    """
+
+    def get(self, request):
+        return Response([style_document(s) for s in ScoreStyle.objects.all()])
+
+    def post(self, request):
+        serializer = StyleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        name = serializer.validated_data["name"]
+        values = {f: serializer.validated_data[f] for f in STYLE_FIELDS}
+        values["description"] = serializer.validated_data.get("description", "")
+        values["is_default"] = serializer.validated_data.get("is_default", False)
+        # Saving over a style of the same name replaces it, because that is
+        # what a teacher means by saving "the house style" again.
+        style, created = ScoreStyle.objects.update_or_create(name=name, defaults=values)
+        return Response(
+            style_document(style),
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class StyleDetailView(EditorView):
+    """Delete a style.  Exercises made with it are untouched: applying a
+    style copies it, so nothing depends on the row still being there."""
+
+    def delete(self, request, pk):
+        style = get_object_or_404(ScoreStyle, pk=pk)
+        if style.is_default:
+            return Response(
+                {"detail": "The house style cannot be deleted — make another one the house style first."},
+                status=400,
+            )
+        style.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BrowseView(EditorView):
@@ -493,8 +558,10 @@ class BlankScoreView(EditorView):
                     "texture": "mono", "formula_name": "", "category": "",
                     "inversion": "", "interval_name": "", "part": "",
                     "variant": "", "source_file": "", "tempo": 86,
-                    "draw_only_note_heads": False, "default_rhythm": "FreeStyle",
-                    "mid_bar_time": 0.1, "shelf": "draft",
+                    "default_rhythm": "FreeStyle", "shelf": "draft",
+                    # A new exercise looks like the rest of the method until
+                    # somebody says otherwise.
+                    **score.house_style_values(),
                 },
                 "bars": [score.blank_bar(system, mode_chord)],
             }
@@ -511,9 +578,9 @@ class BlankScoreView(EditorView):
                     "inversion": "", "part": "", "phase": 0,
                     "exercise_number": 1, "exercise_type": "listening_model",
                     "timed": False, "chromatic": False, "source_file": "",
-                    "tempo": 86, "draw_only_note_heads": False,
-                    "default_rhythm": "FreeStyle", "mid_bar_time": 0.1,
+                    "tempo": 86, "default_rhythm": "FreeStyle",
                     "shelf": "draft",
+                    **score.house_style_values(),
                 },
                 "bars": [score.blank_bar(system, "C_Major")],
             }

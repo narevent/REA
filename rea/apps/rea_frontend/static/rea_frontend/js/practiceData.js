@@ -54,15 +54,24 @@ export function barGapMs(item) {
  * editor overruling the score.  A negative offset — an anticipation — already
  * overlaps its neighbour and is left exactly as it is.
  */
-export function applyLegato(steps) {
+export function applyLegato(steps, { cutAtSeparator = false } = {}) {
   for (let i = 0; i < steps.length - 1; i += 1) {
     const step = steps[i];
     const next = steps[i + 1];
     if (step.isRest || next.isRest) continue;
+    // A separator is a silence somebody drew, so it is the one gap whose
+    // treatment is a decision rather than a repair: the exercise says whether
+    // the note before a breath is cut at it or rings through it.
+    if (step.separator && cutAtSeparator) continue;
     const gap = next.startMs - (step.startMs + step.durationMs);
     if (gap > 0) step.durationMs += gap;
   }
   return steps;
+}
+
+/** The silence a separator opens in the playback, in milliseconds. */
+export function separatorGapMs(item) {
+  return Math.max(0, Math.round((Number(item && item.separator_time) || 0) * 1000));
 }
 
 export function keySigMap(item) {
@@ -118,6 +127,13 @@ export function buildBarSteps(item) {
   const tempo = tempoOf(item);
   const wholeMs = (4 * 60000) / tempo;
   const gapMs = barGapMs(item);
+  const separatorMs = separatorGapMs(item);
+  const cutAtSeparator = !!(item && item.separator_cancel_previous_note);
+  // Whether the last note of a bar stops at the barline or rings into the
+  // gap after it.  The source has carried the answer per exercise since the
+  // beginning (`mute_last_played_notes_after_bar_finishes`) and nothing has
+  // ever read it, so every phrase stopped dead at every barline.
+  const holdAcrossBars = !(item && item.mute_last_played_notes_after_bar_finishes);
   const allBars = [];
   bars.forEach((bar, barIndex) => {
     const steps = [];
@@ -151,11 +167,14 @@ export function buildBarSteps(item) {
         // decide.  Carried through to the synth rather than resolved here:
         // what a decay *sounds* like is the player's business.
         decaySec: ev.attack_decay_time != null ? Number(ev.attack_decay_time) : null,
+        separator: ev.separator || "",
       });
-      cursorMs = startMs + durMs;
+      // A separator holds the next note off by the exercise's separator time —
+      // the breath a singer takes between two phrases of a formula.
+      cursorMs = startMs + durMs + (ev.separator ? separatorMs : 0);
     });
-    applyLegato(steps);
-    allBars.push({ barIndex, steps, gapAfterMs: gapMs });
+    applyLegato(steps, { cutAtSeparator });
+    allBars.push({ barIndex, steps, gapAfterMs: gapMs, holdAcrossBars });
   });
   return allBars;
 }
@@ -218,6 +237,7 @@ export function barsToFlat(barSteps, order, renderer) {
         durationMs: s.durationMs,
         volume: s.volume,
         decaySec: s.decaySec,
+        separator: s.separator,
         barIndex,
         aliasDegree: s.aliasDegree,
         scoreGlobalIndex: scoreBase + localIdx,
@@ -231,6 +251,18 @@ export function barsToFlat(barSteps, order, renderer) {
     const last = place === order.length - 1;
     cursorMs += barDurationMs(bar) + (last ? 0 : bar.gapAfterMs || 0);
   });
+  // The note that ends a bar rings into the gap after it, unless the exercise
+  // says to cut it there.  Done on the flattened schedule because it is the
+  // only place both bars exist at once.
+  for (let i = 0; i < steps.length - 1; i += 1) {
+    const step = steps[i];
+    const next = steps[i + 1];
+    if (step.barIndex === next.barIndex) continue;
+    const bar = barSteps[step.barIndex];
+    if (!bar || !bar.holdAcrossBars || step.isRest || next.isRest) continue;
+    const gap = next.startMs - (step.startMs + step.durationMs);
+    if (gap > 0) step.durationMs += gap;
+  }
   return { steps };
 }
 

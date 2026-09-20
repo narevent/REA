@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from ..style import STYLE_FIELDS
+
 from .models import (
     Bar,
     Lesson,
@@ -63,8 +65,10 @@ class LessonSummarySerializer(serializers.ModelSerializer):
         fields = (
             "id", "key_model", "key_model_name", "texture", "formula_name",
             "category", "inversion", "interval_name", "part", "variant",
-            "source_file", "tempo", "draw_only_note_heads",
-            "default_rhythm", "mid_bar_time",
+            "source_file", "tempo", "default_rhythm",
+            # How it is laid out and paced, so a list can show an exercise
+            # the way it will be practised — see `intonation.style`.
+            *STYLE_FIELDS,
             "display_name", "key_signature",
         )
         read_only_fields = fields

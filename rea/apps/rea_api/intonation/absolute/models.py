@@ -20,6 +20,8 @@ one of the two foreign keys is set (mirroring the relative app).
 
 from django.db import models
 
+from ..style import SeparatedEvent, StyledScore
+
 
 class ChromaticBase(models.Model):
     """The chromatic pitch reference (12 semitones), from ``Ap_12.json``."""
@@ -37,7 +39,7 @@ class ChromaticBase(models.Model):
         return self.name
 
 
-class Lesson(models.Model):
+class Lesson(StyledScore):
     """An absolute-pitch exercise, from the ``lessons/mono`` and
     ``lessons/poly`` JSON files.
 
@@ -130,10 +132,9 @@ class Lesson(models.Model):
     )
     source_file = models.CharField(max_length=512, default="")
     tempo = models.PositiveIntegerField(default=86)
-    # Performance / layout metadata copied from the JSON.
-    draw_only_note_heads = models.BooleanField(default=False)
+    # The rest of the layout and pacing settings — the ones both systems
+    # share — come from `StyledScore`, which is also what a style sets.
     default_rhythm = models.CharField(max_length=32, default="FreeStyle")
-    mid_bar_time = models.FloatField(default=0.1)
     raw = models.JSONField(default=dict, blank=True)
 
     class Shelf(models.TextChoices):
@@ -247,7 +248,7 @@ class Bar(models.Model):
         return f"{owner} bar {self.bar_index}"
 
 
-class MusicEvent(models.Model):
+class MusicEvent(SeparatedEvent):
     """A single note/rest within a bar."""
 
     bar = models.ForeignKey(Bar, related_name="events", on_delete=models.CASCADE)

@@ -24,6 +24,7 @@ from django.db import transaction
 from ..intonation.absolute import models as absolute_models
 from ..intonation.relative import models as relative_models
 from ..intonation.relative.utils.note_parser import parse_note, resolve_pitch_class
+from ..intonation.style import STYLE_FIELDS
 
 SYSTEMS = ("relative", "absolute")
 
@@ -32,17 +33,21 @@ SYSTEMS = ("relative", "absolute")
 # (``raw``, which is kept untouched so a re-imported lesson keeps its origin).
 # `shelf` travels with the identity because that is what it is about: which
 # collection a lesson is filed in, and whether it has been filed at all.
+# The layout and pacing fields are appended from one list (see
+# ``intonation.style``), so the two systems cannot drift apart over what an
+# exercise's appearance consists of, and a field added to a style is editable
+# on an exercise without being named in three more places.
 RELATIVE_META_FIELDS = (
     "texture", "formula_name", "category", "inversion", "interval_name",
-    "part", "variant", "source_file", "tempo", "draw_only_note_heads",
-    "default_rhythm", "mid_bar_time", "shelf",
-)
+    "part", "variant", "source_file", "tempo",
+    "default_rhythm", "shelf",
+) + STYLE_FIELDS
 ABSOLUTE_META_FIELDS = (
     "texture", "category", "span", "grades", "quality", "interval_size",
     "inversion", "part", "phase", "exercise_number", "exercise_type",
-    "timed", "chromatic", "source_file", "tempo", "draw_only_note_heads",
-    "default_rhythm", "mid_bar_time", "shelf",
-)
+    "timed", "chromatic", "source_file", "tempo",
+    "default_rhythm", "shelf",
+) + STYLE_FIELDS
 
 BAR_FIELDS = (
     "music_clef", "music_rhythm", "music_mode_chord",
@@ -54,7 +59,7 @@ RELATIVE_BAR_FIELDS = ("degree", "quality")
 EVENT_FIELDS = (
     "horizontal_offset_ms", "visual_offset_px", "duration", "attack_decay_time",
     "volume", "note_name", "alias_degree", "is_rest", "is_enharmonic", "event_type",
-    "tuplet_num", "tuplet_den",
+    "tuplet_num", "tuplet_den", "separator", "notehead",
 )
 
 
@@ -83,6 +88,8 @@ def event_document(event):
         "is_enharmonic": event.is_enharmonic,
         "event_type": event.event_type,
         "pitch_class": event.pitch_class,
+        "separator": event.separator,
+        "notehead": event.notehead,
     }
 
 
@@ -206,6 +213,18 @@ def mode_chord_for_key(key_model):
         if mode:
             return f"{root}_{mode}"
     return f"{name}_{key_model.mode}" if name else ""
+
+
+def house_style_values():
+    """The house style's settings, or nothing if no style has been made.
+
+    A brand-new exercise starts from the house style rather than from the
+    field defaults, which are nobody's house style in particular.
+    """
+    from ..models import ScoreStyle
+
+    house = ScoreStyle.house()
+    return house.values() if house else {}
 
 
 def blank_bar(system, mode_chord=""):

@@ -83,6 +83,12 @@ export class ScoreCanvas {
     return ((degrees || offsets || volumes) ? LANE_SPACE : 0) + (rhythm ? STEM_SPACE : 0);
   }
 
+  /** Whether the exercise's style is already numbering the bars. */
+  _styleNumbersBars() {
+    const kind = this.doc && this.doc.meta && this.doc.meta.bar_number_type;
+    return kind === "all";
+  }
+
   setView(view) {
     Object.assign(this.view, view);
     this.render();
@@ -116,11 +122,18 @@ export class ScoreCanvas {
         visual_offset_px: event.visual_offset_px,
         tuplet_num: event.tuplet_num,
         tuplet_den: event.tuplet_den,
+        separator: event.separator,
+        notehead: event.notehead,
+        alias: event.alias_degree,
       })),
     }));
 
     this.rowExtra = this._rowExtra();
-    const drawn = drawScore(this.container, bars, { rowExtra: this.rowExtra });
+    // Drawn in the exercise's own style, so the teacher is looking at the
+    // page the student will get — the spacing, the stems, the labels and all.
+    const drawn = drawScore(this.container, bars, {
+      rowExtra: this.rowExtra, style: doc.meta,
+    });
     if (!drawn) return;
 
     this.svg = drawn.svg;
@@ -189,13 +202,18 @@ export class ScoreCanvas {
       });
       svg.insertBefore(hit, svg.firstChild);
 
-      // The bar's own label is drawn by the shared renderer, exactly as the
-      // practice view draws it; these two are the editor's additions.
-      const number = el("text", {
-        x: box.x + 3, y: span.line0 - 18, class: "ed-bar-number",
-      });
-      number.textContent = String(box.barIndex + 1);
-      svg.appendChild(number);
+      // The bar's own label and — where the style asks for them — its number
+      // are drawn by the shared renderer, exactly as the practice view draws
+      // them.  The editor adds a number of its own only when the style draws
+      // none, because a teacher editing bar 14 needs to know it is bar 14
+      // whatever the students will see.
+      if (!this._styleNumbersBars()) {
+        const number = el("text", {
+          x: box.x + 3, y: span.line0 - 18, class: "ed-bar-number",
+        });
+        number.textContent = String(box.barIndex + 1);
+        svg.appendChild(number);
+      }
 
       if (bar.is_incomplete_bar) {
         const flag = el("text", {
@@ -256,7 +274,11 @@ export class ScoreCanvas {
       const cx = rect.left + rect.width / 2 - svgRect.left;
       const baseY = lanes.get(entry.barIndex) || 0;
 
-      if (this.view.degrees && event.alias_degree) {
+      // The style may already be writing the degrees under the notes, in
+      // which case the editor's own lane would print them twice.
+      const styleWritesDegrees = (this.doc && this.doc.meta
+        && this.doc.meta.note_label_type === "degree");
+      if (this.view.degrees && !styleWritesDegrees && event.alias_degree) {
         const text = el("text", { x: cx, y: baseY, class: "ed-ann ed-ann-degree", "text-anchor": "middle" });
         text.textContent = event.alias_degree;
         svg.appendChild(text);
