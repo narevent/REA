@@ -15,6 +15,9 @@ import { API } from "./api.js?v=165";
 import { renderLessonNotation } from "./views/lessonView.js?v=165";
 import { renderScaleNotation } from "./views/scaleView.js?v=165";
 import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=165";
+import {
+  renderLessonInstrument, renderScaleInstrument, resetRenderer as resetInstrument,
+} from "./views/instrumentView.js?v=165";
 import { SoundcheckView } from "./views/soundcheckView.js?v=165";
 import { AudioPlayer } from "./audioPlayer.js?v=165";
 import { PracticeController } from "./practiceController.js?v=165";
@@ -620,6 +623,38 @@ function isNumericCategory() {
   return !!state.category && kindOf(state.category) === "numeric";
 }
 
+/**
+ * Which picture the exercise is read from — the singer's own choice.
+ *
+ * The stave is what the method is written in and stays the default.  But a
+ * guessing round asks "which of these did you hear", and for a student who
+ * does not read music fluently, answering on a stave is a second exercise
+ * stacked on the first.  A keyboard or a neck asks the same question in a
+ * picture they already think in, so it is offered beside the tempo and the
+ * difficulty: a property of the person practising, not of the material.
+ *
+ * Remembered per device, like the tempo, and never sent anywhere: it changes
+ * nothing about the exercise or the marking.
+ */
+const VIEW_KEY = "rea.view";
+const VIEWS = [
+  { value: "score", label: "Score" },
+  { value: "keyboard", label: "Keyboard" },
+  { value: "guitar", label: "Guitar" },
+];
+
+function getView() {
+  try {
+    const saved = window.localStorage.getItem(VIEW_KEY);
+    if (VIEWS.some((v) => v.value === saved)) return saved;
+  } catch (e) { /* private browsing — the stave stands */ }
+  return "score";
+}
+
+function setView(value) {
+  try { window.localStorage.setItem(VIEW_KEY, value); } catch (e) { /* ditto */ }
+}
+
 const practice = new PracticeController({
   stage: document.getElementById("notation"),
   legend: document.getElementById("legend"),
@@ -629,14 +664,20 @@ const practice = new PracticeController({
   // different lesson — it is the same one shown as scale degrees, so the
   // choice is made here, at the one place the score is drawn, and nothing
   // downstream has to know which of the two it is driving.
-  renderNotation: (lesson, onBarClick) =>
-    isNumericCategory()
+  renderNotation: (lesson, onBarClick) => {
+    const view = getView();
+    if (view !== "score") return renderLessonInstrument(lesson, onBarClick, view);
+    return isNumericCategory()
       ? renderLessonNumeric(lesson, onBarClick)
-      : renderLessonNotation(lesson, onBarClick),
-  renderKeyModelNotation: (keyModel, onBarClick) =>
-    isNumericCategory()
+      : renderLessonNotation(lesson, onBarClick);
+  },
+  renderKeyModelNotation: (keyModel, onBarClick) => {
+    const view = getView();
+    if (view !== "score") return renderScaleInstrument(keyModel, onBarClick, view);
+    return isNumericCategory()
       ? renderScaleNumeric(keyModel, onBarClick)
-      : renderScaleNotation(keyModel, onBarClick),
+      : renderScaleNotation(keyModel, onBarClick);
+  },
   getKeyModel: (id) => API.getKey(id),
   setStatus: (m) => setStatus(m),
   onSessionComplete: (chapter, avg) => onSessionComplete(chapter, avg),
@@ -1554,6 +1595,8 @@ const nav = createNav({
   difficultyValue: () => getDifficulty(),
   tempoOptions: () => TEMPO_SCALES.map((s) => ({ value: s, label: tempoLabel(s) })),
   tempoValue: () => getTempoScale(),
+  viewOptions: () => VIEWS.slice(),
+  viewValue: () => getView(),
   goCategory: (node, part, exercise) => applyCategory(node, part, exercise),
   goPart: (value, exercise) => applyCategory(state.category, value, exercise),
   goExercise: async (i) => {
@@ -1579,6 +1622,19 @@ const nav = createNav({
   // needs no fetch (the lesson is already in hand) and it stops whatever was
   // running, which is right: a run half at one tempo and half at another is
   // not a run of anything.
+  // Which picture the exercise is drawn as.  Nothing about the exercise or
+  // the marking changes, but the score node is redrawn by a different
+  // renderer, so the chapter is reopened the way a tempo change reopens it.
+  goView: (value) => {
+    setView(value);
+    resetInstrument();
+    renderTopbar();
+    if (state.activeChapter && state.contextLesson) {
+      practice.openChapter(state.activeChapter, state.contextLesson);
+    }
+    const chosen = VIEWS.find((v) => v.value === value);
+    setStatus(chosen ? "Reading from the " + chosen.label.toLowerCase() : "Ready");
+  },
   goTempo: (value) => {
     setTempoScale(value);
     renderTopbar();
@@ -1867,6 +1923,7 @@ function renderTopbar() {
     '<div class="path-key" id="path-key"></div>' +
     '<div class="path-key path-tempo" id="path-tempo"></div>' +
     '<div class="path-key path-difficulty" id="path-difficulty"></div>' +
+    '<div class="path-key path-view" id="path-view"></div>' +
     // Combination categories keep their multi-select panel: they merge many
     // leaves into one lesson, so they are a selection, not a single path.
     (comboOpen ? '<div class="topbar-ctx combo-ctx">' + comboPanelHTML() + '</div>' : "");
