@@ -13,14 +13,19 @@
  * It answers to the same interface `NotationRenderer` and `NumericRenderer`
  * do — bar clicks, bar marks, per-note highlighting, the sung-pitch marker —
  * so the practice controller never learns which of the three it is driving.
- * What differs is only what a "bar" looks like: a stave draws it as a group
- * of noteheads, this draws it as the key or the fret its first note sounds.
  *
- * The mapping is deliberately one note per bar.  These are degree exercises:
- * the bars of a key model are its scale degrees, one pitch each, and that is
- * exactly what a key or a fret can stand for.  A bar holding several notes is
- * shown by its first — the note the round plays — and its remaining notes
- * keep their indices so the controller's note numbering still lines up.
+ * **One diagram per bar, showing that bar's notes.**  A bar of this library
+ * is a phrase — "1 5 5 8" is four notes, not a single degree — and drawing
+ * the whole exercise as one keyboard with one key standing for each bar threw
+ * all of that away: it showed the bar *numbers* laid out on a keyboard, which
+ * is a picture of the answer sheet rather than of the music.  So each bar
+ * gets its own small keyboard or neck with its own notes marked on it, and
+ * the bar stays the thing a click answers with.
+ *
+ * Every diagram covers the *whole exercise's* range, not its own bar's, so
+ * the same pitch is in the same place in every bar and two bars can be
+ * compared by looking at them.  On the neck a note is placed once, globally,
+ * for the same reason.
  */
 
 /** Which pitch classes are the black keys of a piano octave. */
@@ -29,7 +34,7 @@ const BLACK = new Set([1, 3, 6, 8, 10]);
 /** The strings of a guitar in standard tuning, low to high, as MIDI. */
 const GUITAR_STRINGS = [40, 45, 50, 55, 59, 64];
 
-/** How many frets the neck shows.  Twelve is one octave on every string,
+/** How many frets the neck reaches.  Twelve is one octave on every string,
  *  which is as much as any of this library's exercises can need. */
 const FRETS = 12;
 
@@ -58,8 +63,9 @@ export class InstrumentRenderer {
     // redraw the stave does.  Kept so the controller can set it either way.
     this.onRelayout = null;
 
-    // One delegated pair of listeners for the life of the renderer: the keys
-    // are rebuilt on every render and per-element handlers would pile up.
+    // One delegated pair of listeners for the life of the renderer: the
+    // diagrams are rebuilt on every render and per-element handlers would
+    // pile up with them.
     this.container.addEventListener("click", (e) => {
       const target = e.target && e.target.closest ? e.target.closest("[data-bar]") : null;
       if (!target || !this.container.contains(target)) return;
@@ -86,7 +92,7 @@ export class InstrumentRenderer {
    * Render an array of bars.
    *   [{ label, notes: [{ name, alias, duration, is_rest, midi }] }]
    *
-   * `midi` is what places a bar on the instrument, so the caller has to have
+   * `midi` is what places a note on the instrument, so the caller has to have
    * resolved it — the same `midiFromEvent` the numeric view uses.
    */
   render(bars, opts = {}) {
@@ -99,86 +105,128 @@ export class InstrumentRenderer {
       return [];
     }
 
-    // The bars, reduced to the one pitch each stands for, and their note
-    // indices kept whole so the controller's numbering still lines up.
-    let globalIndex = 0;
-    const targets = [];
-    bars.forEach((bar, barIndex) => {
-      const noteStart = globalIndex;
-      let midi = null;
-      let degree = "";
-      (bar.notes || []).forEach((n) => {
-        const isRest = !!n.is_rest || !n.name;
-        if (!isRest && midi == null && n.midi != null) {
-          midi = n.midi;
-          degree = n.alias || "";
-        }
-        this.notes.push({
-          globalIndex, barIndex, el: null, isRest,
-          midi: isRest ? null : n.midi, degree: n.alias || "",
-        });
-        globalIndex += 1;
-      });
-      this.bars.push({
-        barIndex, el: null, midi, degree,
-        noteStart, noteEnd: globalIndex - 1,
-      });
-      if (midi != null) targets.push({ barIndex, midi, degree });
-    });
+    // Every pitch in the exercise, so each bar's diagram can be drawn to the
+    // same range: a keyboard whose keys moved from bar to bar would be a
+    // different instrument in every picture.
+    const pitches = [];
+    bars.forEach((bar) => (bar.notes || []).forEach((n) => {
+      if (!n.is_rest && n.name && n.midi != null) pitches.push(n.midi);
+    }));
+    if (!pitches.length) {
+      this.container.innerHTML = '<div class="empty">No notes to display.</div>';
+      return [];
+    }
+    const range = { low: Math.min(...pitches), high: Math.max(...pitches) };
+    const places = this.instrument === "guitar" ? fretPositions(pitches) : null;
 
     const root = element("div", `inst inst-${this.instrument}`);
-    if (this.instrument === "guitar") this._drawNeck(root, targets);
-    else this._drawKeyboard(root, targets);
+    let globalIndex = 0;
+
+    bars.forEach((bar, barIndex) => {
+      const card = element("button", "inst-bar");
+      card.type = "button";
+      card.dataset.bar = String(barIndex);
+
+      const head = element("span", "inst-bar-no", String(barIndex + 1));
+      if (bar.label) head.appendChild(element("span", "inst-bar-label", bar.label));
+      card.appendChild(head);
+
+      // This bar's own notes, in order, kept as entries so the controller's
+      // note numbering still lines up — rests included, and silent.
+      const noteStart = globalIndex;
+      const entries = [];
+      (bar.notes || []).forEach((n) => {
+        const isRest = !!n.is_rest || !n.name;
+        const entry = {
+          globalIndex, barIndex, el: null, isRest,
+          midi: isRest ? null : n.midi,
+          degree: n.alias || "",
+          order: entries.length + 1,
+        };
+        entries.push(entry);
+        this.notes.push(entry);
+        globalIndex += 1;
+      });
+
+      const figure = this.instrument === "guitar"
+        ? this._neckFor(entries, places)
+        : this._keyboardFor(entries, range);
+      card.appendChild(figure);
+
+      root.appendChild(card);
+      this.bars.push({
+        barIndex, el: card, noteStart, noteEnd: globalIndex - 1,
+        midi: (entries.find((e) => !e.isRest) || {}).midi ?? null,
+      });
+    });
+
     this.container.appendChild(root);
     this.root = root;
     return this.notes;
   }
 
-  /** Attach a drawn control to the bar it answers for. */
-  _claim(node, barIndex) {
-    node.dataset.bar = String(barIndex);
-    const bar = this.bars.find((b) => b.barIndex === barIndex);
-    if (bar && !bar.el) bar.el = node;
-    this.notes.forEach((n) => { if (n.barIndex === barIndex && !n.el) n.el = node; });
+  /** What is written on a note's key: its degree, or its place in the bar
+   *  when the exercise gives no degrees. */
+  _mark(entry) {
+    return entry.degree !== "" && entry.degree != null
+      ? String(entry.degree) : String(entry.order);
+  }
+
+  /**
+   * The label for a key several notes of the bar land on.
+   *
+   * Repeats are the common case — "1 5 5 8" plays the fifth twice — and the
+   * same pitch has the same degree both times, so the label is said once.
+   * Two different labels on one key can only happen where a lesson names the
+   * same pitch two ways, and then both are worth seeing.
+   */
+  _marksFor(entries) {
+    const seen = [];
+    entries.forEach((entry) => {
+      const mark = this._mark(entry);
+      if (!seen.includes(mark)) seen.push(mark);
+    });
+    return seen.join("\u00b7");
   }
 
   // -- the keyboard ------------------------------------------------------
 
   /**
-   * A piano, as wide as the exercise needs and no wider.
+   * One bar, on a piano.
    *
    * The white keys are laid out in a row and the black ones floated over the
    * gaps between them, which is what makes a keyboard read as a keyboard
-   * rather than as twelve equal buttons.  Keys the exercise does not use are
-   * still drawn — a keyboard with holes in it is not a keyboard — but they
-   * are dead: clicking one answers nothing, because nothing in this exercise
-   * is that note.
+   * rather than as twelve equal buttons.  Keys this bar does not use are
+   * still drawn: a keyboard with holes in it is not a keyboard, and the empty
+   * keys are what make the used ones read as an interval.
    */
-  _drawKeyboard(root, targets) {
-    if (!targets.length) return;
-    const lowest = Math.min(...targets.map((t) => t.midi));
-    const highest = Math.max(...targets.map((t) => t.midi));
-    // Whole octaves, starting at the C at or below the lowest note, so the
-    // keyboard begins where a keyboard begins.
-    const from = Math.floor(lowest / 12) * 12;
-    const to = Math.ceil((highest + 1) / 12) * 12 - 1;
+  _keyboardFor(entries, range) {
+    // Whole octaves, starting at the C at or below the lowest note of the
+    // exercise, so the keyboard begins where a keyboard begins.
+    const from = Math.floor(range.low / 12) * 12;
+    const to = Math.ceil((range.high + 1) / 12) * 12 - 1;
 
+    // Several notes of a bar can land on one key — "1 5 5 8" plays the fifth
+    // twice — and they share it rather than the second one going undrawn.
     const byMidi = new Map();
-    targets.forEach((t) => { if (!byMidi.has(t.midi)) byMidi.set(t.midi, t); });
+    entries.forEach((entry) => {
+      if (entry.isRest || entry.midi == null) return;
+      if (!byMidi.has(entry.midi)) byMidi.set(entry.midi, []);
+      byMidi.get(entry.midi).push(entry);
+    });
 
-    const whites = element("div", "kb-whites");
-    const blacks = element("div", "kb-blacks");
+    const board = element("span", "kb-board");
+    const whites = element("span", "kb-whites");
+    const blacks = element("span", "kb-blacks");
     let whiteCount = 0;
     for (let midi = from; midi <= to; midi += 1) {
-      const target = byMidi.get(midi);
+      const on = byMidi.get(midi);
       const black = BLACK.has(((midi % 12) + 12) % 12);
-      const key = element("button", black ? "kb-key kb-black" : "kb-key kb-white");
-      key.type = "button";
-      key.disabled = !target;
-      if (target) {
-        this._claim(key, target.barIndex);
-        key.appendChild(element("span", "kb-deg", target.degree || String(target.barIndex + 1)));
-        key.title = `Bar ${target.barIndex + 1}`;
+      const key = element("span", black ? "kb-key kb-black" : "kb-key kb-white");
+      if (on) {
+        key.classList.add("is-on");
+        key.appendChild(element("span", "kb-deg", this._marksFor(on)));
+        on.forEach((entry) => { entry.el = key; });
       }
       if (black) {
         // Floated over the seam between the two white keys it sits between.
@@ -189,64 +237,60 @@ export class InstrumentRenderer {
         whites.appendChild(key);
       }
     }
-    const board = element("div", "kb-board");
     board.style.setProperty("--kb-whites", String(whiteCount));
     board.appendChild(whites);
     board.appendChild(blacks);
-    root.appendChild(board);
+    return board;
   }
 
   // -- the neck ----------------------------------------------------------
 
   /**
-   * A guitar neck in standard tuning, twelve frets.
+   * One bar, on a guitar neck.
    *
-   * Every pitch has several places on a neck, and a beginner wants one.  It
-   * is taken on the lowest string that can reach it — the position a player
-   * actually uses, and the one that lets a rising scale climb across the
-   * strings instead of bunching into the first few frets of the top one,
-   * which is what choosing the lowest *fret* did.  The other places are left
-   * undrawn rather than drawn and unclickable: six copies of the same answer
-   * is six chances to wonder which one is meant.
+   * Only the strings and frets the exercise actually reaches are drawn — a
+   * full neck per bar would be mostly empty wood — and the window is the same
+   * in every bar, so a note keeps its place across the whole exercise.
    */
-  _drawNeck(root, targets) {
-    const placed = new Map();   // "string:fret" -> target
-    targets.forEach((target) => {
-      let best = null;
-      GUITAR_STRINGS.forEach((open, stringIndex) => {
-        const fret = target.midi - open;
-        if (fret < 0 || fret > FRETS || best) return;
-        best = { stringIndex, fret };
-      });
-      if (best) placed.set(`${best.stringIndex}:${best.fret}`, target);
+  _neckFor(entries, places) {
+    const neck = element("span", "gt-neck");
+    const { strings, minFret, maxFret } = places.window;
+    neck.style.setProperty("--gt-frets", String(maxFret - minFret + 1));
+
+    const here = new Map();
+    entries.forEach((entry) => {
+      if (entry.isRest || entry.midi == null) return;
+      const at = places.byMidi.get(entry.midi);
+      if (!at) return;
+      const key = `${at.stringIndex}:${at.fret}`;
+      if (!here.has(key)) here.set(key, []);
+      here.get(key).push(entry);
     });
 
-    const neck = element("div", "gt-neck");
-    neck.style.setProperty("--gt-frets", String(FRETS));
-    // Drawn high string first, so the neck reads the way it looks to a player
+    // High string first, so the neck reads the way it looks to a player
     // holding it rather than the way the tuning is listed.
-    for (let stringIndex = GUITAR_STRINGS.length - 1; stringIndex >= 0; stringIndex -= 1) {
-      const row = element("div", "gt-string");
-      for (let fret = 0; fret <= FRETS; fret += 1) {
-        const target = placed.get(`${stringIndex}:${fret}`);
-        const cell = element("button", `gt-fret${fret === 0 ? " gt-open" : ""}`);
-        cell.type = "button";
-        cell.disabled = !target;
-        if (target) {
-          this._claim(cell, target.barIndex);
-          cell.appendChild(element("span", "gt-dot", target.degree || String(target.barIndex + 1)));
-          cell.title = `Bar ${target.barIndex + 1}`;
+    strings.slice().reverse().forEach((stringIndex) => {
+      const row = element("span", "gt-string");
+      for (let fret = minFret; fret <= maxFret; fret += 1) {
+        const cell = element("span", `gt-fret${fret === 0 ? " gt-open" : ""}`);
+        const on = here.get(`${stringIndex}:${fret}`);
+        if (on) {
+          const dot = element("span", "gt-dot", this._marksFor(on));
+          cell.appendChild(dot);
+          cell.classList.add("is-on");
+          on.forEach((entry) => { entry.el = cell; });
         }
         row.appendChild(cell);
       }
       neck.appendChild(row);
+    });
+
+    const numbers = element("span", "gt-numbers");
+    for (let fret = minFret; fret <= maxFret; fret += 1) {
+      numbers.appendChild(element("span", "gt-number", String(fret)));
     }
-    const numbers = element("div", "gt-numbers");
-    for (let fret = 0; fret <= FRETS; fret += 1) {
-      numbers.appendChild(element("span", "gt-number", fret ? String(fret) : ""));
-    }
-    root.appendChild(neck);
-    root.appendChild(numbers);
+    neck.appendChild(numbers);
+    return neck;
   }
 
   // -- the interface the controller drives -------------------------------
@@ -305,12 +349,13 @@ export class InstrumentRenderer {
     if (note && note.el) note.el.classList.add("is-active");
   }
 
+  /** The note marks live on the keys and frets inside a bar's diagram, not on
+   *  the bar itself, so they are cleared where they were put. */
   clearHighlight() {
-    this.bars.forEach((bar) => bar.el && bar.el.classList.remove("is-active"));
+    this.notes.forEach((note) => note.el && note.el.classList.remove("is-active"));
   }
 
-  /** Accuracy colouring belongs to a run of notes, and one key stands for a
-   *  whole bar, so the bar takes the colour of the note last scored in it. */
+  /** How close the singer got, on the key they were aiming at. */
   setNoteAccuracy(globalIndex, score) {
     const note = this.notes.find((n) => n.globalIndex === globalIndex);
     if (!note || !note.el) return;
@@ -321,9 +366,9 @@ export class InstrumentRenderer {
   }
 
   clearNoteAccuracy() {
-    this.bars.forEach((bar) => {
-      if (!bar.el) return;
-      bar.el.classList.remove("acc-good", "acc-ok", "acc-weak", "acc-miss");
+    this.notes.forEach((note) => {
+      if (!note.el) return;
+      note.el.classList.remove("acc-good", "acc-ok", "acc-weak", "acc-miss");
     });
   }
 
@@ -350,8 +395,11 @@ export class InstrumentRenderer {
     this.container.querySelectorAll(".is-sung").forEach((el) => el.classList.remove("is-sung"));
     if (midi == null) return;
     const rounded = Math.round(midi);
-    const bar = this.bars.find((b) => b.midi === rounded);
-    if (bar && bar.el) bar.el.classList.add("is-sung");
+    // The key or fret the singer is on, wherever it appears — the same
+    // information a stave gives with a floating marker, said in the language
+    // of this picture.
+    const sung = this.notes.find((n) => n.midi === rounded && n.el);
+    if (sung) sung.el.classList.add("is-sung");
   }
 
   setSungTarget() { /* the target is already shown as the active bar */ }
@@ -361,4 +409,44 @@ export class InstrumentRenderer {
   clearSungNote() {
     this.container.querySelectorAll(".is-sung").forEach((el) => el.classList.remove("is-sung"));
   }
+}
+
+/**
+ * Where each pitch of the exercise is played, and the window that holds them.
+ *
+ * Worked out once for the whole exercise rather than per bar: a note has
+ * several places on a neck, and it has to be the *same* place every time it
+ * appears or the picture teaches nothing.  Each is taken on the lowest string
+ * that reaches it, which is the position a player actually uses and lets a
+ * rising scale climb across the strings instead of bunching into the first
+ * frets of the top one.
+ */
+function fretPositions(pitches) {
+  const byMidi = new Map();
+  const used = new Set();
+  let minFret = Infinity;
+  let maxFret = -Infinity;
+  pitches.forEach((midi) => {
+    if (byMidi.has(midi)) return;
+    let at = null;
+    GUITAR_STRINGS.forEach((open, stringIndex) => {
+      const fret = midi - open;
+      if (fret < 0 || fret > FRETS || at) return;
+      at = { stringIndex, fret };
+    });
+    if (!at) return;
+    byMidi.set(midi, at);
+    used.add(at.stringIndex);
+    minFret = Math.min(minFret, at.fret);
+    maxFret = Math.max(maxFret, at.fret);
+  });
+  if (!byMidi.size) {
+    return { byMidi, window: { strings: [0], minFret: 0, maxFret: 4 } };
+  }
+  // A fret of air either side, so the notes are not pressed against the edge
+  // of the picture, and never off the end of the neck.
+  minFret = Math.max(0, minFret - 1);
+  maxFret = Math.min(FRETS, maxFret + 1);
+  const strings = Array.from(used).sort((a, b) => a - b);
+  return { byMidi, window: { strings, minFret, maxFret } };
 }

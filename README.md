@@ -281,7 +281,9 @@ node rea/tests/editor/run.mjs
 ```
 
 The first covers the singing exercises' audio path (pitch tracking and note
-segmentation, sung by a synthesiser). The second covers the score editor: the
+segmentation, sung by a synthesiser) and what Stop stops — a piece is handed
+to WebAudio in one go, so stopping it means unscheduling the notes that have
+not sounded yet. The second covers the score editor: the
 MIDI import — the pitch spellings it chooses, and what it does with chords,
 gaps, performed note lengths and barlines — and tuplet timing.
 
@@ -320,8 +322,8 @@ Two pages share that stack:
 
 - **`/`** — the practice app (chapter map, lessons, singing). The exercise can
   be read from the stave, as scale degrees, or on a **piano keyboard** or
-  **guitar neck** — a guessing round answered in the picture the student
-  already thinks in. Right-clicking bars singles them out, and every session
+  **guitar neck** — one small diagram per bar holding that bar's own notes, so
+  a guessing round is answered in the picture the student already thinks in. Right-clicking bars singles them out, and every session
   is then built from those bars alone. Teachers get an **answer key** button
   nobody else sees.
 - **`/editor/`** — the **score editor**, for teachers only. Library on the
