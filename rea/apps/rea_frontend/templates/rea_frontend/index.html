@@ -7,9 +7,14 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=164" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=165" />
 </head>
-<body>
+{% comment %}The practice app asks one thing of the session: whether the
+person using it teaches.  A teacher gets the answer key — see
+`practiceController._renderAnswerKey` — and nothing else changes.  It is a
+role, not a permission: everything a teacher may *do* is checked on the
+server.{% endcomment %}
+<body data-role="{% if user.is_authenticated %}{{ user.profile.role|default:'student' }}{% else %}anonymous{% endif %}">
   <header class="app-header">
     <button type="button" class="app-menu-btn" id="app-menu" aria-label="Menu" aria-expanded="false" aria-controls="app-menu-panel">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
@@ -85,7 +90,7 @@
     <span class="footer-hint" id="footer-hint"></span>
   </footer>
 
-  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=164"></script>
-  <script type="module" src="{% static 'rea_frontend/js/app.js' %}?v=164"></script>
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=165"></script>
+  <script type="module" src="{% static 'rea_frontend/js/app.js' %}?v=165"></script>
 </body>
 </html>

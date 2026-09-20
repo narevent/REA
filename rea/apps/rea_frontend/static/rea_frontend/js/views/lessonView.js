@@ -1,4 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=164";
+import { NotationRenderer } from "../components/notationRenderer.js?v=165";
 
 let renderer = null;
 
@@ -62,6 +62,9 @@ export function renderLessonNotation(lesson, onBarClick) {
   const r = getRenderer();
   const bars = (lesson.bars || []).map((b) => ({
     clef: b.music_clef,
+    // The key the bar is in, so the stave can draw its signature and read the
+    // notes against it — see `staveLayout`.
+    modeChord: b.music_mode_chord,
     label: b.label || "",
     notes: (b.events || []).map((e) => ({
       name: e.note_name,
@@ -73,10 +76,12 @@ export function renderLessonNotation(lesson, onBarClick) {
       visual_offset_px: e.visual_offset_px,
       tuplet_num: e.tuplet_num,
       tuplet_den: e.tuplet_den,
+      separator: e.separator,
+      notehead: e.notehead,
     })),
   }));
   const title = (lesson.key_model_name || "") + " " +
     (lesson.formula_name || lesson.category || "");
-  r.render(bars, { title, onBarClick });
+  r.render(bars, { title, onBarClick, style: lesson });
   return r;
 }

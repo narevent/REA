@@ -19,7 +19,8 @@
 import {
   DURATIONS, MODIFIERS, MODIFIER_LABELS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX,
   OFFSET_GAIN, describeNote, splitToken, buildToken,
-} from "./scoreDoc.js?v=164";
+} from "./scoreDoc.js?v=165";
+import { labelWithDuration } from "./glyphs.js?v=165";
 
 const MIXED = "—"; // em dash: several selected items, several values
 
@@ -40,9 +41,52 @@ const LETTER_CHOICES = [
   ["g", "G"], ["a", "A"], ["h", "B natural (German h)"],
 ];
 
+/** What the server offers when the options request has not landed yet — the
+ *  panel is drawn before the first fetch returns, and a select with no options
+ *  in it is a control that cannot be used rather than one that is loading. */
+const SEPARATOR_FALLBACK = [
+  { value: "", label: "None" },
+  { value: "apostrophe", label: "Apostrophe (breath)" },
+  { value: "thin", label: "Thin barline" },
+  { value: "thick", label: "Thick barline" },
+  { value: "double", label: "Double barline" },
+  { value: "dashed", label: "Dashed barline" },
+  { value: "marker", label: "Marker" },
+];
+const NOTE_LABEL_FALLBACK = [
+  { value: "", label: "Nothing" },
+  { value: "degree", label: "Scale degrees" },
+  { value: "letter", label: "Note names" },
+  { value: "letter_octave", label: "Note names with octave" },
+  { value: "roman", label: "Roman numerals" },
+];
+const BAR_NUMBER_FALLBACK = [
+  { value: "none", label: "None" },
+  { value: "all", label: "Every bar" },
+  { value: "row", label: "First bar of each line" },
+];
+const NOTEHEAD_FALLBACK = [
+  { value: "", label: "Normal" },
+  { value: "cross", label: "Cross" },
+  { value: "diamond", label: "Diamond" },
+  { value: "triangle", label: "Triangle" },
+  { value: "square", label: "Square" },
+  { value: "slash", label: "Slash" },
+];
+
+/** The clefs a bar can be written in, named as the library names them and
+ *  labelled as a musician reads them. */
+const CLEF_CHOICES = [
+  { value: "Violin", label: "Treble (Violin)" },
+  { value: "Bass", label: "Bass" },
+  { value: "Alto", label: "Alto" },
+  { value: "Tenor", label: "Tenor" },
+  { value: "Soprano", label: "Soprano" },
+];
+
 /** An accidental as its sign rather than its name: the row is read at a
  *  glance, and a glance does not read "double sharp". */
-const ACCIDENTAL_GLYPH = { null: "—", "#": "♯", b: "♭", x: "𝄪", r: "♮" };
+const ACCIDENTAL_GLYPH = { null: "—", "#": "♯", b: "♭", bb: "𝄫", x: "𝄪", r: "♮" };
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -133,6 +177,8 @@ function buildControl(spec, value, commit) {
       const button = element("button", "ed-choice", option.label);
       button.type = "button";
       if (option.title) button.title = option.title;
+      // A note value is labelled with the note, not with its fraction.
+      if (option.duration != null) labelWithDuration(button, option.duration, option.label);
       button.classList.toggle("is-on", !mixed && String(option.value) === String(value ?? ""));
       button.addEventListener("click", () => commit(option.value));
       wrap.appendChild(button);
@@ -229,7 +275,15 @@ function renderGroup(parent, title, specs, items, onChange) {
     const scale = spec.scale || 1;
     if (scale !== 1 && value !== MIXED && value != null) value *= scale;
     const { row } = buildControl(spec, value, (next) => {
-      onChange(spec.key, scale !== 1 ? Math.round(next / scale) : next, spec);
+      // A scaled field goes back in its stored unit.  `round` says how many
+      // decimals that unit keeps: milliseconds shown, seconds stored, and
+      // rounding those to whole numbers would turn every pause into none.
+      let back = next;
+      if (scale !== 1) {
+        const factor = 10 ** (spec.round != null ? spec.round : 0);
+        back = Math.round((next / scale) * factor) / factor;
+      }
+      onChange(spec.key, back, spec);
     });
     group.appendChild(row);
   });
@@ -268,6 +322,16 @@ export class Inspector {
     host.innerHTML = "";
     if (!doc || !selection.notes.length) return;
     this._renderNotes(host);
+  }
+
+  /** The Bar tab, rendered into a popup at the cursor — the note menu's
+   *  counterpart, and the same panel for the same reason. */
+  renderBarMenu(host, doc, selection) {
+    this.doc = doc;
+    this.selection = selection;
+    host.innerHTML = "";
+    if (!doc || !selection.bars.length) return;
+    this._renderBars(host);
   }
 
   render(doc, selection) {
@@ -311,7 +375,7 @@ export class Inspector {
     if (!events.length) {
       body.appendChild(element(
         "p", "ed-hint",
-        "Select a note to edit it — click one on the stave, or click empty staff to write a new one."
+        "Select a note to edit it — click a notehead, or double-click empty staff to write a new one."
       ));
       return;
     }
@@ -394,7 +458,7 @@ export class Inspector {
         // Shortest first, matching the toolbar palette and the number keys.
         key: "duration", label: "Note value", type: "buttons",
         options: DURATIONS.slice().reverse().map((d) => ({
-          value: d.value, label: d.short, title: d.label,
+          value: d.value, label: d.short, title: `${d.label} — ${d.short}`, duration: d.value,
         })),
       },
       {
@@ -442,6 +506,21 @@ export class Inspector {
         hint: "Pixels. Moves the notehead left (−) or right (+) on the stave — " +
           "for spacing that reads badly. When it sounds does not change.",
       },
+      {
+        // The mark after the note.  It is a note property rather than a bar
+        // one because that is where it sits in the source and where a
+        // musician puts it: between these two notes, not at the end of
+        // something.  How much silence it opens is the exercise's to say —
+        // see the Exercise panel — so a breath is the same length wherever
+        // it appears.
+        key: "separator", label: "Separator after", type: "select",
+        options: (this.options && this.options.separators) || SEPARATOR_FALLBACK,
+        hint: "Drawn after this note, and heard as the exercise's separator time.",
+      },
+      {
+        key: "notehead", label: "Notehead", type: "select",
+        options: (this.options && this.options.noteheads) || NOTEHEAD_FALLBACK,
+      },
     ], events, commit);
 
     renderGroup(body, "Sound", [
@@ -479,7 +558,7 @@ export class Inspector {
     const bars = indices.map((i) => this.doc.bars[i]).filter(Boolean);
 
     if (!bars.length) {
-      body.appendChild(element("p", "ed-hint", "Select a bar — shift-click empty staff, or select a note in it."));
+      body.appendChild(element("p", "ed-hint", "Select a bar — click the empty part of one, or select a note in it."));
       return;
     }
 
@@ -497,8 +576,19 @@ export class Inspector {
         hint: "German root + mode, e.g. As_Major. Sets the key signature the stave draws.",
       },
       {
-        key: "music_clef", label: "Clef", type: "text",
-        suggestions: options.clefs || [],
+        // A choice, not a typed name.  The library is written entirely in
+        // `Violin`, so the field had never had to be anything else and a free
+        // text box was as good as a list of one; now that the stave actually
+        // draws the clef, choosing another is a real edit and the panel has to
+        // say which ones exist.  Anything the import brings in that is not on
+        // this list is kept as an extra option rather than silently changed.
+        key: "music_clef", label: "Clef", type: "select",
+        options: CLEF_CHOICES.concat(
+          (options.clefs || [])
+            .filter((name) => !CLEF_CHOICES.some((c) => c.value === name))
+            .map((name) => ({ value: name, label: name })),
+        ),
+        hint: "Drawn at the start of every line, and wherever it changes.",
       },
       {
         key: "music_rhythm", label: "Rhythm", type: "text",
@@ -617,23 +707,129 @@ export class Inspector {
       ], [meta], commit);
     }
 
-    renderGroup(body, "Playback", [
-      {
-        key: "tempo", label: "Tempo", type: "range", min: 20, max: 200, step: 1,
-        hint: "Beats per minute. Harmonic lessons are played at half this tempo.",
-      },
-      {
-        key: "mid_bar_time", label: "Gap between bars", type: "number",
-        min: 0, max: 5, step: 0.01, hint: "Seconds of silence after each bar.",
-      },
+    this._renderStyle(body, meta, commit);
+
+    renderGroup(body, "Provenance", [
       { key: "default_rhythm", label: "Default rhythm", type: "text", suggestions: options.rhythms },
-      {
-        key: "draw_only_note_heads", label: "Draw note heads only", type: "checkbox",
-        hint: "Hides stems and flags — used by the scale models.",
-      },
       {
         key: "source_file", label: "Source file", type: "text",
         hint: "Where this exercise was imported from. Blank for one written here.",
+      },
+    ], [meta], commit);
+  }
+
+  /**
+   * How the exercise is laid out and paced — its *style*.
+   *
+   * These are the settings the source files have always carried and nothing
+   * ever read: how far apart the bars sit, whether the stems are drawn, how
+   * long a breath lasts, whether a phrase carries over the barline.  They are
+   * per exercise, because that is where they were, and a named style is a way
+   * of setting twelve of them at once rather than a thing an exercise belongs
+   * to — see `ScoreStyle` on the server for why the link is a copy.
+   */
+  _renderStyle(body, meta, commit) {
+    const options = this.options || {};
+    const styles = options.styles || [];
+
+    const group = element("div", "ed-group");
+    group.appendChild(element("h3", "ed-group-title", "Style"));
+    const picker = element("div", "ed-style-row");
+    const select = element("select", "ed-input");
+    const none = element("option", null, "Apply a style…");
+    none.value = "";
+    select.appendChild(none);
+    styles.forEach((style) => {
+      const option = element("option", null,
+        style.is_default ? `${style.name} (house style)` : style.name);
+      option.value = String(style.id);
+      select.appendChild(option);
+    });
+    select.addEventListener("change", () => {
+      const style = styles.find((s) => String(s.id) === select.value);
+      select.value = "";
+      if (style && this.hooks.onStyle) this.hooks.onStyle(style);
+    });
+    picker.appendChild(select);
+    // Keeping a style is an administrator's act — it is the method's own
+    // look, and every exercise it is applied to takes it.  Applying one is
+    // anybody's.
+    if (options.is_admin) {
+      const keep = element("button", "ed-btn ed-btn-quiet", "Save as style…");
+      keep.type = "button";
+      keep.addEventListener("click", () => this.hooks.onSaveStyle && this.hooks.onSaveStyle());
+      picker.appendChild(keep);
+    }
+    group.appendChild(picker);
+    group.appendChild(element(
+      "p", "ed-hint",
+      "Applying a style copies its settings here. Nothing stays linked, so "
+      + "editing the style later leaves this exercise as it is.",
+    ));
+    body.appendChild(group);
+
+    renderGroup(body, "On the page", [
+      {
+        key: "mid_bar_space", label: "Gap between bars", type: "number",
+        min: 0, max: 200, step: 1, hint: "Pixels between one bar and the next.",
+      },
+      {
+        key: "bars_per_row", label: "Bars per line", type: "number",
+        min: 0, max: 16, step: 1,
+        hint: "0 fits as many as the width allows.",
+      },
+      {
+        key: "auto_align", label: "Stretch lines to the width", type: "checkbox",
+        hint: "Off leaves every bar the width its notes ask for.",
+      },
+      {
+        key: "align_to_center", label: "Centre each line", type: "checkbox",
+      },
+      {
+        key: "draw_only_note_heads", label: "Note heads only", type: "checkbox",
+        hint: "Hides stems, flags and beams.",
+      },
+      {
+        key: "are_all_notes_same_duration", label: "Draw all notes alike", type: "checkbox",
+        hint: "Every note drawn as the same value. What is played does not change.",
+      },
+      {
+        key: "separator_space", label: "Gap at a separator", type: "number",
+        min: 0, max: 120, step: 1, hint: "Pixels opened up around a separator.",
+      },
+      {
+        key: "note_label_type", label: "Under each note", type: "select",
+        options: options.note_labels || NOTE_LABEL_FALLBACK,
+      },
+      {
+        key: "bar_number_type", label: "Bar numbers", type: "select",
+        options: options.bar_numbers || BAR_NUMBER_FALLBACK,
+      },
+    ], [meta], commit);
+
+    renderGroup(body, "Playback", [
+      {
+        // Milliseconds on screen, seconds in the document: the field has
+        // always been in seconds and the numbers teachers reach for are
+        // 40 and 120, not 0.04 and 0.12.
+        key: "mid_bar_time", label: "Pause between bars", type: "number",
+        min: 0, max: 5000, step: 10, scale: 1000, round: 3,
+        hint: "Milliseconds of silence after each bar.",
+      },
+      {
+        key: "mute_last_played_notes_after_bar_finishes",
+        label: "Cut the last note at the barline", type: "checkbox",
+        hint: "Off lets it ring into the pause, which is what carries a phrase across.",
+      },
+      {
+        key: "separator_time", label: "Pause at a separator", type: "number",
+        min: 0, max: 5000, step: 10, scale: 1000, round: 3,
+        hint: "Milliseconds of silence at a separator.",
+      },
+      {
+        key: "separator_cancel_previous_note",
+        label: "Cut the note at a separator", type: "checkbox",
+        hint: "Off lets the note ring through the breath.",
       },
     ], [meta], commit);
   }

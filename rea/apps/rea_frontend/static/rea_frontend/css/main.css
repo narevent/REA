@@ -345,9 +345,9 @@ body {
    and beams only adds clutter around the one thing being trained, which is
    where the note sits.  The rule keys off the class `staveLayout` puts on
    every score it draws, so neither view has to remember to ask. */
-svg.rea-score .vf-stavenote .vf-stem,
-svg.rea-score .vf-stavenote .vf-flag,
-svg.rea-score .vf-beam { display: none !important; }
+svg.rea-score.heads-only .vf-stavenote .vf-stem,
+svg.rea-score.heads-only .vf-stavenote .vf-flag,
+svg.rea-score.heads-only .vf-beam { display: none !important; }
 
 /* ...with one exception, and only in the editor.  The rule above is right for
    a student, who is reading for pitch, and wrong for the teacher writing the
@@ -359,6 +359,16 @@ svg.rea-score .vf-beam { display: none !important; }
 .shows-rhythm svg.rea-score .vf-stavenote .vf-stem,
 .shows-rhythm svg.rea-score .vf-stavenote .vf-flag,
 .shows-rhythm svg.rea-score .vf-beam { display: inline !important; }
+
+/* A separator: a breath, a phrase end, a tick over the note before it.  Drawn
+   into the score by `staveLayout`, and coloured here so both views agree. */
+svg.rea-score .vf-separator { stroke: var(--ink, #16171a); fill: none; }
+svg.rea-score .vf-separator-glyph { fill: var(--ink, #16171a); stroke: none; }
+svg.rea-score .vf-note-label,
+svg.rea-score .vf-bar-number {
+  font-size: 10px; fill: var(--muted, #6b6f76); stroke: none;
+  font-family: "Instrument Sans", system-ui, sans-serif;
+}
 
 /* Live sung-pitch preview marker (singing exercises). */
 /* Per-note accuracy, left on the stave after singing so a finished run can be
@@ -654,6 +664,37 @@ svg.rea-score .vf-beam { display: none !important; }
 .sn-cell.ok { border-color: var(--border-strong); color: var(--ink-2); }
 .sn-cell.weak, .mg-cell.wrong { border-color: color-mix(in srgb, var(--bad) 35%, transparent); color: var(--bad); background: var(--bad-tint); }
 .sn-cell.pending, .mg-cell.pending { border-style: dashed; color: var(--muted-2); background: transparent; }
+/* A bar the student has singled out to practise.  Quieter than an answer
+   mark and longer-lived than a highlight: it says "this is the set", and it
+   stays until they say otherwise. */
+svg.rea-score .vf-bar-focus path,
+svg.rea-score .vf-bar-focus rect { stroke: var(--accent); }
+.focus-note {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin-top: 8px; font-size: 12px; color: var(--ink-2);
+}
+.focus-clear {
+  font: inherit; font-size: 12px; cursor: pointer;
+  padding: 3px 8px; border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink-2);
+}
+.focus-clear:hover { border-color: var(--ink-2); color: var(--ink); }
+
+/* The accidental a student puts on their answer, beside the degrees they are
+   answering with.  Three buttons rather than a menu: there are three, and a
+   guessing round is answered in a hurry. */
+.mg-acc { display: flex; gap: 4px; margin-top: 8px; }
+.mg-acc-btn {
+  font: inherit; font-size: 15px; line-height: 1; cursor: pointer;
+  min-width: 32px; padding: 5px 6px 7px;
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  background: var(--surface); color: var(--ink-2);
+}
+.mg-acc-btn:hover { border-color: var(--ink-2); color: var(--ink); }
+.mg-acc-btn.is-on {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+
 /* The reference note the singer is on right now, in the live per-note strip.
    A ring rather than a glow — it has to be findable at a glance mid-phrase. */
 .sn-cell.pending.active {
@@ -1685,3 +1726,103 @@ svg.rea-score .vf-beam { display: none !important; }
   .about-wrap { padding: 28px 16px 56px; }
   .about-title { font-size: 25px; }
 }
+
+/* ------------------------------------------------------------- instruments */
+/* The exercise drawn as a keyboard or a neck — the same answer sheet the
+   stave is, in a picture a student who does not read music can answer in.
+   See `instrumentRenderer.js`: one key or one fret per bar, and the bars the
+   exercise does not use are drawn but dead. */
+.inst { padding: 18px 10px; overflow-x: auto; }
+
+.kb-board {
+  position: relative; display: block;
+  --kb-key-w: 38px;
+  width: calc(var(--kb-whites) * var(--kb-key-w));
+  min-width: 100%;
+}
+.kb-whites { display: flex; }
+.kb-key {
+  font: inherit; cursor: pointer; padding: 0;
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.kb-white {
+  width: var(--kb-key-w); height: 140px;
+  border: 1px solid var(--border-strong); border-radius: 0 0 5px 5px;
+  background: #fff; color: var(--muted);
+  padding-bottom: 8px; font-size: 12px;
+}
+.kb-blacks { position: absolute; inset: 0; pointer-events: none; }
+.kb-black {
+  position: absolute; top: 0; pointer-events: auto;
+  left: calc(var(--kb-at) * var(--kb-key-w) - var(--kb-key-w) * 0.3);
+  width: calc(var(--kb-key-w) * 0.6); height: 88px;
+  border: 1px solid #16171a; border-radius: 0 0 4px 4px;
+  background: #23242a; color: #fff;
+  padding-bottom: 6px; font-size: 11px;
+}
+.kb-key:disabled { cursor: default; color: transparent; opacity: 0.75; }
+.kb-key:not(:disabled):hover { border-color: var(--accent); }
+.kb-deg { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+/* A guitar neck: six strings, twelve frets, the lowest playable position for
+   each note of the exercise. */
+.gt-neck {
+  display: grid; grid-template-rows: repeat(6, 26px);
+  background: linear-gradient(#f6f3ee, #efeae1);
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  min-width: 520px;
+}
+.gt-string { display: grid; grid-template-columns: 34px repeat(var(--gt-frets), 1fr); align-items: center; }
+.gt-fret {
+  position: relative; height: 100%; padding: 0; cursor: pointer;
+  background: none; border: 0; border-right: 1px solid rgba(22, 23, 26, 0.18);
+  display: flex; align-items: center; justify-content: center;
+}
+/* The string itself, drawn through every fret of its row. */
+.gt-fret::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  height: 1px; background: rgba(22, 23, 26, 0.35);
+}
+.gt-open { border-right: 3px solid rgba(22, 23, 26, 0.55); }
+.gt-fret:disabled { cursor: default; }
+.gt-dot {
+  position: relative; z-index: 1;
+  min-width: 22px; height: 22px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-2);
+}
+.gt-fret:not(:disabled):hover .gt-dot { border-color: var(--accent); color: var(--accent); }
+.gt-numbers {
+  display: grid; grid-template-columns: 34px repeat(13, 1fr);
+  min-width: 520px; font-size: 10px; color: var(--muted-2); text-align: center;
+  padding-top: 4px;
+}
+
+/* The marks every renderer shares, said in this picture's own terms. */
+.inst [data-bar].is-bar-active,
+.inst [data-bar].is-active { outline: 2px solid var(--accent); outline-offset: -2px; }
+.inst [data-bar].is-focus { box-shadow: inset 0 0 0 2px var(--accent); }
+.inst [data-bar].is-sung { outline: 2px dashed var(--accent-2); outline-offset: -2px; }
+.inst .kb-key.res-picked, .inst .gt-fret.res-picked .gt-dot { border-color: var(--accent); }
+.inst .kb-key.res-correct, .inst .gt-fret.res-correct .gt-dot {
+  background: var(--good-tint); border-color: var(--good); color: var(--good);
+}
+.inst .kb-key.res-wrong, .inst .gt-fret.res-wrong .gt-dot {
+  background: var(--bad-tint); border-color: var(--bad); color: var(--bad);
+}
+.inst .kb-key.acc-good, .inst .gt-fret.acc-good .gt-dot { border-color: var(--good); }
+.inst .kb-key.acc-ok, .inst .gt-fret.acc-ok .gt-dot { border-color: var(--warn); }
+.inst .kb-key.acc-weak, .inst .gt-fret.acc-weak .gt-dot { border-color: var(--bad); }
+
+/* The teacher's answer key: what the bars of this exercise actually are, so a
+   student's result can be checked without sitting the exercise. */
+.answer-key { font-size: 12px; }
+.answer-key h4 { margin: 0 0 8px; font-size: 13px; }
+.answer-key table { border-collapse: collapse; width: 100%; max-width: 420px; }
+.answer-key th, .answer-key td {
+  text-align: left; padding: 4px 10px 4px 0;
+  border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums;
+}
+.answer-key th { color: var(--muted); font-weight: 500; }
+.answer-key p { margin: 8px 0 0; color: var(--muted); }

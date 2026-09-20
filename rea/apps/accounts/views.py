@@ -31,7 +31,18 @@ class ReaLoginView(LoginView):
 
 
 class ReaLogoutView(LogoutView):
-    """POST-only, which is Django's default and what the header form uses."""
+    """POST-only — said here rather than inherited.
+
+    It is Django's default from 5.0 on, and it is what the header form uses,
+    but leaning on the default made the view's behaviour a property of
+    whichever Django happened to be installed: on 4.2 the same class answers a
+    GET by signing the user out and redirecting.  That is worth closing
+    outright rather than by version, because a signing-out GET is a link a
+    prefetcher can follow and an ``<img src>`` can fire — the user is logged
+    out by something that never asked them.
+    """
+
+    http_method_names = ["post", "options"]
 
     # The practice app now requires a login, so sending someone there after
     # signing out would only bounce them to the login page with a ?next.

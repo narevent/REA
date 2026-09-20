@@ -34,7 +34,7 @@
 
 import {
   pathOf, firstCategory, labelFor, kindOf, neighbourCategory,
-} from "./curriculum.js?v=164";
+} from "./curriculum.js?v=165";
 
 function el(tag, cls, html) {
   const n = document.createElement(tag);
@@ -205,6 +205,24 @@ export function createNav(deps) {
     })));
   }
 
+  /** The view chip — which picture the exercise is read from.  Beside the
+   *  tempo and the difficulty because it is the same kind of setting: about
+   *  the person practising rather than about the material. */
+  function renderView(host) {
+    if (!host) return;
+    host.innerHTML = "";
+    const opts = deps.viewOptions ? deps.viewOptions() : [];
+    if (!opts.length) { host.hidden = true; return; }
+    host.hidden = false;
+    const cur = deps.viewValue();
+    const now = opts.find((o) => o.value === cur) || opts[0];
+    segment(host, now ? now.label : "—", opts.map((o) => ({
+      label: o.label,
+      current: o.value === cur,
+      pick: () => deps.goView(o.value),
+    })));
+  }
+
   /** The tonality chip — one control, sitting apart from the path because a
    *  key applies across the whole relative system rather than to one node. */
   function renderKey(host) {
@@ -340,6 +358,7 @@ export function createNav(deps) {
     renderKey(document.getElementById("path-key"));
     renderTempo(document.getElementById("path-tempo"));
     renderDifficulty(document.getElementById("path-difficulty"));
+    renderView(document.getElementById("path-view"));
     renderFooter(document.getElementById("session-nav"));
     if (sheetOpen) renderSheet(document.getElementById("curriculum-tree"));
   }

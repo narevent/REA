@@ -466,8 +466,11 @@ export function soundPresetGroups() {
  * optional tremolo LFO modulates the master gain for vibrato/shimmer; an
  * optional shared filter shapes the combined voices (bandpass filters with
  * `freq: 0` track the note's fundamental so reed/flute tones sit on pitch).
+ *
+ * `release` overrides the preset's own release with a tail in seconds that
+ * rings on *after* the note's length — the score's per-note `attack_decay_time`.
  */
-export function buildVoice(ctx, freq, t, durSec, vol, preset) {
+export function buildVoice(ctx, freq, t, durSec, vol, preset, { release = null } = {}) {
   const p = preset || _current;
   const out = ctx.createGain();
   out.gain.setValueAtTime(0.0001, t);
@@ -502,8 +505,9 @@ export function buildVoice(ctx, freq, t, durSec, vol, preset) {
     tremGain.gain.setValueAtTime(1 - depth * 0.5, t); // centre around unity
     lfo.connect(lfoGain).connect(tremGain.gain);
     lfo.start(t);
-    // Tremolo LFO runs for the whole note (it has no envelope of its own).
-    lfo.stop(t + durSec + 0.05);
+    // Tremolo LFO runs for the whole note (it has no envelope of its own),
+    // including a decay tail the note asks for.
+    lfo.stop(t + durSec + (release > 0 ? release : 0) + 0.05);
     tremGain.connect(voiceDest);
   }
   const finalVoiceDest = tremGain || voiceDest;
@@ -551,8 +555,19 @@ export function buildVoice(ctx, freq, t, durSec, vol, preset) {
   const releaseRaw = Math.max(0.01, p.release != null ? p.release : 0.1);
   const releasePct = p.releasePct != null ? p.releasePct : 0.4;
 
-  const release = Math.min(releaseRaw, Math.max(0.01, durSec * releasePct));
-  const relStart = t + Math.max(attack + 0.005, durSec - release);
+  // A note may ask for a decay of its own — the score's `attack_decay_time`.
+  // The preset's release is a fraction of the note carved out of its *end*, so
+  // that a note stops when it stops; a note's own decay is a tail that rings
+  // on *after* it, which is what makes a line legato when one note is written
+  // to start before the last one has finished.  So the two are scheduled
+  // differently: the preset shortens the tone, the note's own decay lengthens
+  // it.
+  const tail = (release != null && release > 0) ? release : 0;
+  const bodyEnd = t + durSec + tail;
+  const relRaw = tail || Math.min(releaseRaw, Math.max(0.01, durSec * releasePct));
+  const relStart = tail
+    ? t + Math.max(attack + 0.005, durSec)
+    : t + Math.max(attack + 0.005, durSec - relRaw);
   const decayEnd = Math.min(t + attack + decay, relStart - 0.002);
 
   out.gain.setValueAtTime(0.0001, t);
@@ -561,7 +576,7 @@ export function buildVoice(ctx, freq, t, durSec, vol, preset) {
     out.gain.exponentialRampToValueAtTime(susLevel, decayEnd);
   }
   out.gain.setValueAtTime(Math.min(susLevel, peak), relStart);
-  out.gain.exponentialRampToValueAtTime(0.0001, t + durSec);
+  out.gain.exponentialRampToValueAtTime(0.0001, bodyEnd);
 
   const stop = (when) => {
     const w = Math.max(when, t + 0.005);

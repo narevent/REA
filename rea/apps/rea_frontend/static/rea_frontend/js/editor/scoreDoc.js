@@ -13,18 +13,21 @@
  * teacher edits is what gets stored.
  */
 
-import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=164";
+import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=165";
 
 /** Note letters in staff order.  German naming: `h` is B-natural. */
 export const LETTERS = ["c", "d", "e", "f", "g", "a", "h"];
 
-/** Accidental modifiers a note token may carry, in the order Alt+↑/↓ cycles. */
-export const MODIFIERS = [null, "#", "b", "x", "r"];
+/** Accidental modifiers a note token may carry, in the order Alt+↑/↓ cycles —
+ *  which is downward, from the double sharp to the double flat, so the cycle
+ *  reads as a pitch going down rather than as an arbitrary ring. */
+export const MODIFIERS = [null, "x", "#", "b", "bb", "r"];
 
 export const MODIFIER_LABELS = {
   null: "natural (as written)",
   "#": "sharp",
   b: "flat",
+  bb: "double flat",
   x: "double sharp",
   r: "naturalised (cancels the key signature)",
 };

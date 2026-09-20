@@ -13,7 +13,7 @@
 
 import {
   NOTEHEAD_REACH, drawScore, durationToType, noteHeadYs, resolveVexFlow,
-} from "./staveLayout.js?v=164";
+} from "./staveLayout.js?v=165";
 
 /** Accuracy bands for `setNoteAccuracy`.  The thresholds match the per-note
  *  chips in the feedback row, so the stave and the report agree. */
@@ -52,6 +52,7 @@ export class NotationRenderer {
     this.notes = [];
     this.bars = []; // [{ staveEl, noteStart, noteEnd, barIndex }]
     this.onBarClick = null;
+    this.onBarContext = null;
 
     // A score is laid out against the width it is drawn into, so it has to be
     // redrawn whenever that width changes — on rotation, on a resize, and on
@@ -142,7 +143,7 @@ export class NotationRenderer {
    * that answer to a click, and the highlighting the practice session drives.
    */
   render(bars, opts = {}, isRelayout = false) {
-    const { clef = "treble", title = "", onBarClick = null } = opts;
+    const { clef = "treble", title = "", onBarClick = null, style = null } = opts;
     this.clear();
     if (!isRelayout) this._relayouts = 0;
     this._lastDraw = { bars, opts };
@@ -152,8 +153,13 @@ export class NotationRenderer {
       return [];
     }
     this.onBarClick = onBarClick;
+    if (opts.onBarContext) this.onBarContext = opts.onBarContext;
 
-    const drawn = drawScore(this.container, bars);
+    // The exercise's own style — how far apart its bars sit, whether its
+    // stems are drawn, what is written under its notes.  A student sees the
+    // exercise as the teacher set it, which is the whole point of the
+    // settings being on the exercise.
+    const drawn = drawScore(this.container, bars, { style });
     if (!drawn) return [];
     this._drawnFor = this.container.clientWidth;
 
@@ -213,6 +219,18 @@ export class NotationRenderer {
         if (idx != null && this.onBarClick) this.onBarClick(idx);
       });
 
+      // Right-click is the other thing a student wants to say about a bar:
+      // not "answer with this one" but "practise this one, and these".  It
+      // goes to a handler of its own because it must never be read as an
+      // answer — a slip in the middle of a guessing round would cost a mark.
+      this.container.addEventListener("contextmenu", (e) => {
+        if (!this._ownsStage() || !this.onBarContext) return;
+        const idx = hitTest(e.clientX, e.clientY);
+        if (idx == null) return;
+        e.preventDefault();
+        this.onBarContext(idx, e);
+      });
+
       this.container.addEventListener("mousemove", (e) => {
         if (!this._ownsStage()) return;
         const idx = hitTest(e.clientX, e.clientY);
@@ -226,6 +244,21 @@ export class NotationRenderer {
     }
 
     return this.notes;
+  }
+
+  /**
+   * Mark the bars a student has chosen to practise, and nothing else.
+   *
+   * A selection is not an answer and not a highlight, so it gets a mark of
+   * its own: the bars stay marked while the set is being built, through the
+   * rounds that follow, and until the student clears it.
+   */
+  markFocus(barIndexes) {
+    const wanted = new Set(barIndexes || []);
+    this.bars.forEach((bar) => {
+      if (!bar.staveEl) return;
+      bar.staveEl.classList.toggle("vf-bar-focus", wanted.has(bar.barIndex));
+    });
   }
 
   /** Highlight all notes in a bar (e.g. when it's the active bar).

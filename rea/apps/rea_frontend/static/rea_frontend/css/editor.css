@@ -130,6 +130,26 @@
 .ed-acc { min-width: 26px; font-size: 14px; line-height: 1; padding: 4px 2px 6px; }
 .ed-tup { min-width: 24px; font-size: 12px; }
 
+/* A note value drawn as a note.  The fraction stays in the DOM for a screen
+   reader and is taken out of the flow, so the button is exactly the glyph. */
+.ed-glyph { display: block; margin: 0 auto; }
+.ed-glyph-text {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+.ed-dur .ed-glyph { width: 15px; height: 20px; }
+.ed-choice .ed-glyph { width: 14px; height: 19px; }
+
+/* The tempo, on the toolbar rather than three clicks away in the Exercise
+   panel: it is the one playback setting a teacher reaches for while writing,
+   and it belongs beside the button that plays the exercise. */
+.ed-tempo { display: flex; align-items: center; gap: 7px; }
+.ed-tempo input[type="range"] { width: 116px; accent-color: var(--accent); }
+.ed-tempo-value {
+  font-size: 11px; font-variant-numeric: tabular-nums; color: var(--ink-2);
+  min-width: 52px;
+}
+
 /* The note-input caret: a text cursor, for a stave. */
 .ed-caret { stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
 .ed-btn-danger:hover:not(:disabled) { background: var(--bad); border-color: var(--bad); color: #fff; }
@@ -175,6 +195,13 @@
    the row says so by going quiet rather than by lying about one of them. */
 .ed-btnset.is-mixed .ed-choice { opacity: 0.55; }
 
+/* Choosing a style, and keeping one: one row, because they are one thought —
+   "make this exercise look like that", and "let something else look like
+   this". */
+.ed-style-row { display: flex; gap: 6px; align-items: center; }
+.ed-style-row .ed-input { flex: 1 1 auto; min-width: 0; }
+.ed-style-row .ed-btn { flex: 0 0 auto; white-space: nowrap; }
+
 /* The stored token, shown but not editable — it follows the buttons above. */
 .ed-token {
   display: flex; align-items: baseline; gap: 8px;
@@ -182,8 +209,8 @@
 }
 .ed-token-value { font-family: var(--font-num, monospace); font-size: 12px; color: var(--ink-2); }
 
-/* ------------------------------------------------------------- note menu */
-/* The Note panel, brought to the cursor.  Same fields as the sidebar, said
+/* --------------------------------------------------------- pointer menus */
+/* The Note and Bar panels, brought to the cursor.  Same fields as the sidebar, said
    shorter: a menu at the pointer is read by somebody who already knows what
    these are, so the hints and the group headings come off and the rows draw
    in tight. */
@@ -210,6 +237,9 @@
 .ed-menu .ed-note-pitch { font-size: 12.5px; }
 .ed-menu .ed-token { margin-bottom: 6px; }
 .ed-menu .ed-choice { min-width: 25px; padding: 5px 3px; font-size: 11px; }
+/* A bar's fields are names and numbers rather than palettes, so its menu
+   needs no room for a row of seven buttons. */
+.ed-menu-bar { width: 236px; }
 
 /* The destination picker: a filter over the curriculum's leaves, each shown
    as its whole path.  A list rather than a dropdown because the path is the

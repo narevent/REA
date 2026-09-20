@@ -15,11 +15,15 @@ from .views import (
     ScoreCreateView,
     ScoreDetailView,
     ScoreDuplicateView,
+    StyleDetailView,
+    StylesView,
 )
 
 urlpatterns = [
     path("options/", OptionsView.as_view(), name="editor-options"),
     path("browse/", BrowseView.as_view(), name="editor-browse"),
+    path("styles/", StylesView.as_view(), name="editor-styles"),
+    path("styles/<int:pk>/", StyleDetailView.as_view(), name="editor-style"),
     path("<str:system>/blank/", BlankScoreView.as_view(), name="editor-blank"),
     path("<str:system>/pitch/", PreviewPitchView.as_view(), name="editor-pitch"),
     path("<str:system>/scores/", ScoreCreateView.as_view(), name="editor-create"),

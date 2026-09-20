@@ -20,20 +20,23 @@
  * exercise half-written is worse than one not written at all.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=164";
-import { EditorAPI } from "./editorApi.js?v=164";
-import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=164";
+import { AudioPlayer } from "../audioPlayer.js?v=165";
+import { EditorAPI } from "./editorApi.js?v=165";
+import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=165";
 import {
   Library, SHELF_DESTINATIONS, destinations, metaFromCtx,
-} from "./library.js?v=164";
-import { ScoreCanvas } from "./scoreCanvas.js?v=164";
+} from "./library.js?v=165";
+import { labelWithDuration } from "./glyphs.js?v=165";
+import { ScoreCanvas } from "./scoreCanvas.js?v=165";
 import {
   DURATIONS, LETTERS, MAX_VISUAL_OFFSET_PX, MODIFIERS, MODIFIER_LABELS, ScoreDoc,
   buildToken, noteMidi, offsetMs, splitToken, transposeToken,
-} from "./scoreDoc.js?v=164";
-import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=164";
-import { midiToToken } from "../notation.js?v=164";
-import { tupletRatio } from "../practiceData.js?v=164";
+} from "./scoreDoc.js?v=165";
+import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=165";
+import { midiToToken } from "../notation.js?v=165";
+import {
+  applyLegato, barGapMs, separatorGapMs, tupletRatio,
+} from "../practiceData.js?v=165";
 
 /** The accidentals offered as buttons, in the order a musician reaches for
  *  them.  `null` is "whatever the key signature says", which is the state a
@@ -41,8 +44,10 @@ import { tupletRatio } from "../practiceData.js?v=164";
  *  cancels a key signature, which is a different statement and needs its own
  *  button. */
 const ACCIDENTAL_BUTTONS = [
+  ["x", "𝄪", "Double sharp"],
   ["#", "♯", "Sharp (#)"],
   ["b", "♭", "Flat (b)"],
+  ["bb", "𝄫", "Double flat"],
   ["r", "♮", "Natural — cancels the key signature"],
   [null, "—", "As the key signature has it (n)"],
 ];
@@ -58,6 +63,22 @@ const el = (tag, className, text) => {
   if (text != null) node.textContent = text;
   return node;
 };
+
+/**
+ * The settings a style carries, and therefore the ones applying one replaces.
+ *
+ * Kept in step with `STYLE_FIELDS` in `intonation/style.py` — the server is
+ * where the list is decided, and this is the editor's copy of it.  A field
+ * missing here would simply not travel; a field here that the server does not
+ * know is refused by the style serializer, which is the safer direction.
+ */
+const STYLE_KEYS = [
+  "mid_bar_space", "bars_per_row", "align_to_center", "auto_align",
+  "draw_only_note_heads", "are_all_notes_same_duration", "separator_space",
+  "note_label_type", "bar_number_type",
+  "mid_bar_time", "mute_last_played_notes_after_bar_finishes",
+  "separator_time", "separator_cancel_previous_note",
+];
 
 /** Letter keys write notes; the top-row digits pick durations. */
 const LETTER_KEYS = new Set(LETTERS);
@@ -102,12 +123,15 @@ class Editor {
       onDragOrder: (from, to) => this.dragOrder(from, to),
       onDragEnd: (position) => this.endDrag(position),
       onNoteMenu: (position, event) => this.openNoteMenu(position, event),
+      onBarMenu: (barIndex, event) => this.openBarMenu(barIndex, event),
     });
     this.inspector = new Inspector(this.dom.inspector, {
       onNote: (positions, changes) => this.updateNotes(positions, changes),
       onBar: (indices, changes) => this.updateBars(indices, changes),
       onMeta: (changes) => this.updateMeta(changes),
       onKey: (key) => this.setKey(key),
+      onStyle: (style) => this.applyStyle(style),
+      onSaveStyle: () => this.saveStyle(),
     });
   }
 
@@ -128,6 +152,28 @@ class Editor {
     this.library.setOptions(this.options);
     await this.createBlank("relative", { silent: true });
     this.status("Ready. Open a branch on the left to find an exercise, or write one here.");
+  }
+
+  /**
+   * What this teacher may write, which is not the same for everybody.
+   *
+   * An administrator owns the curriculum: they may save into it, replace one
+   * of its exercises and delete one.  A teacher writes dictations and their
+   * own drafts — material nobody else is practising — and the editor offers
+   * them exactly that rather than offering everything and being refused by
+   * the server afterwards.  The server still decides (`require_shelf`); this
+   * is only about not asking a teacher to find out the hard way.
+   */
+  get isAdmin() {
+    return !!(this.options && this.options.is_admin);
+  }
+
+  /** Whether the open exercise is one this teacher may replace or delete. */
+  canWriteOpen() {
+    if (!this.doc) return false;
+    if (this.isAdmin) return true;
+    const shelf = this.doc.doc.meta.shelf || "";
+    return shelf === "draft" || shelf === "dictation";
   }
 
   // -- document lifecycle ------------------------------------------------
@@ -537,7 +583,13 @@ class Editor {
     const system = this.doc.system;
     const meta = this.doc.doc.meta;
     const relative = system === "relative";
-    const places = destinations().filter((d) => d.ctx.system === system);
+    // A teacher who does not own the curriculum is offered the two shelves
+    // that are theirs, and no places in the method at all — a list of a
+    // hundred and fifty destinations that will all be refused is worse than
+    // no list.
+    const places = this.isAdmin
+      ? destinations().filter((d) => d.ctx.system === system)
+      : [];
     const keys = (this.options && this.options.keys) || [];
 
     const answer = await this.askForm({
@@ -554,7 +606,9 @@ class Editor {
             value: `shelf:${shelf.value}`, label: shelf.label,
           })).concat(places.map((d, i) => ({ value: String(i), label: d.label }))),
           value: meta.shelf ? `shelf:${meta.shelf}` : this._currentDestination(places, meta),
-          hint: "Any category in the curriculum, the drafts, or the dictations.",
+          hint: this.isAdmin
+            ? "Any category in the curriculum, the drafts, or the dictations."
+            : "Your dictations, or your drafts. The curriculum itself is an administrator's to change.",
         },
         relative ? {
           key: "key_model", label: "Key",
@@ -688,7 +742,13 @@ class Editor {
     // The menu is showing the note that just changed, so it has to be redrawn
     // from the new document — otherwise its own controls would go on showing
     // what they said before the edit they made.
-    if (this._menu) this.inspector.renderNoteMenu(this._menu, this.doc.doc, this.selection);
+    if (this._menu) {
+      if (this._menu.classList.contains("ed-menu-bar")) {
+        this.inspector.renderBarMenu(this._menu, this.doc.doc, this.selection);
+      } else {
+        this.inspector.renderNoteMenu(this._menu, this.doc.doc, this.selection);
+      }
+    }
   }
 
   renderHeader() {
@@ -705,6 +765,11 @@ class Editor {
   }
 
   renderToolbar() {
+    // A control being dragged must not be rebuilt under the pointer: every
+    // step of a tempo drag is a change to the document, and redrawing the
+    // toolbar on each one would hand the mouse a brand-new slider that has
+    // never heard of the gesture in progress.
+    if (this._liveControl) return;
     const bar = this.dom.toolbar;
     bar.innerHTML = "";
     const doc = this.doc;
@@ -759,12 +824,15 @@ class Editor {
     // an exercise students are already practising: the safe answer should be
     // the one under the cursor.
     const isNew = this.doc && this.doc.isNew;
+    const mine = this.canWriteOpen();
     group(0, [
       button("Save as…",
         "Save what is on screen as a new exercise — choose where it goes, or leave it in the drafts (⌘/Ctrl+Shift+S)",
         () => this.saveAs(), { primary: true, disabled: !doc }),
-      button("Save", `Replace “${this.doc ? this.doc.doc.display_name : ""}” with what is on screen — students get it straight away (⌘/Ctrl+S)`,
-        () => this.save(), { disabled: !doc || isNew }),
+      button("Save", mine
+        ? `Replace “${this.doc ? this.doc.doc.display_name : ""}” with what is on screen — students get it straight away (⌘/Ctrl+S)`
+        : "This exercise is part of the curriculum — only an administrator can replace it. Save it as a dictation instead.",
+        () => this.save(), { disabled: !doc || isNew || !mine }),
     ]);
 
     group(0, [
@@ -777,6 +845,13 @@ class Editor {
       button("Play bar", "Play the selected bar (Shift+Space)", () => this.playBar(), { disabled: !doc }),
     ]);
 
+    // The tempo, beside the transport.  It was a field in the Exercise panel,
+    // which is where an exercise's *identity* is edited — and tempo is not
+    // identity, it is the thing a teacher adjusts by ear, playing the phrase
+    // again after every nudge.  Three clicks away from the Play button is
+    // three clicks too many for that loop.
+    if (doc) rows[0].appendChild(this.tempoControl());
+
     group(0, [
       button("Add bar", "Add a bar after the selection (Enter)", () => this.addBar(), { disabled: !doc }),
       button("Copy bar", "Duplicate the selected bar", () => this.duplicateBar(), { disabled: !doc }),
@@ -787,8 +862,14 @@ class Editor {
     // reached rarely and two of them are hard to take back.
     group(0, [
       button("Import MIDI…", "Replace the notes with those from a MIDI file", () => this.importMidi(), { quiet: true, disabled: !doc }),
-      button("Copy exercise", "Save a copy of this exercise and open it", () => this.duplicateExercise(), { quiet: true, disabled: !doc }),
-      button("Delete exercise", "Delete this exercise", () => this.deleteExercise(), { quiet: true, disabled: !doc }),
+      button("Copy exercise", mine
+        ? "Save a copy of this exercise and open it"
+        : "A copy would land in the curriculum, which only an administrator can add to.",
+        () => this.duplicateExercise(), { quiet: true, disabled: !doc || !mine }),
+      button("Delete exercise", mine
+        ? "Delete this exercise"
+        : "Only an administrator can delete a curriculum exercise.",
+        () => this.deleteExercise(), { quiet: true, disabled: !doc || !mine }),
     ], "ed-tool-rare");
 
     // ---- row 2: writing notes -------------------------------------------
@@ -796,11 +877,13 @@ class Editor {
     // number keys agree about which is which.
     rows[1].appendChild(palette("Value", DURATIONS.slice().reverse().map((d) => {
       const key = Object.entries(Editor.DURATION_KEYS).find(([, v]) => v === d.value);
-      return choice(d.short, key ? `${d.label} (${key[0]})` : d.label,
+      const button = choice(d.short, key ? `${d.label} (${key[0]}) — ${d.short}` : `${d.label} — ${d.short}`,
         this.writeDuration === d.value, !doc, () => {
           this.setWriteDuration(d.value);
           if (this.selection.notes.length) this.setDuration(this.selection.notes, d.value);
         });
+      // The note itself rather than its fraction — see `glyphs.js`.
+      return labelWithDuration(button, d.value, d.short);
     })));
 
     // With a note selected these change it; in note input they arm the next
@@ -843,6 +926,52 @@ class Editor {
       views.appendChild(item);
     });
     rows[1].appendChild(views);
+  }
+
+  /**
+   * The tempo slider: one undo step for a drag, not one per pixel.
+   *
+   * It edits the document live so the number beside it and the subtitle above
+   * it follow the thumb, and records the whole gesture as a single change when
+   * the mouse comes up — the same bargain dragging a notehead makes.
+   */
+  tempoControl() {
+    const meta = this.doc.doc.meta;
+    const wrap = el("div", "ed-tool-group ed-tempo");
+    wrap.appendChild(el("span", "ed-palette-lbl", "Tempo"));
+    const slider = el("input");
+    slider.type = "range";
+    slider.min = 20;
+    slider.max = 200;
+    slider.step = 1;
+    slider.value = meta.tempo > 10 ? meta.tempo : 80;
+    slider.title = "Beats per minute. Harmonic lessons are played at half this tempo.";
+    const readout = el("span", "ed-tempo-value", `${slider.value} bpm`);
+
+    const begin = () => {
+      if (this._liveControl) return;
+      this._liveControl = "tempo";
+      this.doc.beginLive("tempo");
+    };
+    const end = () => {
+      if (this._liveControl !== "tempo") return;
+      this._liveControl = null;
+      this.doc.endLive();
+      this.renderToolbar();
+    };
+    slider.addEventListener("pointerdown", begin);
+    slider.addEventListener("keydown", begin);
+    slider.addEventListener("input", () => {
+      begin();
+      const tempo = Number(slider.value);
+      readout.textContent = `${tempo} bpm`;
+      this.doc.live((document) => { document.meta.tempo = tempo; });
+    });
+    slider.addEventListener("change", end);
+    slider.addEventListener("blur", end);
+    wrap.appendChild(slider);
+    wrap.appendChild(readout);
+    return wrap;
   }
 
   status(message, tone = "") {
@@ -904,6 +1033,15 @@ class Editor {
       const at = this.selection.bars.indexOf(barIndex);
       if (at >= 0) this.selection.bars.splice(at, 1);
       else this.selection.bars.push(barIndex);
+    } else if (event.shiftKey && this.selection.bars.length) {
+      // A run of bars, from the first one selected to this one — the same
+      // gesture the notes answer to, and what a teacher means by "these
+      // bars": the ones they are about to edit, or play, together.
+      const anchor = this.selection.bars[0];
+      const [lo, hi] = anchor < barIndex ? [anchor, barIndex] : [barIndex, anchor];
+      const span = [];
+      for (let i = lo; i <= hi; i += 1) if (i !== anchor) span.push(i);
+      this.selection.bars = [anchor].concat(span);
     } else {
       this.selection.bars = [barIndex];
     }
@@ -1009,9 +1147,10 @@ class Editor {
     this.previewNote(position);
   }
 
-  /** A click on empty staff writes a note at that pitch, at the armed note
-   *  value, and leaves the caret after it.  Clicking a *note* selects it
-   *  instead — see `selectNote`. */
+  /** A double click on empty staff writes a note at that pitch, at the armed
+   *  note value, and leaves the caret after it.  A single click selects the
+   *  bar, and a click on a notehead selects the note — see `_bindPointer` in
+   *  `scoreCanvas` for why writing is the gesture that costs two clicks. */
   staffClick(where) {
     const position = this.doc.insertNote(where.barIndex, where.noteIndex, {
       note_name: where.noteName,
@@ -1037,8 +1176,31 @@ class Editor {
 
     const menu = el("div", "ed-menu");
     this.inspector.renderNoteMenu(menu, this.doc.doc, this.selection);
-    document.body.appendChild(menu);
+    this.showMenu(menu, event);
+  }
 
+  /**
+   * The right-click menu for a bar: the Bar tab, at the cursor.
+   *
+   * Same panel, same commit path, same reasoning as the note menu it sits
+   * beside — a bar's clef, its key, its label and its pickup count are
+   * decided while looking at the bar, and the sidebar is across the screen.
+   */
+  openBarMenu(barIndex, event) {
+    this.closeNoteMenu();
+    if (!this.selection.bars.includes(barIndex)) {
+      this.selection = { notes: [], bars: [barIndex] };
+      this.inspector.tab = "bar";
+      this.renderAll();
+    }
+    const menu = el("div", "ed-menu ed-menu-bar");
+    this.inspector.renderBarMenu(menu, this.doc.doc, this.selection);
+    this.showMenu(menu, event);
+  }
+
+  /** Place a menu at the cursor and arrange for it to go away again. */
+  showMenu(menu, event) {
+    document.body.appendChild(menu);
     // Placed at the cursor, then pulled back inside the window — a menu that
     // opens half off-screen is worse than no menu.
     const pad = 8;
@@ -1050,8 +1212,8 @@ class Editor {
 
     this._menu = menu;
     // Anything that is not the menu closes it, including a scroll: the menu
-    // is anchored to a point in the window, and the note moves out from under
-    // it the moment the score scrolls.
+    // is anchored to a point in the window, and the score moves out from
+    // under it the moment the page scrolls.
     this._menuAway = (e) => { if (!menu.contains(e.target)) this.closeNoteMenu(); };
     this._menuKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); this.closeNoteMenu(); } };
     setTimeout(() => {
@@ -1299,8 +1461,74 @@ class Editor {
     this.doc.updateBars(indices, changes);
   }
 
-  updateMeta(changes) {
-    this.doc.updateMeta(changes);
+  updateMeta(changes, label) {
+    this.doc.updateMeta(changes, label);
+  }
+
+  /**
+   * Apply a named style to the open exercise.
+   *
+   * One undo step, and nothing saved: a style is a large edit like any other
+   * and a teacher should be able to try one, hear it, and take it back.
+   */
+  applyStyle(style) {
+    if (!this.doc || !style) return;
+    const values = {};
+    STYLE_KEYS.forEach((key) => {
+      if (style[key] !== undefined) values[key] = style[key];
+    });
+    this.doc.updateMeta(values, `apply ${style.name}`);
+    this.status(`${style.name} applied — not saved yet.`, "good");
+  }
+
+  /**
+   * Keep the settings on screen as a named style.
+   *
+   * Saved from the exercise rather than edited in a dialog of its own,
+   * because the moment a teacher knows what they want a style to be is the
+   * moment an exercise in front of them looks right.
+   */
+  async saveStyle() {
+    if (!this.doc) return;
+    const meta = this.doc.doc.meta;
+    const existing = (this.options && this.options.styles) || [];
+    const house = existing.find((s) => s.is_default);
+    const answer = await this.askForm({
+      title: "Save these settings as a style",
+      body: "A style is a starting point: applying it copies these settings onto "
+        + "an exercise, and the exercise keeps them from then on.",
+      fields: [
+        { key: "name", label: "Name", value: "", hint: "Saving over a name replaces that style." },
+        { key: "description", label: "What it is for", value: "" },
+        {
+          key: "is_default", label: "Make it the house style",
+          options: [{ value: "no", label: "No" }, { value: "yes", label: "Yes" }],
+          value: "no",
+          hint: house ? `${house.name} is the house style now.` : "Nothing is the house style yet.",
+        },
+      ],
+      confirm: "Save style",
+    });
+    if (!answer) return;
+    const payload = { name: answer.values.name.trim(), description: answer.values.description };
+    STYLE_KEYS.forEach((key) => { payload[key] = meta[key]; });
+    payload.is_default = answer.values.is_default === "yes";
+    try {
+      const saved = await EditorAPI.saveStyle(payload);
+      // The options carry the style list the panel offers, so the new one has
+      // to reach them or it would not appear until the page was reloaded.
+      this.options.styles = (this.options.styles || [])
+        .filter((s) => s.id !== saved.id)
+        .concat([saved]);
+      if (saved.is_default) {
+        this.options.styles.forEach((s) => { s.is_default = s.id === saved.id; });
+      }
+      this.inspector.setOptions(this.options);
+      this.renderAll();
+      this.status(`Saved the style “${saved.name}”.`, "good");
+    } catch (e) {
+      answer.fail(e.message);
+    }
   }
 
   setKey(key) {
@@ -1471,12 +1699,16 @@ class Editor {
     const doc = this.doc.doc;
     const tempo = (doc.meta.tempo > 10 ? doc.meta.tempo : 80) / (doc.meta.texture === "poly" ? 2 : 1);
     const wholeMs = (4 * 60000) / tempo;
-    const gapMs = Math.round((doc.meta.mid_bar_time || 0) * 1000);
+    const gapMs = barGapMs(doc.meta);
+    const separatorMs = separatorGapMs(doc.meta);
+    const cutAtSeparator = !!doc.meta.separator_cancel_previous_note;
+    const holdAcrossBars = !doc.meta.mute_last_played_notes_after_bar_finishes;
     const steps = [];
     let barStart = 0;
     barIndices.forEach((barIndex) => {
       const bar = doc.bars[barIndex];
       if (!bar) return;
+      const from = steps.length;
       let cursor = 0;
       (bar.events || []).forEach((event, noteIndex) => {
         const offset = offsetMs(event);
@@ -1490,16 +1722,34 @@ class Editor {
         steps.push({
           midi: noteMidi(event, doc.key_signature),
           isRest: !!event.is_rest,
-          startMs: barStart + start,
+          startMs: start,
           durationMs,
           volume: event.volume || 80,
+          decaySec: event.attack_decay_time != null ? Number(event.attack_decay_time) : null,
+          separator: event.separator || "",
           barIndex,
           noteIndex,
         });
-        cursor = start + durationMs;
+        cursor = start + durationMs + (event.separator ? separatorMs : 0);
       });
+      // Held notes are closed up inside the bar, exactly as the student's
+      // player does it — see `applyLegato`.  Bar by bar, so a gap between
+      // bars stays a gap until the rule below decides otherwise.
+      applyLegato(steps.slice(from), { cutAtSeparator });
+      steps.slice(from).forEach((step) => { step.startMs += barStart; });
       barStart += cursor + gapMs;
     });
+    // ...and the note that ends a bar rings into that gap unless the exercise
+    // says to cut it at the barline.
+    if (holdAcrossBars) {
+      for (let i = 0; i < steps.length - 1; i += 1) {
+        const step = steps[i];
+        const next = steps[i + 1];
+        if (step.barIndex === next.barIndex || step.isRest || next.isRest) continue;
+        const gap = next.startMs - (step.startMs + step.durationMs);
+        if (gap > 0) step.durationMs += gap;
+      }
+    }
     return steps;
   }
 

@@ -18,6 +18,8 @@ A `Bar` is owned by *either* a `KeyModel` (scale-template bars) *or* a
 
 from django.db import models
 
+from ..style import SeparatedEvent, StyledScore
+
 
 class ScaleModel(models.Model):
     """A generic scale recipe (e.g. Major, HarmonicMinor)."""
@@ -133,7 +135,7 @@ class KeyModel(models.Model):
         return self.name
 
 
-class Lesson(models.Model):
+class Lesson(StyledScore):
     """A lesson built on top of a key.
 
     Populated from the ``lessons`` JSON files.  Two textures exist:
@@ -193,10 +195,9 @@ class Lesson(models.Model):
     )
     source_file = models.CharField(max_length=512, default="")
     tempo = models.PositiveIntegerField(default=86)
-    # Performance / layout metadata copied from the JSON.
-    draw_only_note_heads = models.BooleanField(default=False)
+    # The rest of the layout and pacing settings — the ones both systems
+    # share — come from `StyledScore`, which is also what a style sets.
     default_rhythm = models.CharField(max_length=32, default="FreeStyle")
-    mid_bar_time = models.FloatField(default=0.1)
     raw = models.JSONField(default=dict, blank=True)
 
     class Shelf(models.TextChoices):
@@ -303,7 +304,7 @@ class Bar(models.Model):
         return f"{owner} bar {self.bar_index} (deg {self.degree})"
 
 
-class MusicEvent(models.Model):
+class MusicEvent(SeparatedEvent):
     """A single note/rest within a bar."""
 
     bar = models.ForeignKey(Bar, related_name="events", on_delete=models.CASCADE)

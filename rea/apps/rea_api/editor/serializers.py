@@ -19,6 +19,8 @@ from rest_framework import serializers
 from ..intonation.absolute.models import Lesson as AbsoluteLesson
 from ..intonation.relative.models import Lesson as RelativeLesson
 from ..intonation.relative.utils.note_parser import LETTER_PC
+from ..intonation.style import STYLE_FIELDS, Notehead, Separator
+from ..models import ScoreStyle
 from . import score
 
 # Note tokens the parser understands: a German letter, an optional octave
@@ -27,7 +29,7 @@ from . import score
 # a good token looks like.
 NOTE_TOKEN_HELP = (
     "a note is a German letter (c d e f g a h), an optional octave digit, "
-    "and an optional modifier (# b x r) — e.g. 'c1', 'f2#', 'e1r'"
+    "and an optional modifier (# b bb x r) — e.g. 'c1', 'f2#', 'e1r', 'h1bb'"
 )
 
 # Durations the notation renderer can draw.  Anything else would sound but
@@ -58,7 +60,7 @@ def validate_note_token(value):
         raise serializers.ValidationError(f"'{token}' is not a note — {NOTE_TOKEN_HELP}.")
     if rest and rest[0].isdigit():
         rest = rest[1:]
-    if rest and rest not in ("#", "b", "x", "r"):
+    if rest and rest not in ("#", "b", "bb", "x", "r"):
         raise serializers.ValidationError(f"'{token}' is not a note — {NOTE_TOKEN_HELP}.")
     return token
 
@@ -88,6 +90,16 @@ class EventSerializer(serializers.Serializer):
     is_rest = serializers.BooleanField(default=False)
     is_enharmonic = serializers.BooleanField(default=False)
     event_type = serializers.CharField(max_length=64, default="MusicNoteBundle")
+    # What is drawn after the note, and what shape its head is — neither has
+    # anything to do with the pitch, and both are refused rather than guessed
+    # at, because a separator nothing can draw would be a silent no-op on the
+    # page and a real pause in the playback.
+    separator = serializers.ChoiceField(
+        choices=Separator.choices, required=False, allow_blank=True, default="",
+    )
+    notehead = serializers.ChoiceField(
+        choices=Notehead.choices, required=False, allow_blank=True, default="",
+    )
 
     def validate_duration(self, value):
         if value not in DURATIONS:
@@ -119,6 +131,21 @@ class EventSerializer(serializers.Serializer):
             return attrs
         attrs["note_name"] = validate_note_token(attrs.get("note_name"))
         return attrs
+
+
+class StyleSerializer(serializers.ModelSerializer):
+    """A named style on its way in from the editor."""
+
+    class Meta:
+        model = ScoreStyle
+        fields = ("name", "description", "is_default") + tuple(STYLE_FIELDS)
+        extra_kwargs = {"description": {"required": False, "allow_blank": True}}
+
+    def validate_name(self, value):
+        name = (value or "").strip()
+        if not name:
+            raise serializers.ValidationError("A style needs a name.")
+        return name
 
 
 class BarSerializer(serializers.Serializer):

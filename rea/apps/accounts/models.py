@@ -1,12 +1,22 @@
 """
 User accounts for REA.
 
-Two roles share one login:
+Three roles share one login:
 
   student  practises, and every completed session is recorded so progress can
            be read back over time (see `PracticeSession`).
-  teacher  authors and edits exercises in the score editor (/editor/), and is
-           the only role the editing API will write for (see `permissions`).
+  teacher  writes dictations in the score editor (/editor/) and keeps drafts
+           of their own, and reads the answer key of any exercise so they can
+           check a student's work without sitting the exercise themselves.
+  admin    everything a teacher can do, and the curriculum itself: creating,
+           replacing and deleting the exercises every student is given, and
+           setting the house style.
+
+The split is between *one teacher's own material* and *the method*.  A
+dictation is a teacher's to write, change and throw away; a curriculum
+exercise belongs to everybody using the method, and saving one replaces it
+for every student practising it that minute.  Those are different acts with
+different blast radii, and until now one role did both.
 
 The project already had users when accounts were added, so the role lives on a
 `Profile` attached one-to-one to Django's own `User` rather than in a custom
@@ -22,6 +32,7 @@ from django.utils import timezone
 class Role(models.TextChoices):
     STUDENT = "student", "Student"
     TEACHER = "teacher", "Teacher"
+    ADMIN = "admin", "Administrator"
 
 
 class Difficulty(models.TextChoices):
@@ -56,7 +67,10 @@ class Profile(models.Model):
         max_length=16,
         choices=Role.choices,
         default=Role.STUDENT,
-        help_text="Students are tracked; teachers author exercises.",
+        help_text=(
+            "Students are tracked; teachers write dictations; "
+            "administrators own the curriculum."
+        ),
     )
     display_name = models.CharField(
         max_length=80,
@@ -78,8 +92,14 @@ class Profile(models.Model):
         return f"{self.user.username} ({self.get_role_display()})"
 
     @property
+    def is_admin(self):
+        return self.role == Role.ADMIN
+
+    @property
     def is_teacher(self):
-        return self.role == Role.TEACHER
+        """True for anyone who may author at all — an admin is a teacher with
+        the curriculum added, not a different kind of user."""
+        return self.role in (Role.TEACHER, Role.ADMIN)
 
     @property
     def is_student(self):

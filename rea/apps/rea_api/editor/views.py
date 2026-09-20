@@ -31,7 +31,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ...accounts.permissions import IsTeacher
+from ...accounts.permissions import IsAdmin, IsTeacher, is_admin, require_shelf
 from ..intonation.absolute.models import (
     Bar as AbsoluteBar,
     ChromaticBase,
@@ -43,8 +43,12 @@ from ..intonation.relative.models import (
     Lesson as RelativeLesson,
     ScaleModel,
 )
+from ..intonation.style import (
+    BarNumber, Notehead, NoteLabel, STYLE_FIELDS, Separator,
+)
+from ..models import ScoreStyle
 from . import score
-from .serializers import NOTE_TOKEN_HELP, ScoreDocumentSerializer
+from .serializers import NOTE_TOKEN_HELP, ScoreDocumentSerializer, StyleSerializer
 
 LESSON_MODELS = {"relative": RelativeLesson, "absolute": AbsoluteLesson}
 
@@ -176,7 +180,85 @@ class OptionsView(EditorView):
                 distinct(RelativeBar, "music_rhythm") + distinct(AbsoluteBar, "music_rhythm")
             )),
             "mode_chords": distinct(RelativeBar, "music_mode_chord"),
+            # What a note can carry that has no pitch in it, and the named
+            # sets of layout settings a teacher can apply to an exercise.
+            "separators": [{"value": v, "label": l} for v, l in Separator.choices],
+            "noteheads": [{"value": v, "label": l} for v, l in Notehead.choices],
+            "note_labels": [{"value": v, "label": l} for v, l in NoteLabel.choices],
+            "bar_numbers": [{"value": v, "label": l} for v, l in BarNumber.choices],
+            "styles": [style_document(style) for style in ScoreStyle.objects.all()],
+            # What this teacher may do, so the editor can offer it rather than
+            # offer it and then be refused.  The server is still the one that
+            # decides — see `require_shelf`.
+            "is_admin": is_admin(request.user),
+            "shelves": (
+                ["", "draft", "dictation"] if is_admin(request.user) else ["draft", "dictation"]
+            ),
         })
+
+
+def style_document(style):
+    """One named style, as the editor reads it."""
+    document = {
+        "id": style.pk, "name": style.name,
+        "description": style.description, "is_default": style.is_default,
+    }
+    document.update(style.values())
+    return document
+
+
+class StylesView(EditorView):
+    """The named styles, and the making of new ones.
+
+    A style is saved *from* an exercise — a teacher sets an exercise up until
+    it looks right and then says "keep this as a style", which is the only
+    moment they actually know what they want the style to be.  There is no
+    separate style editor, and that is the point: the preview for a style is
+    the exercise in front of them.
+    """
+
+    def get(self, request):
+        return Response([style_document(s) for s in ScoreStyle.objects.all()])
+
+    # A style is the method's own look, shared by every exercise it is applied
+    # to, so making one is an administrator's act.  Reading them is not:
+    # a teacher applies a style to their dictation like anybody else.
+    def post(self, request):
+        if not is_admin(request.user):
+            return Response(
+                {"detail": "Only administrators can save a style."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        serializer = StyleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        name = serializer.validated_data["name"]
+        values = {f: serializer.validated_data[f] for f in STYLE_FIELDS}
+        values["description"] = serializer.validated_data.get("description", "")
+        values["is_default"] = serializer.validated_data.get("is_default", False)
+        # Saving over a style of the same name replaces it, because that is
+        # what a teacher means by saving "the house style" again.
+        style, created = ScoreStyle.objects.update_or_create(name=name, defaults=values)
+        return Response(
+            style_document(style),
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class StyleDetailView(EditorView):
+    """Delete a style.  Exercises made with it are untouched: applying a
+    style copies it, so nothing depends on the row still being there."""
+
+    permission_classes = [IsAdmin]
+
+    def delete(self, request, pk):
+        style = get_object_or_404(ScoreStyle, pk=pk)
+        if style.is_default:
+            return Response(
+                {"detail": "The house style cannot be deleted — make another one the house style first."},
+                status=400,
+            )
+        style.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class BrowseView(EditorView):
@@ -307,6 +389,14 @@ class ScoreDetailView(EditorView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        # Both ends of the move have to be allowed: the shelf the exercise is
+        # on now, because saving replaces what is there, and the shelf it is
+        # being saved onto, because that is where it ends up.  Checking only
+        # one of them would let a dictation be saved into the curriculum, or a
+        # curriculum exercise be quietly emptied on its way to a draft.
+        require_shelf(request.user, lesson.shelf)
+        require_shelf(request.user, data["meta"].get("shelf", lesson.shelf))
+
         try:
             with transaction.atomic():
                 for field, value in data["meta"].items():
@@ -328,6 +418,7 @@ class ScoreDetailView(EditorView):
         if not system:
             return Response({"detail": "Unknown system."}, status=400)
         lesson = self.get_lesson(system, pk)
+        require_shelf(request.user, lesson.shelf)
         name = lesson.display_name
         lesson.delete()
         return Response({"deleted": True, "name": name})
@@ -343,6 +434,7 @@ class ScoreCreateView(EditorView):
         serializer = ScoreDocumentSerializer(data=request.data, system=system)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        require_shelf(request.user, data["meta"].get("shelf", ""))
 
         kwargs = dict(data["meta"])
         if system == "relative":
@@ -393,6 +485,9 @@ class ScoreDuplicateView(EditorView):
             return Response({"detail": "Unknown system."}, status=400)
         model = lesson_model(system)
         source = get_object_or_404(model.objects.all(), pk=pk)
+        # A copy lands on the shelf its original is on, so copying a
+        # curriculum exercise adds one to the curriculum.
+        require_shelf(request.user, source.shelf)
         document = score.lesson_document(source, system)
 
         with transaction.atomic():
@@ -493,8 +588,10 @@ class BlankScoreView(EditorView):
                     "texture": "mono", "formula_name": "", "category": "",
                     "inversion": "", "interval_name": "", "part": "",
                     "variant": "", "source_file": "", "tempo": 86,
-                    "draw_only_note_heads": False, "default_rhythm": "FreeStyle",
-                    "mid_bar_time": 0.1, "shelf": "draft",
+                    "default_rhythm": "FreeStyle", "shelf": "draft",
+                    # A new exercise looks like the rest of the method until
+                    # somebody says otherwise.
+                    **score.house_style_values(),
                 },
                 "bars": [score.blank_bar(system, mode_chord)],
             }
@@ -511,9 +608,9 @@ class BlankScoreView(EditorView):
                     "inversion": "", "part": "", "phase": 0,
                     "exercise_number": 1, "exercise_type": "listening_model",
                     "timed": False, "chromatic": False, "source_file": "",
-                    "tempo": 86, "draw_only_note_heads": False,
-                    "default_rhythm": "FreeStyle", "mid_bar_time": 0.1,
+                    "tempo": 86, "default_rhythm": "FreeStyle",
                     "shelf": "draft",
+                    **score.house_style_values(),
                 },
                 "bars": [score.blank_bar(system, "C_Major")],
             }

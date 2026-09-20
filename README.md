@@ -125,6 +125,25 @@ Trains absolute pitch, so there are no keys — the hierarchy differs:
      pedagogical `phase`s — phase 1 presents the material melodically,
      phase 2 harmonically (simultaneous sounding).
 
+### How an exercise looks and is paced
+
+Layout and playback settings live on the lesson itself, declared once as an
+abstract model both domains inherit (`rea_api.intonation.style.StyledScore`):
+the gap between bars on the page and in the ear, bars per line, alignment,
+whether stems are drawn, whether every note is drawn as one value, what is
+written under each note, bar numbers, how long a separator lasts and whether
+notes ring through it and across the barline. Nearly all of them come from
+the source JSON and were dropped by the original import.
+
+A **style** (`rea_api.ScoreStyle`) is a named bundle of exactly those values,
+with one marked as the house style. Applying a style *copies* it onto the
+exercise — nothing stays linked, so editing a style never re-lays-out
+exercises somebody is already practising.
+
+Per note, `separator` (a breath, a phrase line, a tick) and `notehead` carry
+the two things a note can say about how it is drawn rather than what it
+sounds.
+
 ### Shared model pattern
 
 In both domains a `Bar` is owned by **either** the reference model
@@ -136,8 +155,9 @@ keys — one `Bar` model serves both. `MusicEvent` stores the resolved
 
 Tokens use German letters (`h` = B-natural, `b` = flat *modifier*):
 
-`<letter><octave?><modifier?>` where modifier ∈ `# b x r`
-(`x` = double-sharp, `r` = naturalised/"raised" in flat minor keys). When
+`<letter><octave?><modifier?>` where modifier ∈ `# b bb x r`
+(`x` = double-sharp, `bb` = double-flat, `r` = naturalised/"raised" in flat
+minor keys). When
 `is_enharmonic` is true the note inherits its alteration from the key
 signature (`incdec`). See `rea/apps/rea_api/intonation/relative/utils/note_parser.py`.
 
@@ -169,14 +189,25 @@ writers are the teacher-only editor endpoints under `/api/editor/`.
 
 **Editor** (`/api/editor/`, teachers only — `IsTeacher`):
 - `options/` — every dropdown's contents, read from the library itself (keys,
-  categories, spans, exercise types, clefs, rhythms, …).
+  categories, spans, exercise types, clefs, rhythms, separators, noteheads,
+  styles, …), plus `is_admin` / `shelves` saying what this teacher may write.
 - `browse/` — id + name + bar count for exercises matching the picker's
   facets and a free-text search (each word narrows, any field may match).
-- `<system>/blank/` — a starting document with the importers' defaults.
+- `<system>/blank/` — a starting document with the importers' defaults and
+  the house style.
 - `<system>/scores/` — `POST` creates; `<system>/scores/<id>/` `GET`s,
   `PUT`s (replaces the whole score) and `DELETE`s;
   `<system>/scores/<id>/duplicate/` copies one under a free variant /
   exercise number.
+- `styles/` — the named layout styles; `POST` keeps one (administrators
+  only), `styles/<id>/` `DELETE`s it.
+
+**Who may write what.** Three roles (`accounts.Role`): a *student* practises;
+a *teacher* writes dictations and their own drafts; an *administrator* owns
+the curriculum — filing into it, replacing one of its exercises, deleting one,
+and keeping the house style. Every write checks the shelf it lands on
+(`accounts.permissions.require_shelf`), both the one an exercise is on now and
+the one it is being saved onto.
 
 The editor's unit of work is the **whole score** — lesson meta plus every bar
 and event — rewritten in one transaction. Bar and event indices come from
@@ -266,22 +297,38 @@ measuring, the row wrapping, the accidental carry rules and the drawing;
 `notationRenderer` (practice) and `editor/scoreCanvas` (editor) each add only
 their own interaction layer on top, so the two views are pixel-identical.
 
-What is drawn is deliberately spare: five lines, barlines and noteheads. No
-clef, no time signature, no key signature, and no stems, flags or beams — the
-last three hidden by one rule on the `svg.rea-score` class every score
-carries. These are intonation exercises, so the eye belongs on where the note
-sits. Rhythm is still real in playback and editable in the editor's
-inspector; it is simply not notated. With no key signature drawn, a notehead
-carries only the accidental in its own token — a written `f` in G major shows
-plain but still *sounds* F♯ (the pitch is resolved from the key server-side,
-and the editor's inspector names the sounding pitch).
+What is drawn is deliberately spare: five lines, barlines, noteheads, and the
+two things a musician needs before reading any of them — the clef, and the key
+signature the bar is in (taken from its own `music_mode_chord`, so a relative
+exercise gets its sharps or flats and every absolute one, being in C, gets
+none). No time signature: these bars are phrases, not metrical measures. Stems,
+flags and beams are hidden when the exercise says `draw_only_note_heads`, which
+the house style does — these are intonation exercises, so the eye belongs on
+where the note sits, and rhythm stays real in playback and editable in the
+inspector.
+
+Accidentals are read against the signature the way a musician reads them: an
+`f` in G major is the F♯ the key already promised and is drawn plain, and an
+`fr` cancels it and is drawn with a natural.
+
+An exercise spanning more than an octave and a fourth below A3 is drawn on a
+**grand staff** — two staves braced together, one voice, each note on the one
+it sits better on. The extended exercises cover two and three octaves, and on
+one stave the bottom of that is four ledger lines down.
 
 Two pages share that stack:
 
-- **`/`** — the practice app (chapter map, lessons, singing).
+- **`/`** — the practice app (chapter map, lessons, singing). The exercise can
+  be read from the stave, as scale degrees, or on a **piano keyboard** or
+  **guitar neck** — a guessing round answered in the picture the student
+  already thinks in. Right-clicking bars singles them out, and every session
+  is then built from those bars alone. Teachers get an **answer key** button
+  nobody else sees.
 - **`/editor/`** — the **score editor**, for teachers only. Library on the
   left, an editable stave in the middle, property panels on the right. Notes
-  are written by clicking empty staff at the pitch you want, dragged
+  are written by double-clicking empty staff at the pitch you want (a single
+  click selects the bar, a click on a notehead selects the note, and a
+  right-click gives the properties of whichever was pointed at), dragged
   vertically to re-pitch, `Alt`-dragged sideways to change **when they sound**
   and `Alt`+`Shift`-dragged sideways to change **where they are drawn**; the
   keyboard can do all of it (press `?` or *Shortcuts* for the sheet). Notes can

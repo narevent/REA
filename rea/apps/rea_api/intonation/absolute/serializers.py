@@ -1,5 +1,7 @@
 from rest_framework import serializers
 
+from ..style import STYLE_FIELDS
+
 from .models import Bar, ChromaticBase, Lesson, MusicEvent
 
 
@@ -86,8 +88,10 @@ class LessonSummarySerializer(serializers.ModelSerializer):
             "id", "base", "texture", "category", "span", "grades",
             "quality", "interval_size", "inversion", "part", "phase",
             "exercise_number", "exercise_type", "timed", "chromatic",
-            "source_file", "tempo", "draw_only_note_heads",
-            "default_rhythm", "mid_bar_time",
+            "source_file", "tempo", "default_rhythm",
+            # How it is laid out and paced, so a list can show an exercise
+            # the way it will be practised — see `intonation.style`.
+            *STYLE_FIELDS,
             "display_name", "formula_name", "variant",
             "key_model", "key_model_name",
         )

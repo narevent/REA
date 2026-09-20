@@ -50,6 +50,12 @@ class RawEvent:
     volume: int = 80
     note: Optional[NoteBundle] = None
     event_type: str = "MusicNoteBundle"
+    # The mark drawn after the note.  The source writes it as
+    # ``{"separator": {"separator_type": "apostrophe"}}`` and the library is
+    # full of them — a breath between two phrases of a formula — and until the
+    # schema had a field for it, every one was thrown away on the way in.
+    separator: str = ""
+    notehead: str = ""
 
 
 @dataclass
@@ -134,6 +140,8 @@ def parse_music_strain(data: dict) -> RawMusicStrain:
                     volume=int(ev.get("volume", 80) or 80),
                     note=note,
                     event_type=etype,
+                    separator=str((ev.get("separator") or {}).get("separator_type", "") or ""),
+                    notehead=str(ev.get("notehead", "") or ""),
                 )
             )
         strain.bars.append(raw_bar)

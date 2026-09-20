@@ -131,4 +131,20 @@ export const EditorAPI = {
   remove(system, id) {
     return request(`${BASE}/${system}/scores/${id}/`, { method: "DELETE" });
   },
+
+  /** The named layout styles a teacher can apply to an exercise. */
+  styles() {
+    return request(`${BASE}/styles/`);
+  },
+
+  /** Keep the settings on screen as a named style, replacing one of the same
+   *  name.  The exercise is not touched: a style is a copy, not a link. */
+  saveStyle(style) {
+    return request(`${BASE}/styles/`, { method: "POST", body: style });
+  },
+
+  /** Forget a style.  Exercises made with it keep their settings. */
+  removeStyle(id) {
+    return request(`${BASE}/styles/${id}/`, { method: "DELETE" });
+  },
 };
