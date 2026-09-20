@@ -32,7 +32,8 @@
  */
 
 import {
-  keyAccidentalCount, keyAccidentals, modeChordToVexKey, noteNameToVexflow, parseNoteToken,
+  keyAccidentalCount, keyAccidentals, modeChordToVexKey, noteNameToVexflow,
+  noteTokenToMidi, parseNoteToken,
 } from "../notation.js?v=165";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
@@ -241,6 +242,42 @@ const VF_SPACE_ABOVE_PX = 40;
 /** Extra room above the top row for a tuplet bracket and its number. */
 const TUPLET_HEADROOM = 22;
 
+/**
+ * The grand staff: two staves, one voice.
+ *
+ * An extended exercise covers two or three octaves, and on one stave the
+ * bottom of it is four ledger lines under the staff — countable, in
+ * principle, and not readable at the speed an intonation exercise is read
+ * at.  A pianist's answer is two staves braced together with the music
+ * crossing between them, and that is what this draws: the *same* single
+ * voice, its notes sent to whichever stave they sit better on.
+ *
+ * It is decided by the music rather than by a setting, because it is not a
+ * preference — an exercise that needs it cannot be read without it, and one
+ * that does not would only be made emptier by it.  A score reaches for it
+ * when it spans more than an octave and a fourth *and* goes below A3, which
+ * is where the ledger lines start to pile up underneath a treble stave.
+ */
+const GRAND_SPAN = 16;          // semitones
+const GRAND_FLOOR = 57;         // A3
+const GRAND_DROP = 78;          // pixels between the two staves' first lines
+const GRAND_SPLIT = 60;         // middle C: at or above it, the upper stave
+
+/** Whether a score is written across two staves. */
+export function needsGrandStaff(bars) {
+  let lowest = null;
+  let highest = null;
+  (bars || []).forEach((bar) => (bar.notes || []).forEach((n) => {
+    if (n.is_rest || !n.name) return;
+    const midi = noteTokenToMidi(parseNoteToken(n.name));
+    if (midi == null) return;
+    if (lowest == null || midi < lowest) lowest = midi;
+    if (highest == null || midi > highest) highest = midi;
+  }));
+  if (lowest == null) return false;
+  return (highest - lowest) > GRAND_SPAN && lowest < GRAND_FLOOR;
+}
+
 /** VexFlow, however the vendored build exposed itself. */
 export function resolveVexFlow() {
   const candidates = [window.VexFlow, window.Vex && window.Vex.Flow, window.Vex];
@@ -317,9 +354,11 @@ function commonDuration(bars) {
  * with a notehead; the barlines go through it, because that is what they
  * mean.
  */
-function drawSeparators(context, stave, notes, look) {
+function drawSeparators(context, stave, notes, look, bass) {
   const top = stave.getYForLine(0);
-  const bottom = stave.getYForLine(4);
+  // Through both staves when there are two: a barline that stopped halfway
+  // down a grand staff would read as a different mark entirely.
+  const bottom = (bass || stave).getYForLine(4);
   notes.forEach((note, index) => {
     const kind = note.reaSeparator;
     if (!kind) return;
@@ -408,9 +447,9 @@ export function noteLabelText(note, kind, keyMap) {
 }
 
 /** Write the style's label under each note in a bar. */
-function drawNoteLabels(context, stave, notes, look, keyMap) {
+function drawNoteLabels(context, stave, notes, look, keyMap, bass) {
   if (!look.noteLabel) return;
-  let floor = stave.getYForLine(4);
+  let floor = (bass || stave).getYForLine(4);
   notes.forEach((note) => {
     try {
       (note.getYs() || []).forEach((y) => { floor = Math.max(floor, y); });
@@ -449,7 +488,11 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
   if (!VF) return null;
 
   const look = scoreStyle(style);
-  const rowHeight = METRICS.ROW_HEIGHT + rowExtra;
+  // Two staves take two staves' worth of room, and every row on the page
+  // takes it — a score that changes height between its lines reads as two
+  // scores.
+  const grand = needsGrandStaff(bars);
+  const rowHeight = METRICS.ROW_HEIGHT + rowExtra + (grand ? GRAND_DROP : 0);
 
   // Every note drawn as the same value, when the exercise asks for it: these
   // are intonation exercises, and one written in sixteenths for the sake of
@@ -604,6 +647,35 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
       } catch (e) { /* an unknown clef or key is not worth losing the score over */ }
     }
     stave.setContext(context).draw();
+
+    // The lower stave of a grand staff, in the bass clef, braced to the upper
+    // one.  Its notes start at exactly the same x — a bass clef is a
+    // different width from a treble one, and without this the two staves
+    // would disagree by a few pixels about where the bar's first note is,
+    // which on a chord reads as a mistake.
+    let bass = null;
+    if (grand) {
+      bass = new VF.Stave(
+        placement[i].x, placement[i].y + GRAND_DROP - VF_SPACE_ABOVE_PX, barWidths[i],
+      );
+      if (showHead[i]) {
+        try {
+          bass.addClef("bass");
+          if (heads[i].key) bass.addKeySignature(heads[i].key);
+        } catch (e) { /* as above */ }
+      }
+      bass.setContext(context).draw();
+      bass.setNoteStartX(Math.max(stave.getNoteStartX(), bass.getNoteStartX()));
+      stave.setNoteStartX(bass.getNoteStartX());
+      try {
+        const brace = new VF.StaveConnector(stave, bass);
+        brace.setType(showHead[i] ? VF.StaveConnector.type.BRACE : VF.StaveConnector.type.SINGLE_LEFT);
+        brace.setContext(context).draw();
+        const line = new VF.StaveConnector(stave, bass);
+        line.setType(VF.StaveConnector.type.SINGLE_RIGHT);
+        line.setContext(context).draw();
+      } catch (e) { /* the brace is chrome; the staves are the score */ }
+    }
     const noteStart = globalIndex;
 
     // Per-bar text label (a Roman-numeral harmonic function, a chord name)
@@ -633,6 +705,12 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
     const staveNotes = [];
     (bar.notes || []).forEach((n) => {
       const durType = durationToType(drawnDuration(n));
+      // On a grand staff a note belongs to the stave it reads better on:
+      // middle C and up on the treble, below it on the bass.  One voice, two
+      // staves — the notes are not divided into parts, they simply cross.
+      const midi = (!n.is_rest && n.name) ? noteTokenToMidi(parseNoteToken(n.name)) : null;
+      const onBass = !!(grand && midi != null && midi < GRAND_SPLIT);
+      const clef = onBass ? "bass" : heads[i].clef;
       let note;
       if (n.is_rest || !n.name) {
         note = new VF.StaveNote({ keys: ["b/4"], duration: durType + "r", clef: heads[i].clef });
@@ -646,11 +724,11 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
         try {
           note = new VF.StaveNote({
             keys: [head ? `${key}/${head}` : key],
-            duration: durType, clef: heads[i].clef, auto_stem: true,
+            duration: durType, clef, auto_stem: true,
           });
         } catch (e) {
           note = new VF.StaveNote({
-            keys: [key], duration: durType, clef: heads[i].clef, auto_stem: true,
+            keys: [key], duration: durType, clef, auto_stem: true,
           });
         }
         // Drawn from what the note *sounds* against what the stave has said
@@ -678,6 +756,10 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
         ? { num: Number(n.tuplet_num), den: Number(n.tuplet_den) } : null;
       note.reaSeparator = n.separator || "";
       note.reaLabel = n;
+      // Which of the two staves it is drawn on.  Set on the note rather than
+      // handed to `voice.draw`, because the voice would set one stave on all
+      // of them — see the draw call below.
+      if (grand) note.setStave(onBass ? bass : stave);
       staveNotes.push(note);
       globalIndex += 1;
     });
@@ -724,9 +806,9 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
     if (staveNotes.length) {
       const voice = new VF.Voice({ num_beats: 4, beat_value: 4 }).setStrict(false);
       voice.addTickables(staveNotes);
-      formatted.push({ voice, stave, notes: staveNotes, noteStart, barIndex: i });
+      formatted.push({ voice, stave, bass, notes: staveNotes, noteStart, barIndex: i });
     } else {
-      formatted.push({ voice: null, stave, notes: [], noteStart, barIndex: i });
+      formatted.push({ voice: null, stave, bass, notes: [], noteStart, barIndex: i });
     }
   });
 
@@ -754,10 +836,13 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
     applyVisualOffset(note, note.reaVisualOffset);
   }));
 
-  formatted.forEach(({ voice, stave }) => voice && voice.draw(context, stave));
-  formatted.forEach(({ notes, stave }) => drawSeparators(context, stave, notes, look));
-  formatted.forEach(({ notes, stave, barIndex }) => drawNoteLabels(
-    context, stave, notes, look, keyAccidentals(heads[barIndex].key),
+  // Drawn without naming a stave when the score is on two of them: the voice
+  // would otherwise set that one stave on every note, and the notes have
+  // already said which of the two they are on.
+  formatted.forEach(({ voice, stave }) => voice && (grand ? voice.draw(context) : voice.draw(context, stave)));
+  formatted.forEach(({ notes, stave, bass }) => drawSeparators(context, stave, notes, look, bass));
+  formatted.forEach(({ notes, stave, bass, barIndex }) => drawNoteLabels(
+    context, stave, notes, look, keyAccidentals(heads[barIndex].key), bass,
   ));
 
   // Bar numbers, where the style asks for them: on every bar, or once at the
@@ -810,6 +895,10 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
   const barEntries = formatted.map((f, i) => ({
     barIndex: i,
     stave: f.stave,
+    // The lower stave, when there is one.  Everything that measures a bar's
+    // height — the editor's hit area, its selection frame — has to reach down
+    // to this one rather than stopping at the upper stave's bottom line.
+    bass: f.bass || null,
     staveEl: staveGroups[i] || null,
     x: placement[i].x,
     y: placement[i].y,
@@ -821,6 +910,6 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
 
   return {
     VF, context, svg, width: availWidth, height,
-    bars: barEntries, notes: noteEntries, rows: rows.length,
+    bars: barEntries, notes: noteEntries, rows: rows.length, grand,
   };
 }

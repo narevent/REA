@@ -145,7 +145,7 @@ export class ScoreCanvas {
       barIndex: entry.barIndex, noteIndex: entry.noteIndex, el: entry.el,
     }));
     this.barBoxes = drawn.bars.map((bar) => ({
-      barIndex: bar.barIndex, stave: bar.stave, staveEl: bar.staveEl,
+      barIndex: bar.barIndex, stave: bar.stave, bass: bar.bass, staveEl: bar.staveEl,
       x: bar.x, y: bar.y, width: bar.width, row: bar.row,
     }));
 
@@ -182,7 +182,12 @@ export class ScoreCanvas {
    *  and a click down there has to be able to write a note. */
   _barSpan(box, reach = 34) {
     const top = box.stave ? box.stave.getYForLine(0) : box.y;
-    const bottom = box.stave ? box.stave.getYForLine(4) : box.y + 40;
+    // The bottom is the *lower* stave's when the score is on two of them —
+    // otherwise the hit area, the selection frame and the annotation lanes
+    // would all stop in the gap between the staves, with half the bar's
+    // notes below them.
+    const floor = box.bass || box.stave;
+    const bottom = floor ? floor.getYForLine(4) : box.y + 40;
     return { top: top - reach, bottom: bottom + reach, line0: top, line4: bottom };
   }
 
@@ -509,12 +514,21 @@ export class ScoreCanvas {
     if (!box || !box.stave) return "c1";
     const svgRect = this.svg.getBoundingClientRect();
     const y = clientY - svgRect.top;
-    const top = box.stave.getYForLine(0);
-    const lineHeight = box.stave.getYForLine(1) - top;
+    const bar = this.doc && this.doc.bars ? this.doc.bars[box.barIndex] : null;
+    // On a grand staff the click belongs to whichever stave it is nearer —
+    // the two read the same height as different notes, and the boundary
+    // between them is simply halfway.
+    let stave = box.stave;
+    let clef = vexClef(bar && bar.music_clef);
+    if (box.bass) {
+      const middle = (box.stave.getYForLine(4) + box.bass.getYForLine(0)) / 2;
+      if (y > middle) { stave = box.bass; clef = "bass"; }
+    }
+    const top = stave.getYForLine(0);
+    const lineHeight = stave.getYForLine(1) - top;
     if (!lineHeight) return "c1";
     const steps = Math.round(((y - top) / lineHeight) * 2);   // half-lines below the top line
-    const bar = this.doc && this.doc.bars ? this.doc.bars[box.barIndex] : null;
-    const topLine = CLEF_TOP_LINE[vexClef(bar && bar.music_clef)] ?? TOP_LINE_DIATONIC;
+    const topLine = CLEF_TOP_LINE[clef] ?? TOP_LINE_DIATONIC;
     const diatonic = topLine - steps;
     const octave = Math.floor(diatonic / 7);
     if (octave < 0 || octave > 9) return "c1";
@@ -627,6 +641,8 @@ export class ScoreCanvas {
     const offsetDrag = event.altKey && !event.shiftKey;
     const visualDrag = event.altKey && event.shiftKey;
     const box = this.barBoxes.find((b) => b.barIndex === note.barIndex);
+    // The same on either stave of a grand staff, so a drag that crosses
+    // between them still moves one step per half-line.
     const lineHeight = box && box.stave
       ? (box.stave.getYForLine(1) - box.stave.getYForLine(0)) : 10;
 
