@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=167" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=167" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=168" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=168" />
 </head>
 <body class="ed-body">
   <header class="app-header">
@@ -64,7 +64,7 @@
           <dt>Backspace</dt><dd>rub out the note before the caret</dd>
           <dt>Delete</dt><dd>delete what is selected</dd>
           <dt>Esc</dt><dd>drop the selection</dd>
-          <dt>Tuplets</dt><dd>select the notes, then press 3, 5, 6 or 7 in the toolbar — as many notes as the tuplet has, or a multiple of it</dd>
+          <dt>Tuplets</dt><dd>select a note and press 3, 5, 6 or 7 in the toolbar to divide it into that many, in the time it already takes; select a run that is already the right length — three notes for a triplet, or six for two — to mark those instead</dd>
         </dl>
         <h2>Changing notes</h2>
         <dl>
@@ -107,8 +107,8 @@
     <aside class="ed-panel ed-panel-right" id="ed-inspector"></aside>
   </main>
 
-  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=167"></script>
-  <script type="module" src="{% static 'rea_frontend/js/editor/editor.js' %}?v=167"></script>
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=168"></script>
+  <script type="module" src="{% static 'rea_frontend/js/editor/editor.js' %}?v=168"></script>
   <script>
     // The one behaviour that belongs to the page rather than the score: the
     // shortcut sheet.  Keeping it here means the editor module never has to

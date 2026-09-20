@@ -11,8 +11,8 @@
  * without depending on the main app state.
  */
 
-import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=167";
-import { getTempoScale } from "./tempo.js?v=167";
+import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=168";
+import { getTempoScale } from "./tempo.js?v=168";
 
 const DEFAULT_TEMPO = 80;
 // The event's stored offset is a *playback* offset — it moves when a note
