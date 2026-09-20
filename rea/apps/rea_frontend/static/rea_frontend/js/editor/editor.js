@@ -154,6 +154,28 @@ class Editor {
     this.status("Ready. Open a branch on the left to find an exercise, or write one here.");
   }
 
+  /**
+   * What this teacher may write, which is not the same for everybody.
+   *
+   * An administrator owns the curriculum: they may save into it, replace one
+   * of its exercises and delete one.  A teacher writes dictations and their
+   * own drafts — material nobody else is practising — and the editor offers
+   * them exactly that rather than offering everything and being refused by
+   * the server afterwards.  The server still decides (`require_shelf`); this
+   * is only about not asking a teacher to find out the hard way.
+   */
+  get isAdmin() {
+    return !!(this.options && this.options.is_admin);
+  }
+
+  /** Whether the open exercise is one this teacher may replace or delete. */
+  canWriteOpen() {
+    if (!this.doc) return false;
+    if (this.isAdmin) return true;
+    const shelf = this.doc.doc.meta.shelf || "";
+    return shelf === "draft" || shelf === "dictation";
+  }
+
   // -- document lifecycle ------------------------------------------------
 
   /** Adopt a server document as the score being edited. */
@@ -561,7 +583,13 @@ class Editor {
     const system = this.doc.system;
     const meta = this.doc.doc.meta;
     const relative = system === "relative";
-    const places = destinations().filter((d) => d.ctx.system === system);
+    // A teacher who does not own the curriculum is offered the two shelves
+    // that are theirs, and no places in the method at all — a list of a
+    // hundred and fifty destinations that will all be refused is worse than
+    // no list.
+    const places = this.isAdmin
+      ? destinations().filter((d) => d.ctx.system === system)
+      : [];
     const keys = (this.options && this.options.keys) || [];
 
     const answer = await this.askForm({
@@ -578,7 +606,9 @@ class Editor {
             value: `shelf:${shelf.value}`, label: shelf.label,
           })).concat(places.map((d, i) => ({ value: String(i), label: d.label }))),
           value: meta.shelf ? `shelf:${meta.shelf}` : this._currentDestination(places, meta),
-          hint: "Any category in the curriculum, the drafts, or the dictations.",
+          hint: this.isAdmin
+            ? "Any category in the curriculum, the drafts, or the dictations."
+            : "Your dictations, or your drafts. The curriculum itself is an administrator's to change.",
         },
         relative ? {
           key: "key_model", label: "Key",
@@ -794,12 +824,15 @@ class Editor {
     // an exercise students are already practising: the safe answer should be
     // the one under the cursor.
     const isNew = this.doc && this.doc.isNew;
+    const mine = this.canWriteOpen();
     group(0, [
       button("Save as…",
         "Save what is on screen as a new exercise — choose where it goes, or leave it in the drafts (⌘/Ctrl+Shift+S)",
         () => this.saveAs(), { primary: true, disabled: !doc }),
-      button("Save", `Replace “${this.doc ? this.doc.doc.display_name : ""}” with what is on screen — students get it straight away (⌘/Ctrl+S)`,
-        () => this.save(), { disabled: !doc || isNew }),
+      button("Save", mine
+        ? `Replace “${this.doc ? this.doc.doc.display_name : ""}” with what is on screen — students get it straight away (⌘/Ctrl+S)`
+        : "This exercise is part of the curriculum — only an administrator can replace it. Save it as a dictation instead.",
+        () => this.save(), { disabled: !doc || isNew || !mine }),
     ]);
 
     group(0, [
@@ -829,8 +862,14 @@ class Editor {
     // reached rarely and two of them are hard to take back.
     group(0, [
       button("Import MIDI…", "Replace the notes with those from a MIDI file", () => this.importMidi(), { quiet: true, disabled: !doc }),
-      button("Copy exercise", "Save a copy of this exercise and open it", () => this.duplicateExercise(), { quiet: true, disabled: !doc }),
-      button("Delete exercise", "Delete this exercise", () => this.deleteExercise(), { quiet: true, disabled: !doc }),
+      button("Copy exercise", mine
+        ? "Save a copy of this exercise and open it"
+        : "A copy would land in the curriculum, which only an administrator can add to.",
+        () => this.duplicateExercise(), { quiet: true, disabled: !doc || !mine }),
+      button("Delete exercise", mine
+        ? "Delete this exercise"
+        : "Only an administrator can delete a curriculum exercise.",
+        () => this.deleteExercise(), { quiet: true, disabled: !doc || !mine }),
     ], "ed-tool-rare");
 
     // ---- row 2: writing notes -------------------------------------------

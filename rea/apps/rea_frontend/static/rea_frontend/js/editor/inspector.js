@@ -751,10 +751,15 @@ export class Inspector {
       if (style && this.hooks.onStyle) this.hooks.onStyle(style);
     });
     picker.appendChild(select);
-    const keep = element("button", "ed-btn ed-btn-quiet", "Save as style…");
-    keep.type = "button";
-    keep.addEventListener("click", () => this.hooks.onSaveStyle && this.hooks.onSaveStyle());
-    picker.appendChild(keep);
+    // Keeping a style is an administrator's act — it is the method's own
+    // look, and every exercise it is applied to takes it.  Applying one is
+    // anybody's.
+    if (options.is_admin) {
+      const keep = element("button", "ed-btn ed-btn-quiet", "Save as style…");
+      keep.type = "button";
+      keep.addEventListener("click", () => this.hooks.onSaveStyle && this.hooks.onSaveStyle());
+      picker.appendChild(keep);
+    }
     group.appendChild(picker);
     group.appendChild(element(
       "p", "ed-hint",

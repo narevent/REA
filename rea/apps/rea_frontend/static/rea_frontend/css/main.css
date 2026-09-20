@@ -1814,3 +1814,15 @@ svg.rea-score .vf-bar-focus rect { stroke: var(--accent); }
 .inst .kb-key.acc-good, .inst .gt-fret.acc-good .gt-dot { border-color: var(--good); }
 .inst .kb-key.acc-ok, .inst .gt-fret.acc-ok .gt-dot { border-color: var(--warn); }
 .inst .kb-key.acc-weak, .inst .gt-fret.acc-weak .gt-dot { border-color: var(--bad); }
+
+/* The teacher's answer key: what the bars of this exercise actually are, so a
+   student's result can be checked without sitting the exercise. */
+.answer-key { font-size: 12px; }
+.answer-key h4 { margin: 0 0 8px; font-size: 13px; }
+.answer-key table { border-collapse: collapse; width: 100%; max-width: 420px; }
+.answer-key th, .answer-key td {
+  text-align: left; padding: 4px 10px 4px 0;
+  border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums;
+}
+.answer-key th { color: var(--muted); font-weight: 500; }
+.answer-key p { margin: 8px 0 0; color: var(--muted); }

@@ -31,7 +31,13 @@ G_MAJOR_SIGNATURE = [{"name": "f2#", "letter": "f", "offset": 1}]
 
 
 class EditorTestCase(TestCase):
-    """A key, a chromatic base and a teacher — the minimum to author anything."""
+    """A key, a chromatic base and the two authoring roles.
+
+    `self.teacher` is an administrator, because most of these tests are about
+    the curriculum and the curriculum is an administrator's.  The narrower
+    role has its own name here (`self.dictation_teacher`) and its own tests
+    below — see `RoleTests`.
+    """
 
     def setUp(self):
         self.scale = ScaleModel.objects.create(mode="Major", reference_key="C_Major")
@@ -44,7 +50,8 @@ class EditorTestCase(TestCase):
             root_pitch_class=0, key_signature=[],
         )
         self.base = ChromaticBase.objects.create(name="Ap_12")
-        self.teacher = make_user("kovacs", Role.TEACHER)
+        self.teacher = make_user("kovacs", Role.ADMIN)
+        self.dictation_teacher = make_user("fischer", Role.TEACHER)
         self.student = make_user("sam", Role.STUDENT)
 
     def sign_in(self, user):
@@ -436,3 +443,115 @@ class BrowseAndCopyTests(EditorTestCase):
             lesson.bars.get().events.all()[1].pitch_class, 5,
             "the same written f is F natural once the exercise is in C major",
         )
+
+
+class RoleTests(EditorTestCase):
+    """What a teacher who is not an administrator may and may not write.
+
+    The line is between one teacher's own material and the method everybody
+    is taught from.  A dictation is theirs; a curriculum exercise is every
+    student's, and saving one replaces it for whoever is practising it that
+    minute.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.sign_in(self.dictation_teacher)
+
+    def test_teacher_reaches_the_editor(self):
+        self.assertEqual(self.client.get(reverse("editor-options")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("rea_frontend:editor")).status_code, 200)
+
+    def test_teacher_can_write_a_dictation(self):
+        payload = self.relative_payload()
+        payload["meta"]["shelf"] = "dictation"
+        response = self.post(reverse("editor-create", args=["relative"]), payload)
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(RelativeLesson.objects.get().shelf, "dictation")
+
+    def test_teacher_can_keep_a_draft(self):
+        payload = self.relative_payload()
+        payload["meta"]["shelf"] = "draft"
+        self.assertEqual(
+            self.post(reverse("editor-create", args=["relative"]), payload).status_code, 201
+        )
+
+    def test_teacher_cannot_file_into_the_curriculum(self):
+        response = self.post(
+            reverse("editor-create", args=["relative"]), self.relative_payload()
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(RelativeLesson.objects.count(), 0)
+
+    def test_teacher_cannot_replace_a_curriculum_exercise(self):
+        self.sign_in(self.teacher)
+        created = self.post(
+            reverse("editor-create", args=["relative"]), self.relative_payload()
+        ).json()
+        self.sign_in(self.dictation_teacher)
+        payload = self.relative_payload()
+        payload["meta"]["variant"] = "CHANGED"
+        response = self.put(
+            reverse("editor-detail", args=["relative", created["id"]]), payload
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(RelativeLesson.objects.get(pk=created["id"]).variant, "TEST")
+
+    def test_teacher_cannot_move_a_curriculum_exercise_onto_a_shelf(self):
+        """The other direction: a curriculum exercise emptied on its way out."""
+        self.sign_in(self.teacher)
+        created = self.post(
+            reverse("editor-create", args=["relative"]), self.relative_payload()
+        ).json()
+        self.sign_in(self.dictation_teacher)
+        payload = self.relative_payload()
+        payload["meta"]["shelf"] = "draft"
+        response = self.put(
+            reverse("editor-detail", args=["relative", created["id"]]), payload
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_teacher_cannot_delete_a_curriculum_exercise(self):
+        self.sign_in(self.teacher)
+        created = self.post(
+            reverse("editor-create", args=["relative"]), self.relative_payload()
+        ).json()
+        self.sign_in(self.dictation_teacher)
+        response = self.client.delete(
+            reverse("editor-detail", args=["relative", created["id"]])
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(RelativeLesson.objects.count(), 1)
+
+    def test_teacher_can_delete_their_own_dictation(self):
+        payload = self.relative_payload()
+        payload["meta"]["shelf"] = "dictation"
+        created = self.post(reverse("editor-create", args=["relative"]), payload).json()
+        response = self.client.delete(
+            reverse("editor-detail", args=["relative", created["id"]])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(RelativeLesson.objects.count(), 0)
+
+    def test_the_options_say_which_role_is_asking(self):
+        options = self.client.get(reverse("editor-options")).json()
+        self.assertFalse(options["is_admin"])
+        self.assertNotIn("", options["shelves"])
+        self.sign_in(self.teacher)
+        self.assertTrue(self.client.get(reverse("editor-options")).json()["is_admin"])
+
+    def test_only_an_administrator_keeps_a_style(self):
+        style = {
+            "name": "Worksheet", "mid_bar_space": 30, "bars_per_row": 4,
+            "align_to_center": True, "auto_align": False,
+            "draw_only_note_heads": True, "are_all_notes_same_duration": True,
+            "separator_space": 14, "note_label_type": "degree",
+            "bar_number_type": "row", "mid_bar_time": 0.2,
+            "mute_last_played_notes_after_bar_finishes": False,
+            "separator_time": 0.05, "separator_cancel_previous_note": False,
+        }
+        self.assertEqual(self.post(reverse("editor-styles"), style).status_code, 403)
+        self.sign_in(self.teacher)
+        response = self.post(reverse("editor-styles"), style)
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.json()["bars_per_row"], 4)

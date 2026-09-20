@@ -466,11 +466,33 @@ export class PracticeController {
     if (replay) replay.disabled = !(this._lastAnswerBar != null && !running);
   }
 
+  /**
+   * True when the person at the keyboard teaches.
+   *
+   * Read off the page rather than fetched, because it decides nothing: the
+   * only thing it changes is whether the answer key is offered.  Everything
+   * a teacher may actually *do* is checked on the server.
+   */
+  _isTeacher() {
+    const role = document.body && document.body.dataset ? document.body.dataset.role : "";
+    return role === "teacher" || role === "admin";
+  }
+
   /** Inline controls-row extras (e.g. listen repeat/random toggles). */
   _controlsExtras() {
-    if (!this.mode || this.mode.key !== "listen") return "";
+    // The answer key, for a teacher, in every chapter.  A teacher checking a
+    // student's work on a guessing exercise had no way to see what the right
+    // answers were except to sit the exercise themselves — nine rounds of
+    // clicking to find out what nine bars are, every time somebody asks.
+    const key = this._isTeacher()
+      ? '<button id="cfg-answers" type="button" class="btn btn-toggle">'
+        + glyph("info", 14) + "<span>Answer key</span></button>"
+      : "";
+    if (!this.mode || this.mode.key !== "listen") {
+      return key ? '<span class="ctrl-extras">' + key + "</span>" : "";
+    }
     const o = this.listenOpts;
-    return '<span class="ctrl-extras">' +
+    return '<span class="ctrl-extras">' + key +
       '<button id="cfg-repeat" type="button" class="btn btn-toggle' + (o.repeat ? " on" : "") + '">' + glyph("replay", 14) + '<span>Repeat</span></button>' +
       '<button id="cfg-random" type="button" class="btn btn-toggle' + (o.random ? " on" : "") + '">' + glyph("rounds", 14) + '<span>Random</span></button>' +
     "</span>";
@@ -478,6 +500,11 @@ export class PracticeController {
 
   /** Wire controls-row extras after the deck is in the DOM. */
   _wireControlsExtras() {
+    const answers = this.info.querySelector("#cfg-answers");
+    if (answers) answers.addEventListener("click", () => {
+      const on = answers.classList.toggle("on");
+      if (on) this._renderAnswerKey(); else this._prompt(this._readyHint());
+    });
     if (!this.mode || this.mode.key !== "listen") return;
     const rep = this.info.querySelector("#cfg-repeat");
     if (rep) rep.addEventListener("click", () => {
@@ -572,6 +599,34 @@ export class PracticeController {
   }
 
   _setLegend(text) { this.legend.textContent = text; }
+
+  /**
+   * What the exercise's bars actually are — the teacher's answer key.
+   *
+   * Every bar, its degree and the note it sounds, read straight off the same
+   * `barSteps` the rounds are built from, so it cannot drift from what a
+   * student is being asked.  Shown in the report panel rather than on the
+   * stave: the stave is the student's answer sheet, and writing the answers
+   * onto it would leave them there for the next person who sits down.
+   */
+  _renderAnswerKey() {
+    const rows = (this.barSteps || []).map((bar, index) => {
+      const pitches = barPitches(bar);
+      const degrees = barDegrees(bar);
+      const notes = pitches.map((midi) => midiToName(midi)).join(" ");
+      return '<tr><td>' + (index + 1) + "</td><td>"
+        + (degrees.filter((d) => d !== "" && d != null).join(" ") || "—")
+        + "</td><td>" + (notes || "—") + "</td></tr>";
+    }).join("");
+    this._report(
+      '<div class="answer-key">'
+      + "<h4>Answer key</h4>"
+      + '<table><thead><tr><th>Bar</th><th>Degree</th><th>Notes</th></tr></thead>'
+      + "<tbody>" + rows + "</tbody></table>"
+      + "<p>Only teachers see this. Press the button again to put it away.</p>"
+      + "</div>",
+    );
+  }
 
   /** Mode-10 generation config.  (Listen options live in the controls row.) */
   _renderConfig() {

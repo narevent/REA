@@ -31,7 +31,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ...accounts.permissions import IsTeacher
+from ...accounts.permissions import IsAdmin, IsTeacher, is_admin, require_shelf
 from ..intonation.absolute.models import (
     Bar as AbsoluteBar,
     ChromaticBase,
@@ -187,6 +187,13 @@ class OptionsView(EditorView):
             "note_labels": [{"value": v, "label": l} for v, l in NoteLabel.choices],
             "bar_numbers": [{"value": v, "label": l} for v, l in BarNumber.choices],
             "styles": [style_document(style) for style in ScoreStyle.objects.all()],
+            # What this teacher may do, so the editor can offer it rather than
+            # offer it and then be refused.  The server is still the one that
+            # decides — see `require_shelf`.
+            "is_admin": is_admin(request.user),
+            "shelves": (
+                ["", "draft", "dictation"] if is_admin(request.user) else ["draft", "dictation"]
+            ),
         })
 
 
@@ -213,7 +220,15 @@ class StylesView(EditorView):
     def get(self, request):
         return Response([style_document(s) for s in ScoreStyle.objects.all()])
 
+    # A style is the method's own look, shared by every exercise it is applied
+    # to, so making one is an administrator's act.  Reading them is not:
+    # a teacher applies a style to their dictation like anybody else.
     def post(self, request):
+        if not is_admin(request.user):
+            return Response(
+                {"detail": "Only administrators can save a style."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = StyleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         name = serializer.validated_data["name"]
@@ -232,6 +247,8 @@ class StylesView(EditorView):
 class StyleDetailView(EditorView):
     """Delete a style.  Exercises made with it are untouched: applying a
     style copies it, so nothing depends on the row still being there."""
+
+    permission_classes = [IsAdmin]
 
     def delete(self, request, pk):
         style = get_object_or_404(ScoreStyle, pk=pk)
@@ -372,6 +389,14 @@ class ScoreDetailView(EditorView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        # Both ends of the move have to be allowed: the shelf the exercise is
+        # on now, because saving replaces what is there, and the shelf it is
+        # being saved onto, because that is where it ends up.  Checking only
+        # one of them would let a dictation be saved into the curriculum, or a
+        # curriculum exercise be quietly emptied on its way to a draft.
+        require_shelf(request.user, lesson.shelf)
+        require_shelf(request.user, data["meta"].get("shelf", lesson.shelf))
+
         try:
             with transaction.atomic():
                 for field, value in data["meta"].items():
@@ -393,6 +418,7 @@ class ScoreDetailView(EditorView):
         if not system:
             return Response({"detail": "Unknown system."}, status=400)
         lesson = self.get_lesson(system, pk)
+        require_shelf(request.user, lesson.shelf)
         name = lesson.display_name
         lesson.delete()
         return Response({"deleted": True, "name": name})
@@ -408,6 +434,7 @@ class ScoreCreateView(EditorView):
         serializer = ScoreDocumentSerializer(data=request.data, system=system)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
+        require_shelf(request.user, data["meta"].get("shelf", ""))
 
         kwargs = dict(data["meta"])
         if system == "relative":
@@ -458,6 +485,9 @@ class ScoreDuplicateView(EditorView):
             return Response({"detail": "Unknown system."}, status=400)
         model = lesson_model(system)
         source = get_object_or_404(model.objects.all(), pk=pk)
+        # A copy lands on the shelf its original is on, so copying a
+        # curriculum exercise adds one to the curriculum.
+        require_shelf(request.user, source.shelf)
         document = score.lesson_document(source, system)
 
         with transaction.atomic():
