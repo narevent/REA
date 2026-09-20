@@ -19,8 +19,8 @@
 import {
   DURATIONS, MODIFIERS, MODIFIER_LABELS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX,
   OFFSET_GAIN, describeNote, splitToken, buildToken,
-} from "./scoreDoc.js?v=168";
-import { labelWithDuration } from "./glyphs.js?v=168";
+} from "./scoreDoc.js?v=170";
+import { labelWithAccidental, labelWithDuration, labelWithNotehead } from "./glyphs.js?v=170";
 
 const MIXED = "—"; // em dash: several selected items, several values
 
@@ -83,10 +83,6 @@ const CLEF_CHOICES = [
   { value: "Tenor", label: "Tenor" },
   { value: "Soprano", label: "Soprano" },
 ];
-
-/** An accidental as its sign rather than its name: the row is read at a
- *  glance, and a glance does not read "double sharp". */
-const ACCIDENTAL_GLYPH = { null: "—", "#": "♯", b: "♭", bb: "𝄫", x: "𝄪", r: "♮" };
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -177,8 +173,13 @@ function buildControl(spec, value, commit) {
       const button = element("button", "ed-choice", option.label);
       button.type = "button";
       if (option.title) button.title = option.title;
-      // A note value is labelled with the note, not with its fraction.
+      // A note value is labelled with the note, not with its fraction, and a
+      // notehead with the shape rather than its name.
       if (option.duration != null) labelWithDuration(button, option.duration, option.label);
+      else if (option.notehead != null) labelWithNotehead(button, option.notehead, option.label);
+      else if (option.accidental !== undefined) {
+        labelWithAccidental(button, option.accidental, option.label);
+      }
       button.classList.toggle("is-on", !mixed && String(option.value) === String(value ?? ""));
       button.addEventListener("click", () => commit(option.value));
       wrap.appendChild(button);
@@ -421,7 +422,8 @@ export class Inspector {
         key: "__modifier", label: "Accidental", type: "buttons",
         options: MODIFIERS.map((m) => ({
           value: m === null ? "" : m,
-          label: ACCIDENTAL_GLYPH[m === null ? "null" : m],
+          accidental: m,
+          label: MODIFIER_LABELS[m === null ? "null" : m],
           title: MODIFIER_LABELS[m === null ? "null" : m],
         })),
         get: () => (token ? (token.modifier || "") : MIXED),
@@ -518,8 +520,14 @@ export class Inspector {
         hint: "Drawn after this note, and heard as the exercise's separator time.",
       },
       {
-        key: "notehead", label: "Notehead", type: "select",
-        options: (this.options && this.options.noteheads) || NOTEHEAD_FALLBACK,
+        // Six shapes, drawn.  A dropdown made a teacher read the word
+        // "diamond" to find out what the note would look like, which is a
+        // translation a row of the shapes themselves does not ask for.
+        key: "notehead", label: "Notehead", type: "buttons",
+        options: ((this.options && this.options.noteheads) || NOTEHEAD_FALLBACK)
+          .map((option) => Object.assign({}, option, {
+            notehead: option.value, title: option.label,
+          })),
       },
     ], events, commit);
 

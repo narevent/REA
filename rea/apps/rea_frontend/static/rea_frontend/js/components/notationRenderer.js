@@ -13,7 +13,7 @@
 
 import {
   NOTEHEAD_REACH, drawScore, durationToType, noteHeadYs, resolveVexFlow,
-} from "./staveLayout.js?v=168";
+} from "./staveLayout.js?v=170";
 
 /** Accuracy bands for `setNoteAccuracy`.  The thresholds match the per-note
  *  chips in the feedback row, so the stave and the report agree. */
