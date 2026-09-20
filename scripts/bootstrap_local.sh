@@ -487,8 +487,27 @@ if remote_run "$SUDO systemctl is-active --quiet rea" 2>/dev/null; then
 else
   warn "  gunicorn not active — check: ssh $HOST '$SUDO systemctl status rea'"
 fi
-remote_run "curl -fsS -o /dev/null -w 'local-nginx: HTTP %{http_code}\n' http://127.0.0.1/ || \
-            curl -fsS -o /dev/null -w 'local-gunicorn: HTTP %{http_code}\n' http://127.0.0.1:8000/ || true"
+# Asked the way a visitor asks.  Two details, both of which made a healthy
+# server look broken:
+#
+#   The Host header.  The app's nginx block is name-based on $REA_DOMAIN and
+#   is not the default server, so a request to 127.0.0.1 never reached it —
+#   it fell through to whatever Ubuntu's default site is and answered 404.
+#
+#   No -f.  The app requires a login, so / redirects: 302 is the healthy
+#   answer here and -f used to turn it into a failure at the first hop.
+smoke() {  # <label> <curl args...>
+  local label="$1"; shift
+  local code
+  code="$(remote_run "curl -sS -o /dev/null -w '%{http_code}' $*" 2>/dev/null | tr -d '\r')"
+  case "$code" in
+    2*|3*) ok "  $label: HTTP $code" ;;
+    "")    warn "  $label: no answer" ;;
+    *)     warn "  $label: HTTP $code" ;;
+  esac
+}
+smoke "nginx"    "-H 'Host: $REA_DOMAIN' http://127.0.0.1/"
+smoke "gunicorn" "http://127.0.0.1:8000/"
 
 ok "  app should now be live at http://$REA_DOMAIN/  (DNS must point here)."
 

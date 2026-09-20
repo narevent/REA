@@ -83,10 +83,6 @@ def import_key_model(data: dict, filename: str, *, clear: bool = True) -> KeyMod
         },
     )
 
-    if clear:
-        # Remove previous bars/events for an idempotent re-import.
-        KeyModel.objects.filter(name=key_name.display).delete()
-
     # Take the key signature from the first bar that has one.
     incdec_items: list = []
     for b in strain.bars:
@@ -95,17 +91,32 @@ def import_key_model(data: dict, filename: str, *, clear: bool = True) -> KeyMod
             break
     key_signature = _normalise_key_signature(incdec_items)
 
-    key_model = KeyModel.objects.create(
-        scale_model=scale_model,
+    # The key is *updated*, never replaced, and only its own bars are cleared.
+    #
+    # It used to be deleted and recreated, which is idempotent as far as the
+    # key itself goes and catastrophic beyond it: every lesson built on a key
+    # cascades from it, so re-importing the key models — the first thing every
+    # deploy does — silently deleted every relative lesson in the database.
+    # That was survivable while the tables were a mirror of the shipped JSON
+    # and the next step rebuilt them.  It stopped being survivable when the
+    # editor started writing to the same tables: a teacher's drafts, their
+    # dictations and their edits are not in any JSON file and do not come
+    # back.
+    key_model, _ = KeyModel.objects.update_or_create(
         name=key_name.display,
-        mode=key_name.mode,
-        root_pitch_class=key_name.root_pitch_class,
-        root_octave=1,
-        key_signature=key_signature,
-        default_rhythm=data.get("default_music_rhythm", "FreeStyle"),
-        draw_only_note_heads=data.get("draw_only_note_heads", True),
-        tempo=int(data.get("tempo", 4) or 4),
+        defaults={
+            "scale_model": scale_model,
+            "mode": key_name.mode,
+            "root_pitch_class": key_name.root_pitch_class,
+            "root_octave": 1,
+            "key_signature": key_signature,
+            "default_rhythm": data.get("default_music_rhythm", "FreeStyle"),
+            "draw_only_note_heads": data.get("draw_only_note_heads", True),
+            "tempo": int(data.get("tempo", 4) or 4),
+        },
     )
+    if clear:
+        key_model.bars.all().delete()
 
     intervals = _MODE_INTERVALS.get(key_name.mode, _MODE_INTERVALS["Major"])
     seen_degrees: set[tuple[int, str]] = set()

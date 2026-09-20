@@ -148,8 +148,13 @@ def import_lesson(data: dict, filename: str, *, clear: bool = True) -> Optional[
     formula, variant = _detect_formula_variant(filename)
 
     if clear:
+        # Only the curriculum's own copy.  A re-import owns the exercises
+        # that came from the shipped JSON and nothing else: a teacher's
+        # draft or dictation can carry the same facets and is not the
+        # same exercise, and it exists nowhere but in this database.
         Lesson.objects.filter(
-            key_model=key_model, formula_name=formula, variant=variant
+            key_model=key_model, formula_name=formula, variant=variant,
+            shelf=Lesson.Shelf.CURRICULUM,
         ).delete()
 
     lesson = Lesson.objects.create(
@@ -243,10 +248,15 @@ def generate_lesson_for_key(
     key's scale degrees.
     """
     if clear:
+        # Only the curriculum's own copy.  A re-import owns the exercises
+        # that came from the shipped JSON and nothing else: a teacher's
+        # draft or dictation can carry the same facets and is not the
+        # same exercise, and it exists nowhere but in this database.
         Lesson.objects.filter(
             key_model=target_key,
             formula_name=source_lesson.formula_name,
             variant=source_lesson.variant,
+            shelf=Lesson.Shelf.CURRICULUM,
         ).delete()
 
     new_ex = Lesson.objects.create(

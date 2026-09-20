@@ -129,3 +129,70 @@ class LessonRegenerationTests(TestCase):
             .values_list("note_name", flat=True)
         )
         self.assertNotEqual(src_names, new_names)
+
+class ReimportTests(TestCase):
+    """What a second import must not destroy.
+
+    Every deploy re-imports the whole library over the live database, so
+    "import" is really "import again" — and until the editor existed, the only
+    thing in these tables was the shipped JSON, so rebuilding them from
+    scratch was harmless.  It is not harmless now: a teacher's drafts, their
+    dictations and their edits live in the same tables and exist in no file.
+    """
+
+    def setUp(self):
+        self.key_data = _load("key_models/Major/C-dur_8.json")
+        import_key_model(self.key_data, "C-dur_8.json")
+        self.lesson_path = (
+            "lessons/mono/Major/Octave/CMajor/1_ C-dur formula 8/"
+            "1_1_1_C-dur_formula_8.json"
+        )
+        self.lesson_data = _load(self.lesson_path)
+        self.lesson = import_lesson(self.lesson_data, self.lesson_path)
+
+    def test_reimporting_a_key_keeps_the_lessons_built_on_it(self):
+        """The key used to be deleted and recreated, and every lesson on it
+        cascaded away with it — the first step of every deploy, emptying the
+        relative library."""
+        before = Lesson.objects.count()
+        self.assertGreater(before, 0)
+        import_key_model(self.key_data, "C-dur_8.json")
+        self.assertEqual(Lesson.objects.count(), before)
+        self.assertTrue(Lesson.objects.filter(pk=self.lesson.pk).exists())
+
+    def test_reimporting_a_key_replaces_only_its_own_bars(self):
+        import_key_model(self.key_data, "C-dur_8.json")
+        key = KeyModel.objects.get(name="C-dur")
+        self.assertEqual(KeyModel.objects.filter(name="C-dur").count(), 1)
+        self.assertEqual(key.bars.count(), 7)
+
+    def test_a_teachers_draft_survives_the_reimport(self):
+        draft = Lesson.objects.create(
+            key_model=KeyModel.objects.get(name="C-dur"),
+            formula_name=self.lesson.formula_name,
+            variant=self.lesson.variant,
+            shelf=Lesson.Shelf.DRAFT,
+        )
+        dictation = Lesson.objects.create(
+            key_model=KeyModel.objects.get(name="C-dur"),
+            formula_name=self.lesson.formula_name,
+            variant=self.lesson.variant,
+            shelf=Lesson.Shelf.DICTATION,
+        )
+        import_key_model(self.key_data, "C-dur_8.json")
+        import_lesson(self.lesson_data, self.lesson_path)
+        self.assertTrue(Lesson.objects.filter(pk=draft.pk).exists())
+        self.assertTrue(Lesson.objects.filter(pk=dictation.pk).exists())
+
+    def test_the_curriculum_copy_is_still_replaced(self):
+        """The shipped exercise is what a re-import owns, and it is refreshed
+        rather than duplicated."""
+        import_lesson(self.lesson_data, self.lesson_path)
+        self.assertEqual(
+            Lesson.objects.filter(
+                formula_name=self.lesson.formula_name,
+                variant=self.lesson.variant,
+                shelf=Lesson.Shelf.CURRICULUM,
+            ).count(),
+            1,
+        )

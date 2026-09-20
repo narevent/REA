@@ -22,16 +22,24 @@ def import_chromatic_base(data: dict, filename: str, *, clear: bool = True) -> C
 
     strain = parse_music_strain(data)
 
-    if clear:
-        ChromaticBase.objects.filter(name=name).delete()
-
-    base = ChromaticBase.objects.create(
+    # The base is *updated*, never replaced.  Every absolute lesson points at
+    # it with a PROTECT foreign key, so deleting it either fails outright —
+    # which is what a re-import did, on any database that already had lessons,
+    # and is why a second deploy reported errors here — or, if it ever stopped
+    # being protected, would take the whole absolute library with it.  Only
+    # the base's own bars are replaced; they cascade from it and nothing else
+    # refers to them.
+    base, _ = ChromaticBase.objects.update_or_create(
         name=name,
-        clef=strain.default_music_clef,
-        default_rhythm=data.get("default_music_rhythm", "FreeStyle"),
-        draw_only_note_heads=bool(data.get("draw_only_note_heads", True)),
-        tempo=int(data.get("tempo", 4) or 4),
+        defaults={
+            "clef": strain.default_music_clef,
+            "default_rhythm": data.get("default_music_rhythm", "FreeStyle"),
+            "draw_only_note_heads": bool(data.get("draw_only_note_heads", True)),
+            "tempo": int(data.get("tempo", 4) or 4),
+        },
     )
+    if clear:
+        base.bars.all().delete()
 
     for bar_index, raw_bar in enumerate(strain.bars):
         bar = Bar.objects.create(
