@@ -138,7 +138,11 @@ def import_poly_lesson(data: dict, filename: str, *, clear: bool = True) -> Opti
         variant=meta.variant,
     )
     if clear:
-        Lesson.objects.filter(**identity).delete()
+        # Only the curriculum's own copy.  A re-import owns the exercises
+        # that came from the shipped JSON and nothing else: a teacher's
+        # draft or dictation can carry the same facets and is not the
+        # same exercise, and it exists nowhere but in this database.
+        Lesson.objects.filter(**identity, shelf=Lesson.Shelf.CURRICULUM).delete()
 
     lesson = Lesson.objects.create(
         **identity,

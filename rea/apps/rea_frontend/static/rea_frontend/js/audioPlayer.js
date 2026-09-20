@@ -112,6 +112,19 @@ export class AudioPlayer {
     return true;
   }
 
+  /**
+   * Stop everything, now.
+   *
+   * A piece is scheduled in one go — every note of it, at its absolute time —
+   * so stopping is not a matter of letting the current note finish: it is
+   * unscheduling all the notes that have not sounded yet.  `voice.stop` does
+   * that (see `buildVoice`), and the output gain is disconnected a moment
+   * later as well, so a browser that disagrees about what stopping an
+   * oscillator before its start means still cannot make a sound with it.
+   * That belt and braces is deliberate: the symptom it prevents — a row of
+   * short blips carrying on after Stop — is the kind a user hears long
+   * before any test does.
+   */
   stop() {
     if (this.endTimer) { clearTimeout(this.endTimer); this.endTimer = null; }
     this.stepTimers.forEach((id) => clearTimeout(id));
@@ -119,11 +132,15 @@ export class AudioPlayer {
     const now = this.ctx ? this.ctx.currentTime : 0;
     this.scheduled.forEach(({ oscs, gain, voice }) => {
       try {
-        if (voice && voice.stop) { voice.stop(now); return; }
-        gain.gain.cancelScheduledValues(now);
-        gain.gain.setValueAtTime(0.0001, now);
-        (oscs || []).forEach((osc) => { try { osc.stop(now + 0.02); } catch (e) {} });
+        if (voice && voice.stop) voice.stop(now);
+        else {
+          gain.gain.cancelScheduledValues(now);
+          gain.gain.setValueAtTime(0.0001, now);
+          (oscs || []).forEach((osc) => { try { osc.stop(now + 0.02); } catch (e) {} });
+        }
       } catch (e) { /* already stopped */ }
+      // After the fade the voice is cut out of the graph altogether.
+      setTimeout(() => { try { gain.disconnect(); } catch (e) {} }, 60);
     });
     this.scheduled = [];
     this.isPlaying = false;

@@ -46,6 +46,12 @@
  *                was written.  Nothing else here sings badly enough to have
  *                caught any of it.
  *
+ * `transport.mjs` what Stop stops.  The only file here that is not about
+ *                listening to a singer: a piece is handed to WebAudio in one
+ *                go, so stopping it is a matter of unscheduling the notes
+ *                that have not sounded yet, and getting that wrong is heard
+ *                as the rest of the exercise playing on as a row of clicks.
+ *
  * `roomtone.mjs`  silence, in a room that is not silent.  The only file that
  *                drives the *whole* detector — the gate, the voicing machine,
  *                the median, the smoother — which everything else skips, and
@@ -64,7 +70,7 @@
  * each one began and whether it settled, which is the first thing to look at
  * when a learner case fails.
  */
-const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs", "./lastnote.mjs", "./profile.mjs", "./learner.mjs", "./articulation.mjs", "./singlenote.mjs", "./scoring.mjs", "./roomtone.mjs", "./voice.mjs"];
+const mods = ["./cases.mjs", "./slots.mjs", "./tempo.mjs", "./patience.mjs", "./pacing.mjs", "./lastnote.mjs", "./profile.mjs", "./learner.mjs", "./articulation.mjs", "./singlenote.mjs", "./scoring.mjs", "./roomtone.mjs", "./voice.mjs", "./transport.mjs"];
 let failed = false;
 for (const m of mods) {
   const before = process.exitCode;

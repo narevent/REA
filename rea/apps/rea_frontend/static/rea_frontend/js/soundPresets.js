@@ -494,6 +494,10 @@ export function buildVoice(ctx, freq, t, durSec, vol, preset, { release = null }
   // depth/2).  This gives vibrato-like amplitude shimmer without affecting
   // the ADSR shape.
   let tremGain = null;
+  // Everything that makes sound and therefore has to be stoppable: the
+  // partials below, and the tremolo LFO, which is not a partial but is a
+  // running oscillator all the same.
+  const sources = [];
   if (p.tremolo && p.tremolo.depth > 0) {
     const lfo = ctx.createOscillator();
     lfo.type = "sine";
@@ -508,6 +512,7 @@ export function buildVoice(ctx, freq, t, durSec, vol, preset, { release = null }
     // Tremolo LFO runs for the whole note (it has no envelope of its own),
     // including a decay tail the note asks for.
     lfo.stop(t + durSec + (release > 0 ? release : 0) + 0.05);
+    sources.push(lfo);
     tremGain.connect(voiceDest);
   }
   const finalVoiceDest = tremGain || voiceDest;
@@ -539,6 +544,7 @@ export function buildVoice(ctx, freq, t, durSec, vol, preset, { release = null }
 
     osc.connect(vg).connect(finalVoiceDest);
     osc.start(t);
+    sources.push(osc);
     nodes.push({ osc, gain: vg });
   }
 
@@ -578,15 +584,34 @@ export function buildVoice(ctx, freq, t, durSec, vol, preset, { release = null }
   out.gain.setValueAtTime(Math.min(susLevel, peak), relStart);
   out.gain.exponentialRampToValueAtTime(0.0001, bodyEnd);
 
+  /**
+   * Silence this voice, now.
+   *
+   * "Now" is the whole of it, and it is why this takes the context's clock
+   * rather than the note's own start.  A piece is scheduled in one go, at
+   * absolute times: pressing Stop two seconds in leaves every later note
+   * already scheduled, oscillators and envelopes and all.  This used to clamp
+   * the stop to `t + 0.005` — five milliseconds after *this note's* start —
+   * so for a note due in eight seconds the "stop" was scheduled eight seconds
+   * out, and the note duly began on time, jumped to full gain and rang for
+   * thirty milliseconds before the ramp caught it.  That is the row of short
+   * blips that went on sounding after Stop: not a note failing to stop, but
+   * every remaining note being told to stop *at its own start*.
+   *
+   * So the ramp is scheduled from the context's clock, and every source is
+   * stopped just after it.  For a note that has not begun that stop time
+   * falls before its start, which is the one instruction WebAudio takes to
+   * mean "never play at all".
+   */
   const stop = (when) => {
-    const w = Math.max(when, t + 0.005);
+    const w = Math.max(when, ctx.currentTime);
     try {
       out.gain.cancelScheduledValues(w);
       out.gain.setValueAtTime(Math.max(0.0001, out.gain.value), w);
       out.gain.exponentialRampToValueAtTime(0.0001, w + 0.03);
     } catch (e) { /* already stopped */ }
-    for (const n of nodes) {
-      try { n.osc.stop(w + 0.05); } catch (e) { /* already stopped */ }
+    for (const s of sources) {
+      try { s.stop(w + 0.05); } catch (e) { /* already stopped */ }
     }
   };
 
