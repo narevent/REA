@@ -34,7 +34,7 @@
 import {
   keyAccidentalCount, keyAccidentals, modeChordToVexKey, noteNameToVexflow,
   noteTokenToMidi, parseNoteToken,
-} from "../notation.js?v=165";
+} from "../notation.js?v=166";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
 export const METRICS = {
@@ -239,8 +239,24 @@ function applyVisualOffset(note, px) {
  */
 const VF_SPACE_ABOVE_PX = 40;
 
-/** Extra room above the top row for a tuplet bracket and its number. */
+/** Least extra room above the top row for a tuplet bracket and its number. */
 const TUPLET_HEADROOM = 22;
+
+/** How far above the highest notehead of a tuplet its number ends up: the
+ *  stem, the beam or bracket on top of it, and the digits above that. */
+const TUPLET_STACK = 48;
+
+/** The least y a tuplet number's baseline may be drawn at: its digits reach
+ *  a little over a dozen pixels above it, and anything less than this is
+ *  clipped by the top of the SVG. */
+const MIN_TUPLET_BASELINE = 18;
+
+/** Pixels per diatonic step — half the distance between two staff lines. */
+const STEP_PX = 5;
+
+/** The letters in staff order, for turning a note into a diatonic index the
+ *  way `CLEF_TOP_LINE` states one. */
+const STEP_LETTERS = "cdefgab";
 
 /**
  * The grand staff: two staves, one voice.
@@ -285,6 +301,16 @@ export function resolveVexFlow() {
     if (c && c.Renderer && c.Stave && c.StaveNote) return c;
   }
   return null;
+}
+
+/** How much of its written length a note in a tuplet occupies.
+ *  1 for every ordinary note, which is nearly all of them.  The same rule
+ *  `practiceData.tupletRatio` applies to the sound, so what a bar is given
+ *  room for and what it takes to sing agree. */
+function tupletRatio(note) {
+  const num = note && note.tuplet_num;
+  const den = note && note.tuplet_den;
+  return (num > 0 && den > 0) ? den / num : 1;
 }
 
 /** VexFlow duration type for a duration in whole notes. */
@@ -483,7 +509,7 @@ function drawNoteLabels(context, stave, notes, look, keyMap, bass) {
  *   `bars`  [{barIndex, stave, staveEl, x, y, width, row, noteStart, noteEnd}]
  *   `notes` [{barIndex, noteIndex, globalIndex, note, el}]
  */
-export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) {
+function layoutScore(container, bars, { rowExtra = 0, style = null } = {}, padOverride = null) {
   const VF = resolveVexFlow();
   if (!VF) return null;
 
@@ -509,12 +535,30 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
   // lying high on the staff — most of this library — is above the beam and
   // therefore above the staff.  `STAVE_Y` leaves 26px of room up there, which
   // a beam over high notes uses most of, so the number was drawn at a
-  // negative y and the SVG simply cut it off.  Only paid for when the score
-  // actually holds a tuplet, so nothing else gains a band of white space.
-  const hasTuplets = bars.some((bar) => (bar.notes || []).some(
-    (n) => n.tuplet_num > 0 && n.tuplet_den > 0
-  ));
-  const topPad = hasTuplets ? TUPLET_HEADROOM : 0;
+  // negative y and the SVG simply cut it off.
+  //
+  // So the room is measured from the highest note that is actually *in* a
+  // tuplet, which is what the number sits above.  `drawScore` checks the
+  // result afterwards and draws again if this guessed short.  Only paid for
+  // when the score holds a tuplet, so nothing else gains a band of white
+  // space.
+  let hasTuplets = false;
+  let tupletReach = 0;
+  bars.forEach((bar) => {
+    const topLine = CLEF_TOP_LINE[vexClef(bar.clef)];
+    (bar.notes || []).forEach((n) => {
+      if (!(n.tuplet_num > 0 && n.tuplet_den > 0)) return;
+      hasTuplets = true;
+      if (n.is_rest || !n.name || topLine == null) return;
+      const tok = parseNoteToken(n.name);
+      if (!tok || tok.octave == null) return;
+      const steps = (tok.octave * 7 + STEP_LETTERS.indexOf(tok.letter)) - topLine;
+      if (steps > 0) tupletReach = Math.max(tupletReach, steps * STEP_PX);
+    });
+  });
+  const topPad = padOverride != null ? padOverride : (hasTuplets
+    ? Math.max(TUPLET_HEADROOM, tupletReach + TUPLET_STACK - METRICS.STAVE_Y)
+    : 0);
 
   // --- Measure the available width inside the panel --------------------
   // Bars wrap into rows so a whole score is visible without scrolling
@@ -540,7 +584,13 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
 
   const prefWidths = bars.map((bar, i) => {
     const notes = bar.notes || [];
-    const totalWhole = notes.reduce((sum, n) => sum + (n.duration || 0.125), 0);
+    // A tuplet's notes keep their written value and occupy less time than it,
+    // so the room the bar needs is measured from what they actually take —
+    // three eighths in the time of two ask for two eighths of width, which is
+    // what the formatter will then give them.
+    const totalWhole = notes.reduce(
+      (sum, n) => sum + (n.duration || 0.125) * tupletRatio(n), 0,
+    );
     const durArea = Math.ceil(totalWhole * METRICS.PX_PER_WHOLE);
     const countArea = notes.length * METRICS.NOTE_SLOT;
     const separators = notes.filter((n) => n.separator).length;
@@ -764,19 +814,41 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
       globalIndex += 1;
     });
 
+    /** Whether a note is short enough to carry a beam rather than a flag. */
+    const isBeamable = (n) => {
+      const d = n.getDuration ? n.getDuration() : "";
+      return d === "8" || d === "16";
+    };
+
     // Tuplets: runs of adjacent notes carrying the same ratio, cut into
     // groups of `num`.  Two triplets in a row are six marked notes and read
     // as 3 + 3 — see `MusicEvent.tuplet_num` for why the grouping is
     // positional rather than held by an id.
+    //
+    // The groups are kept rather than only their brackets, because the
+    // beaming below has to know where each one begins and ends.
+    const tupletGroups = [];
     let run = [];
     const closeRun = () => {
       if (!run.length) return;
       const { num, den } = run[0].reaTuplet;
-      for (let i = 0; i + num <= run.length; i += num) {
+      for (let start = 0; start + num <= run.length; start += num) {
+        const group = run.slice(start, start + num);
+        // A beamed group is read from its beam and takes only the number;
+        // one that is not beamed needs the bracket to say how far it
+        // reaches.  Decided here because VexFlow decides it at construction,
+        // which is before the beams exist — so left to itself it brackets
+        // every tuplet, beam and all.
+        const beamed = group.length >= 2 && group.every(isBeamable);
         try {
-          allTuplets.push(new VF.Tuplet(run.slice(i, i + num), {
-            num_notes: num, notes_occupied: den,
+          // VexFlow 5 spells these `numNotes` and `notesOccupied`.  Under the
+          // 3.x names it silently ignored both and fell back to its own
+          // defaults — which is why every tuplet drew and spaced as "in the
+          // time of 2", and a quintuplet announced itself as 5:2.
+          allTuplets.push(new VF.Tuplet(group, {
+            numNotes: num, notesOccupied: den, bracketed: !beamed,
           }));
+          tupletGroups.push(group);
         } catch (e) { /* a malformed group is not worth losing the score over */ }
       }
       run = [];
@@ -789,17 +861,34 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
     });
     closeRun();
 
-    // Beaming: eighths and shorter group into beats.
-    const beamable = staveNotes.filter((n) => {
-      const d = n.getDuration ? n.getDuration() : "";
-      return d === "8" || d === "16";
+    // Beaming: eighths and shorter group into beats — except a tuplet, which
+    // is beamed as the one unit it is read as.  Left to the beat grouping a
+    // 5-in-the-time-of-4 would be cut wherever four eighths' worth of ticks
+    // happened to land, which is in the middle of the group.
+    const inTuplet = new Set();
+    tupletGroups.forEach((group) => {
+      group.forEach((n) => inTuplet.add(n));
+      if (group.length < 2 || !group.every(isBeamable)) return;
+      try { allBeams.push(new VF.Beam(group)); } catch (e) { /* decoration */ }
     });
-    if (beamable.length >= 2) {
-      try {
-        VF.Beam.generateBeams(beamable, { groups: [new VF.Fraction(2, 8)] })
-          .forEach((b) => allBeams.push(b));
-      } catch (e) { /* beaming is decoration; best effort */ }
-    }
+
+    // Everything outside a tuplet, in runs: a beam must not reach across a
+    // group and join the notes on either side of it.
+    let plain = [];
+    const closePlain = () => {
+      if (plain.length >= 2) {
+        try {
+          VF.Beam.generateBeams(plain, { groups: [new VF.Fraction(2, 8)] })
+            .forEach((b) => allBeams.push(b));
+        } catch (e) { /* beaming is decoration; best effort */ }
+      }
+      plain = [];
+    };
+    staveNotes.forEach((note) => {
+      if (inTuplet.has(note)) closePlain();
+      else if (isBeamable(note)) plain.push(note);
+    });
+    closePlain();
 
     // An empty bar has nothing to format — VexFlow throws on a voice with no
     // tickables, and the editor's brand-new bars are exactly that.
@@ -909,7 +998,44 @@ export function drawScore(container, bars, { rowExtra = 0, style = null } = {}) 
   }));
 
   return {
-    VF, context, svg, width: availWidth, height,
+    VF, context, svg, width: availWidth, height, topPad,
     bars: barEntries, notes: noteEntries, rows: rows.length, grand,
   };
+}
+
+/** The lowest baseline any tuplet number was drawn at, or null when the score
+ *  has none.  Read from the drawn SVG because how high a tuplet ends up is
+ *  VexFlow's decision, taken against the beam it has just drawn. */
+function highestTupletBaseline(container) {
+  let top = null;
+  container.querySelectorAll("svg g.vf-tuplet text").forEach((text) => {
+    const y = parseFloat(text.getAttribute("y"));
+    if (!isFinite(y)) return;
+    if (top == null || y < top) top = y;
+  });
+  return top;
+}
+
+/**
+ * Draw a score, and make sure its tuplets fit on the page.
+ *
+ * The room reserved above the top row is an estimate — it has to be, because
+ * it decides the height of an SVG that does not exist yet, while where a
+ * tuplet number lands is settled much later, by VexFlow, against the beam it
+ * has just drawn.  When the estimate falls short the number is drawn at a
+ * negative y and the SVG simply cuts it off, so the score is measured once
+ * and, if anything is hanging over the top, drawn again with exactly the room
+ * it turned out to need.  The second pass costs nothing on a score without
+ * tuplets, which is nearly all of them.
+ */
+export function drawScore(container, bars, options = {}) {
+  const drawn = layoutScore(container, bars, options);
+  if (!drawn) return drawn;
+  const baseline = highestTupletBaseline(container);
+  if (baseline == null || baseline >= MIN_TUPLET_BASELINE) return drawn;
+  if (drawn.svg && drawn.svg.parentNode) drawn.svg.parentNode.removeChild(drawn.svg);
+  return layoutScore(
+    container, bars, options,
+    drawn.topPad + Math.ceil(MIN_TUPLET_BASELINE - baseline),
+  );
 }
