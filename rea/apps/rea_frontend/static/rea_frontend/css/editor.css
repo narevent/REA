@@ -118,17 +118,18 @@
 /* ------------------------------------------------------- note input tools */
 .ed-dur {
   font: inherit; font-size: 11px; font-variant-numeric: tabular-nums;
-  min-width: 34px; padding: 6px 4px; cursor: pointer;
+  min-width: 32px; padding: 5px 4px; cursor: pointer;
   border: 1px solid var(--border-strong); background: var(--surface);
   color: var(--muted); border-radius: var(--r-sm);
 }
 .ed-dur:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-2); }
 .ed-dur.is-on { background: var(--accent-tint); border-color: var(--accent); color: var(--accent); font-weight: 600; }
-/* Accidental glyphs want to be bigger than the "1/8" labels beside them and
-   are narrower, so they get their own sizing rather than a shared row style. */
+/* Accidentals are drawn, not typed — see `glyphs.js` — so these only have to
+   give the mark room.  They were 14px characters, at which a sharp and a
+   double sharp are the same grey smudge and the row is read by elimination. */
 .ed-accidentals { margin-left: 2px; }
-.ed-acc { min-width: 26px; font-size: 14px; line-height: 1; padding: 4px 2px 6px; }
-.ed-tup { min-width: 24px; font-size: 12px; }
+.ed-acc { min-width: 32px; padding: 5px 4px; }
+.ed-tup { min-width: 26px; font-size: 13px; }
 
 /* A note value drawn as a note.  The fraction stays in the DOM for a screen
    reader and is taken out of the flow, so the button is exactly the glyph. */
@@ -137,8 +138,17 @@
   position: absolute; width: 1px; height: 1px; overflow: hidden;
   clip-path: inset(50%); white-space: nowrap;
 }
-.ed-dur .ed-glyph { width: 15px; height: 20px; }
-.ed-choice .ed-glyph { width: 14px; height: 19px; }
+/* Tall and narrow, because a note value is told apart by the flags at the
+   top of the stem and they need the room.  The head is a small part of this
+   box on purpose — see `glyphs.js`. */
+.ed-dur .ed-glyph-note { width: 17px; height: 28px; }
+.ed-choice .ed-glyph-note { width: 15px; height: 25px; }
+/* A notehead is only a head, so its box is square and the shape fills it. */
+.ed-glyph-head { width: 18px; height: 18px; }
+.ed-choice .ed-glyph-head { width: 17px; height: 17px; }
+/* An accidental is tall and narrow, like the mark itself. */
+.ed-glyph-acc { width: 15px; height: 21px; }
+.ed-choice .ed-glyph-acc { width: 14px; height: 19px; }
 
 /* The tempo, on the toolbar rather than three clicks away in the Exercise
    panel: it is the one playback setting a teacher reaches for while writing,
@@ -194,6 +204,7 @@
 /* Several notes selected that do not agree: nothing is shown as current, and
    the row says so by going quiet rather than by lying about one of them. */
 .ed-btnset.is-mixed .ed-choice { opacity: 0.55; }
+
 
 /* Choosing a style, and keeping one: one row, because they are one thought —
    "make this exercise look like that", and "let something else look like

@@ -20,23 +20,23 @@
  * exercise half-written is worse than one not written at all.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=168";
-import { EditorAPI } from "./editorApi.js?v=168";
-import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=168";
+import { AudioPlayer } from "../audioPlayer.js?v=170";
+import { EditorAPI } from "./editorApi.js?v=170";
+import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=170";
 import {
   Library, SHELF_DESTINATIONS, destinations, metaFromCtx,
-} from "./library.js?v=168";
-import { labelWithDuration } from "./glyphs.js?v=168";
-import { ScoreCanvas } from "./scoreCanvas.js?v=168";
+} from "./library.js?v=170";
+import { labelWithAccidental, labelWithDuration } from "./glyphs.js?v=170";
+import { ScoreCanvas } from "./scoreCanvas.js?v=170";
 import {
   DURATIONS, LETTERS, MAX_VISUAL_OFFSET_PX, MODIFIERS, MODIFIER_LABELS, ScoreDoc,
   buildToken, noteMidi, offsetMs, splitToken, transposeToken,
-} from "./scoreDoc.js?v=168";
-import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=168";
-import { midiToToken } from "../notation.js?v=168";
+} from "./scoreDoc.js?v=170";
+import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=170";
+import { midiToToken } from "../notation.js?v=170";
 import {
   applyLegato, barGapMs, separatorGapMs, tupletRatio,
-} from "../practiceData.js?v=168";
+} from "../practiceData.js?v=170";
 
 /** The accidentals offered as buttons, in the order a musician reaches for
  *  them.  `null` is "whatever the key signature says", which is the state a
@@ -44,12 +44,12 @@ import {
  *  cancels a key signature, which is a different statement and needs its own
  *  button. */
 const ACCIDENTAL_BUTTONS = [
-  ["x", "𝄪", "Double sharp"],
-  ["#", "♯", "Sharp (#)"],
-  ["b", "♭", "Flat (b)"],
-  ["bb", "𝄫", "Double flat"],
-  ["r", "♮", "Natural — cancels the key signature"],
-  [null, "—", "As the key signature has it (n)"],
+  ["x", "Double sharp", "Double sharp"],
+  ["#", "Sharp", "Sharp (#)"],
+  ["b", "Flat", "Flat (b)"],
+  ["bb", "Double flat", "Double flat"],
+  ["r", "Natural", "Natural — cancels the key signature"],
+  [null, "As the key signature has it", "As the key signature has it (n)"],
 ];
 
 /** What each offered tuplet is called, keyed by its note count.  The ratios
@@ -891,11 +891,18 @@ class Editor {
     // one, which is how MuseScore's palette behaves — you say sharp and then
     // say which note.
     rows[1].appendChild(palette("Accidental", ACCIDENTAL_BUTTONS.map(([modifier, label, title]) => (
-      // Only a real accidental lights up.  "—" is the one that *clears* an
-      // accidental, and lighting it whenever nothing was armed made the row
-      // look permanently set to something.
-      choice(label, title, this.writeModifier != null && this.writeModifier === modifier,
-        !doc, () => this.pickAccidental(modifier), "ed-acc")
+      // Only a real accidental lights up.  The dash is the one that *clears*
+      // an accidental, and lighting it whenever nothing was armed made the
+      // row look permanently set to something.
+      //
+      // Drawn rather than typed: the two doubles have no character any
+      // interface font carries — see `accidentalGlyph`.  The word stays as
+      // the button's accessible name.
+      labelWithAccidental(
+        choice(label, title, this.writeModifier != null && this.writeModifier === modifier,
+          !doc, () => this.pickAccidental(modifier), "ed-acc"),
+        modifier, label,
+      )
     ))));
 
     // Tuplets act on a *selection* rather than arming the next note: a tuplet
