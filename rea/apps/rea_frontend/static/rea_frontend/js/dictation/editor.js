@@ -15,13 +15,14 @@
  * panel are built in `ui.js` from the state kept here.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=177";
-import * as S from "./score.js?v=177";
+import { AudioPlayer } from "../audioPlayer.js?v=180";
+import * as S from "./score.js?v=180";
 import {
-  eventAt, measureAt, paintState, renderScore, stepAt, tickX,
-} from "./layout.js?v=177";
-import { schedule } from "./playback.js?v=177";
-import { buildPalette, buildPanel, buildToolbar, openDialog } from "./ui.js?v=177";
+  eventAt, measureAt, paintState, renderScore, stepAt, stepY, tickX,
+} from "./layout.js?v=180";
+import { readMusicXml, unzipMxl, writeMusicXml } from "./musicxml.js?v=180";
+import { schedule } from "./playback.js?v=180";
+import { buildPalette, buildPanel, buildToolbar, openDialog } from "./ui.js?v=180";
 
 const API = "/api/dictation-scores/";
 const DURATION_KEYS = { 1: "64", 2: "32", 3: "16", 4: "8", 5: "q", 6: "h", 7: "w" };
@@ -243,6 +244,48 @@ export class DictationEditor {
     window.history.replaceState(null, "", window.location.pathname);
     this.renderAll();
     this.status("A new dictation. Press N to write notes.");
+  }
+
+  /** Bring in a score from another notation program (MusicXML). */
+  async importFile() {
+    if (!(await this.confirmDiscard())) return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".musicxml,.xml,.mxl,application/vnd.recordare.musicxml+xml,application/vnd.recordare.musicxml";
+    input.addEventListener("change", async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      try {
+        const xml = /\.mxl$/i.test(file.name) ? await unzipMxl(await file.arrayBuffer()) : await file.text();
+        const { title, composer, score } = readMusicXml(xml);
+        this.newDocument();
+        this.doc.title = title || file.name.replace(/\.(musicxml|xml|mxl)$/i, "");
+        this.doc.composer = composer;
+        this.doc.score = score;
+        this.dirty = true;
+        window.history.replaceState(null, "", window.location.pathname);
+        this.renderAll();
+        this.status(`Imported “${this.doc.title}”: ${score.parts.length} instrument${score.parts.length === 1 ? "" : "s"}, ${score.measures.length} measures. Not saved yet.`, "good");
+      } catch (e) {
+        this.status(`Could not import that file — ${e.message}`, "bad");
+      }
+    });
+    input.click();
+  }
+
+  /** Hand the score to another notation program, as MusicXML. */
+  exportFile() {
+    const title = (this.doc.title || "").trim() || "dictation";
+    const xml = writeMusicXml({ title, composer: this.doc.composer, score: this.doc.score });
+    const blob = new Blob([xml], { type: "application/vnd.recordare.musicxml+xml" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${title.replace(/[\\/:*?"<>|]+/g, "-")}.musicxml`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    this.status("Exported as MusicXML — it opens in MuseScore, Sibelius, Finale and Dorico.");
   }
 
   // ---- history --------------------------------------------------------------
@@ -596,6 +639,27 @@ export class DictationEditor {
           const next = S.pitchFromStep(S.pitchStep(p) + steps);
           return Object.assign(next, { alter: key[next.step] || 0, tie: p.tie });
         }));
+      });
+    });
+  }
+
+  /** The other spelling of the selected notes: C♯ and D♭, E and F♭ (J). */
+  respell() {
+    const ids = this.targetIds();
+    if (!ids.length) return;
+    const pitch = this.selection.pitch;
+    this.change("respell", (score) => {
+      ids.forEach((id) => {
+        const where = S.locate(score, id);
+        if (!where || where.event.rest) return;
+        where.event.pitches = where.event.pitches.map((p, i) => {
+          if (pitch && pitch.id === id && pitch.index !== i) return p;
+          const midi = S.pitchMidi(p);
+          const index = S.pitchStep(p) + ((p.alter || 0) >= 0 ? 1 : -1);
+          const next = S.pitchFromStep(index, 0);
+          const alter = midi - S.pitchMidi(next);
+          return Math.abs(alter) <= 2 ? Object.assign(next, { alter, tie: p.tie }) : p;
+        });
       });
     });
   }
@@ -1106,6 +1170,49 @@ export class DictationEditor {
       }
       this.select([]);
     });
+    // In note input, a ghost of the note a click would write follows the
+    // pointer: its pitch from the height, its place from the nearest beat.
+    canvas.addEventListener("mousemove", (e) => {
+      const svg = this.layout && this.layout.svg;
+      if (!svg) return;
+      svg.querySelectorAll(".dz-ghost").forEach((n) => n.remove());
+      if (!this.input.on) return;
+      const p = this.svgPoint(e);
+      const measure = p && measureAt(this.layout, p.x, p.y);
+      if (!measure) return;
+      const step = stepAt(measure, p.y);
+      const tick = this.nearestTick(measure, p.x);
+      const x = tickX(this.layout, this.doc.score, { mi: measure.mi, staffKey: measure.staffKey, voice: this.input.voice, tick });
+      if (x == null) return;
+      const ns = "http://www.w3.org/2000/svg";
+      const ghost = document.createElementNS(ns, "g");
+      ghost.setAttribute("class", "dz-ghost");
+      const y = stepY(measure, step);
+      const spacing = (measure.bottom - measure.top) / 4;
+      // Ledger lines above or below the staff, as the real note would have.
+      for (let ly = measure.top - spacing; ly >= y - 1; ly -= spacing) {
+        const line = document.createElementNS(ns, "line");
+        line.setAttribute("x1", x - 5); line.setAttribute("x2", x + 17);
+        line.setAttribute("y1", ly); line.setAttribute("y2", ly);
+        ghost.appendChild(line);
+      }
+      for (let ly = measure.bottom + spacing; ly <= y + 1; ly += spacing) {
+        const line = document.createElementNS(ns, "line");
+        line.setAttribute("x1", x - 5); line.setAttribute("x2", x + 17);
+        line.setAttribute("y1", ly); line.setAttribute("y2", ly);
+        ghost.appendChild(line);
+      }
+      const head = document.createElementNS(ns, "ellipse");
+      head.setAttribute("cx", x + 6); head.setAttribute("cy", y);
+      head.setAttribute("rx", 6.5); head.setAttribute("ry", 4.6);
+      head.setAttribute("transform", `rotate(-20 ${x + 6} ${y})`);
+      ghost.appendChild(head);
+      svg.appendChild(ghost);
+    });
+    canvas.addEventListener("mouseleave", () => {
+      if (this.layout) this.layout.svg.querySelectorAll(".dz-ghost").forEach((n) => n.remove());
+    });
+
     canvas.addEventListener("dblclick", (e) => {
       const p = this.svgPoint(e);
       const measure = p && measureAt(this.layout, p.x, p.y);
@@ -1219,6 +1326,7 @@ export class DictationEditor {
       return true;
     }
     if (key === "#") { this.setAccidental(1); return true; }
+    if ((key === "j" || key === "J") && !this.input.on) { this.respell(); return true; }
     return false;
   }
 

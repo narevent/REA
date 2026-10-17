@@ -13,7 +13,7 @@
  * highlight the sounding note.  Pass -1 to clear (on stop).
  */
 
-import { buildVoice, getCurrentSoundPreset } from "./soundPresets.js?v=177";
+import { buildVoice, getCurrentSoundPreset } from "./soundPresets.js?v=180";
 
 const A4_HZ = 440;
 const A4_MIDI = 69;

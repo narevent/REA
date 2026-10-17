@@ -7,8 +7,8 @@
  * keyboard calls — so a palette button and its shortcut can never disagree.
  */
 
-import * as S from "./score.js?v=177";
-import { labelWithAccidental, labelWithDuration } from "../editor/glyphs.js?v=177";
+import * as S from "./score.js?v=180";
+import { labelWithAccidental, labelWithDuration } from "../editor/glyphs.js?v=180";
 
 const DURATION_FRACTION = { w: 1, h: 0.5, q: 0.25, 8: 0.125, 16: 0.0625, 32: 0.03125, 64: 0.015625 };
 const DURATION_KEY = { 64: 1, 32: 2, 16: 3, 8: 4, q: 5, h: 6, w: 7 };
@@ -252,6 +252,10 @@ export function buildToolbar(host, editor) {
     plain("New…", "Start a new dictation", () => editor.chooseNew()),
     plain("Open…", "Open one of your dictations", () => editor.chooseToOpen()),
     plain("Save", "Save (Ctrl+S)", () => editor.save(), { primary: true }),
+  ]);
+  group([
+    plain("Import…", "Bring in a score from MuseScore, Sibelius, Finale or Dorico (MusicXML: .musicxml, .xml or .mxl)", () => editor.importFile()),
+    plain("Export", "Save the score as MusicXML, to open in another notation program", () => editor.exportFile()),
   ]);
   group([
     plain("Undo", "Undo (Ctrl+Z)", () => editor.undo(), { disabled: !editor.undoStack.length }),

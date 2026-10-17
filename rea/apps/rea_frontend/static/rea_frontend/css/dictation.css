@@ -59,6 +59,8 @@
 .dz-canvas g.dz-event[data-voice="3"]:not(.is-selected) .vf-stem path { fill: #c2681a; stroke: #c2681a; }
 .dz-canvas g.dz-event[data-voice="4"]:not(.is-selected) .vf-notehead text,
 .dz-canvas g.dz-event[data-voice="4"]:not(.is-selected) .vf-stem path { fill: #8a3fb5; stroke: #8a3fb5; }
+.dz-ghost ellipse { fill: var(--accent); opacity: 0.4; pointer-events: none; }
+.dz-ghost line { stroke: var(--accent); opacity: 0.4; stroke-width: 1.2; }
 .dz-pitch-mark { fill: none; stroke: var(--accent); stroke-width: 2; pointer-events: none; }
 .dz-measure-sel { fill: var(--accent-tint); stroke: var(--accent); stroke-width: 1; pointer-events: none; opacity: 0.8; }
 .dz-cursor { fill: rgba(61, 78, 219, 0.14); stroke: var(--accent); stroke-width: 1.5; pointer-events: none; }

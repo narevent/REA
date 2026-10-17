@@ -22,11 +22,11 @@
 import {
   CLEF_TOP_LINE, METRICS, NOTEHEAD_REACH, drawScore, noteHeadYs, resolveVexFlow, scoreStyle,
   vexClef,
-} from "../components/staveLayout.js?v=177";
+} from "../components/staveLayout.js?v=180";
 import {
   LETTERS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX, OFFSET_GAIN,
   buildToken, offsetMs, splitToken,
-} from "./scoreDoc.js?v=177";
+} from "./scoreDoc.js?v=180";
 
 /** Vertical room added to each row when annotation lanes are showing. */
 const LANE_SPACE = 58;

@@ -5,8 +5,9 @@
  *
  * `score.mjs`     the score document and every edit made to it
  * `playback.mjs`  what is heard, and when
+ * `musicxml.mjs`  scores in from other notation programs, and back out
  */
-const mods = ["./score.mjs", "./playback.mjs"];
+const mods = ["./score.mjs", "./playback.mjs", "./musicxml.mjs"];
 let failed = false;
 for (const m of mods) {
   const out = [];

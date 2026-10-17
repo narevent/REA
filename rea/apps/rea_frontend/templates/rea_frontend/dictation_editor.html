@@ -7,9 +7,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=177" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=177" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/dictation.css' %}?v=177" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=180" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=180" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/dictation.css' %}?v=180" />
 </head>
 <body class="ed-body dz-body">
   <header class="app-header">
@@ -74,6 +74,7 @@
           <dt>Alt + Shift + ↑ ↓</dt><dd>a step within the key</dd>
           <dt>A – G</dt><dd>outside note input, re-pitch the selected note</dd>
           <dt>Delete</dt><dd>turn the selection into rests (or, with one note of a chord picked, remove that note)</dd>
+          <dt>J</dt><dd>respell enharmonically: C♯ ↔ D♭, E ↔ F♭</dd>
           <dt>S</dt><dd>slur from the first to the last selected note</dd>
           <dt>&lt; &gt;</dt><dd>crescendo / diminuendo over the selection</dd>
           <dt>Ctrl + C, Ctrl + V</dt><dd>copy a run of notes, paste it over the music at the selection</dd>
@@ -89,6 +90,8 @@
           <dt>Space</dt><dd>play from the selection, or stop</dd>
           <dt>Ctrl + S</dt><dd>save</dd>
         </dl>
+        <h2>Other notation programs</h2>
+        <p><b>Import…</b> reads a score exported from MuseScore, Sibelius, Finale or Dorico as MusicXML (.musicxml, .xml or the compressed .mxl). <b>Export</b> writes one back. Notes, chords, voices, ties, slurs, dynamics, hairpins, articulations, repeats, endings and jumps travel; lyrics, grace notes and layout do not.</p>
         <h2>Phrases</h2>
         <p>Select the first and the last note of a phrase (click one, Shift+click the other) and press <b>New phrase</b> in the Phrases panel. A phrase is played to students as one piece — everything sounding in every part between those two notes.</p>
       </div>
@@ -98,7 +101,7 @@
     <aside class="ed-panel dz-panel" id="dz-panel"></aside>
   </main>
 
-  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=177"></script>
-  <script type="module" src="{% static 'rea_frontend/js/dictation/editor.js' %}?v=177"></script>
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=180"></script>
+  <script type="module" src="{% static 'rea_frontend/js/dictation/editor.js' %}?v=180"></script>
 </body>
 </html>

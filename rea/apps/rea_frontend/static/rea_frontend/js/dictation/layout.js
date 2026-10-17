@@ -16,8 +16,8 @@
  * belongs to.
  */
 
-import { resolveVexFlow } from "../components/staveLayout.js?v=177";
-import * as S from "./score.js?v=177";
+import { resolveVexFlow } from "../components/staveLayout.js?v=180";
+import * as S from "./score.js?v=180";
 
 export const METRICS = {
   margin: 14,          // left and right
@@ -90,11 +90,15 @@ function buildStaffMeasure(VF, score, mi, staffKey, accidentals) {
     const notes = events.map((event, index) => {
       const duration = event.dur + "d".repeat(event.dots || 0);
       let note;
+      // A rest that fills the whole measure is a whole rest, centred, in
+      // any meter — that is how an empty measure is engraved.
+      const wholeMeasure = event.rest && events.length === 1;
       if (event.rest) {
         const keys = REST_KEYS[vfClef] || REST_KEYS.treble;
         note = new VF.StaveNote({
           keys: [poly ? keys[voice % 2 === 0 ? 1 : 2] : keys[0]],
-          duration: duration + "r", clef: vfClef,
+          duration: (wholeMeasure ? "w" : duration) + "r", clef: vfClef,
+          alignCenter: wholeMeasure, align_center: wholeMeasure,
         });
       } else {
         note = new VF.StaveNote({
@@ -117,7 +121,7 @@ function buildStaffMeasure(VF, score, mi, staffKey, accidentals) {
           } catch (e) { /* an articulation is decoration */ }
         });
       }
-      if (event.dots) {
+      if (event.dots && !wholeMeasure) {
         try { VF.Dot.buildAndAttach([note], { all: true }); } catch (e) { /* dots are decoration */ }
       }
       // Dynamics and hairpins are drawn by `drawDynamics`, under the note's
@@ -186,6 +190,60 @@ function timeChanged(score, mi) {
   return before[0] !== time[0] || before[1] !== time[1];
 }
 
+/**
+ * How tall one system has to be, and where each staff goes in it.
+ *
+ * Measured from the music on the line, the way an engraver spaces staves:
+ * notes far above or below a staff, the stems that reach further still, the
+ * articulations over them and a lane for dynamics under them.  Two staves are
+ * kept at least the usual distance apart, and moved further apart when the
+ * notes between them need the room — rather than drawn into each other.
+ */
+function verticalFor(score, mis, list) {
+  const ext = list.map(() => ({ top: 0, bottom: 40, lane: false }));
+  list.forEach((s, i) => {
+    mis.forEach((mi) => {
+      const staff = score.measures[mi].staves[s.key];
+      if (!staff) return;
+      const top = TOP_LINE[S.clefAt(score, s.key, mi)] ?? TOP_LINE.treble;
+      const poly = staff.voices.filter((v) => v.length).length > 1;
+      staff.voices.forEach((events, voice) => events.forEach((e) => {
+        if (e.dyn || e.hairpin || e.hairpinEnd) ext[i].lane = true;
+        if (e.rest) return;
+        const ys = e.pitches.map((p) => (top - S.pitchStep(p)) * 5);
+        const hi = Math.min(...ys);
+        const lo = Math.max(...ys);
+        const stem = e.dur !== "w";
+        const up = poly ? voice % 2 === 0 : (hi + lo) / 2 > 20;
+        ext[i].top = Math.min(ext[i].top, hi - 7, stem && up ? lo - 36 : 0);
+        ext[i].bottom = Math.max(ext[i].bottom, lo + 7, stem && !up ? hi + 36 : 40);
+        if ((e.art || []).length) {
+          ext[i].top = Math.min(ext[i].top, hi - 20);
+          ext[i].bottom = Math.max(ext[i].bottom, lo + 16);
+        }
+      }));
+    });
+  });
+  const offsets = [];
+  let y = 0;
+  list.forEach((s, i) => {
+    if (i > 0) {
+      const prev = ext[i - 1];
+      const below = prev.bottom - 40 + (prev.lane ? 28 : 0);
+      const above = -ext[i].top;
+      const minGap = (list[i - 1].part.id === s.part.id ? METRICS.staffGap : METRICS.partGap) - 40;
+      y += 40 + Math.max(minGap, below + above + 8);
+    }
+    offsets.push(y);
+  });
+  const last = ext[ext.length - 1];
+  return {
+    offsets,
+    above: Math.max(0, -ext[0].top),
+    height: y + Math.max(40, last.bottom + (last.lane ? 28 : 0)),
+  };
+}
+
 /** Every staff's vertical place within a system, from the system's top. */
 function staffOffsets(score) {
   const list = S.staves(score);
@@ -213,7 +271,6 @@ export function renderScore(container, score, opts = {}) {
   }
   const width = Math.max(360, opts.width || container.clientWidth || 900);
   const list = staffOffsets(score);
-  const systemHeight = (list.length ? list[list.length - 1].offset : 0) + 40;
   const nameWidth = opts.showNames === false ? 0 : (list.some((s) => s.part.name) ? METRICS.nameWidth : 0);
 
   // --- How wide each measure wants to be --------------------------------
@@ -252,7 +309,17 @@ export function renderScore(container, score, opts = {}) {
   });
   if (current) systems.push(current);
 
-  const height = METRICS.top + systems.length * (systemHeight + METRICS.systemGap) + 20;
+  // Each system as tall as its own music needs, one under the other.
+  let cursorY = METRICS.top;
+  systems.forEach((system, si) => {
+    system.vertical = verticalFor(score, system.measures.map((m) => m.mi), list);
+    // Notes high over the top staff push the system down, so the tempo
+    // mark, the endings and the phrase brackets stay clear of them.
+    cursorY += Math.max(0, system.vertical.above - 20);
+    system.top = cursorY;
+    cursorY += system.vertical.height + METRICS.systemGap;
+  });
+  const height = cursorY + 20;
   const renderer = new VF.Renderer(container, VF.Renderer.Backends.SVG);
   renderer.resize(width, height);
   const context = renderer.getContext();
@@ -267,14 +334,14 @@ export function renderScore(container, score, opts = {}) {
   const ties = [];
 
   systems.forEach((system, si) => {
-    const top = METRICS.top + si * (systemHeight + METRICS.systemGap);
+    const top = system.top;
     const last = si === systems.length - 1;
     // Stretched to the line, except a short last system, which is left at
     // its natural width rather than pulled thin across the page.
     const natural = system.measures.reduce((sum, m) => sum + m.natural + m.head, 0);
     const stretch = (last && natural < system.lineWidth * 0.66) ? 1 : (system.lineWidth / natural);
     let x = system.left;
-    const systemInfo = { index: si, top, bottom: top + systemHeight, measures: [], staves: {} };
+    const systemInfo = { index: si, top, bottom: top + system.vertical.height, measures: [], staves: {} };
     layout.systems.push(systemInfo);
 
     system.measures.forEach((m, k) => {
@@ -284,7 +351,7 @@ export function renderScore(container, score, opts = {}) {
       const firstInSystem = k === 0;
       const staveObjs = [];
       list.forEach((s) => {
-        const y = top + s.offset;
+        const y = top + system.vertical.offsets[list.indexOf(s)];
         const stave = new VF.Stave(x, y - 40, measureWidth);
         const clef = S.clefAt(score, s.key, mi);
         const clefChanged = !firstInSystem && measure.staves[s.key] && measure.staves[s.key].clef
@@ -538,10 +605,25 @@ function drawSlursAndHairpins(VF, context, score, layout) {
  * reads them, and the one place they cannot be mistaken for the staff below.
  */
 function drawDynamics(context, layout) {
-  const lane = (entry) => {
+  // One lane per staff per system: under the staff, or under the lowest
+  // note hanging below it on that line, whichever is lower — a dynamic
+  // written over a notehead cannot be read.
+  const lanes = new Map();
+  layout.events.forEach((entry) => {
     const m = layout.measures.find((x) => x.mi === entry.mi && x.staffKey === entry.staffKey);
-    return m ? m.bottom + METRICS.laneOffset : null;
-  };
+    if (!m) return;
+    const key = `${entry.system}:${entry.staffKey}`;
+    let lowest = Math.max(m.bottom, ...(entry.event.rest ? [] : entry.ys));
+    // A stem pointing down reaches further than its head.
+    try {
+      if (!entry.event.rest && entry.note.hasStem && entry.note.hasStem() && entry.note.getStemDirection() === -1) {
+        const ext = entry.note.getStemExtents();
+        lowest = Math.max(lowest, ext.topY, ext.baseY);
+      }
+    } catch (e) { /* the heads will do */ }
+    lanes.set(key, Math.max(lanes.get(key) || 0, m.bottom + METRICS.laneOffset, lowest + 13));
+  });
+  const lane = (entry) => lanes.get(`${entry.system}:${entry.staffKey}`) ?? null;
   const ordered = Array.from(layout.events.values()).sort((a, b) => a.mi - b.mi || a.x - b.x);
   ordered.forEach((entry) => {
     if (!entry.event.dyn) return;
@@ -572,7 +654,8 @@ function drawDynamics(context, layout) {
     const cresc = from.event.hairpin !== ">";
     segments.forEach(([x1, x2, opens, closes]) => {
       if (x2 - x1 < 8) return;
-      const yLane = from.system === entry.system ? y : (layout.measures.find((m) => m.system === (opens ? from.system : entry.system) && m.staffKey === from.staffKey) || {}).bottom + METRICS.laneOffset;
+      const yLane = from.system === entry.system ? y
+        : (lanes.get(`${opens ? from.system : entry.system}:${from.staffKey}`) ?? y);
       // A crescendo opens to the right, a diminuendo to the left; a hairpin
       // carried over a line break is drawn part-open where it is cut.
       const closed = 0;
@@ -700,6 +783,13 @@ export function stepAt(measureInfo, y) {
   const halfLines = Math.round((y - measureInfo.top) / (spacing / 2));
   const top = TOP_LINE[measureInfo.clef] ?? TOP_LINE.treble;
   return top - halfLines;
+}
+
+/** The height a line or space is drawn at on a staff (the inverse of `stepAt`). */
+export function stepY(measureInfo, step) {
+  const spacing = (measureInfo.bottom - measureInfo.top) / 4;
+  const top = TOP_LINE[measureInfo.clef] ?? TOP_LINE.treble;
+  return measureInfo.top + (top - step) * (spacing / 2);
 }
 
 /**
