@@ -73,6 +73,23 @@ class SignupTests(TestCase):
         })
         self.assertEqual(User.objects.get(username="sneaky").profile.role, Role.STUDENT)
 
+    def test_signup_offers_only_student_and_teacher(self):
+        response = self.client.get(reverse("accounts:signup"))
+        self.assertContains(response, 'value="student"')
+        self.assertContains(response, 'value="teacher"')
+        self.assertNotContains(response, 'value="admin"')
+
+    def test_admin_role_cannot_be_signed_up_for(self):
+        """Administrator is granted, never chosen — a forged post is refused."""
+        response = self.client.post(reverse("accounts:signup"), {
+            "username": "climber",
+            "password1": "practice-pass-123",
+            "password2": "practice-pass-123",
+            "role": Role.ADMIN,
+        })
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(User.objects.filter(username="climber").exists())
+
     def test_signup_rejects_mismatched_passwords(self):
         response = self.client.post(reverse("accounts:signup"), {
             "username": "nope",

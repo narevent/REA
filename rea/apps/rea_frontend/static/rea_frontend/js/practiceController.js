@@ -26,22 +26,22 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=171";
+import { AudioPlayer } from "./audioPlayer.js?v=172";
 import {
   PitchDetector, midiToName, getVoiceVibratoCents, getVoiceOnsetFloor,
-} from "./pitchDetector.js?v=171";
-import { API } from "./api.js?v=171";
+} from "./pitchDetector.js?v=172";
+import { API } from "./api.js?v=172";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt, tempoOf,
-} from "./practiceData.js?v=171";
+} from "./practiceData.js?v=172";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=171";
-import { tuning } from "./difficulty.js?v=171";
-import { keyAccidentals, modeChordToVexKey, parseNoteToken } from "./notation.js?v=171";
-import { vexClef } from "./components/staveLayout.js?v=171";
-import { AnswerStaff, naturalMidi, tokenStep, writtenName } from "./components/answerStaff.js?v=171";
+} from "./practiceScore.js?v=172";
+import { tuning } from "./difficulty.js?v=172";
+import { keyAccidentals, modeChordToVexKey, parseNoteToken } from "./notation.js?v=172";
+import { vexClef } from "./components/staveLayout.js?v=172";
+import { AnswerStaff, naturalMidi, tokenStep, writtenName } from "./components/answerStaff.js?v=172";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 // Above this many rounds the per-round pips stop being readable (a 39-bar

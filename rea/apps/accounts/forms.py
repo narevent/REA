@@ -33,8 +33,12 @@ class SignupForm(UserCreationForm):
         label="Display name",
         help_text="Optional — shown instead of your username.",
     )
+    # Student or teacher, never administrator: an administrator owns the
+    # curriculum, and that is granted, not chosen.  A posted "admin" is a
+    # validation error rather than a quiet downgrade, because only a crafted
+    # request can send one.
     role = forms.ChoiceField(
-        choices=Role.choices,
+        choices=[(Role.STUDENT, Role.STUDENT.label), (Role.TEACHER, Role.TEACHER.label)],
         initial=Role.STUDENT,
         widget=forms.RadioSelect,
         help_text="Students practise and have their progress tracked. "

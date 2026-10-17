@@ -34,14 +34,14 @@
 import {
   keyAccidentalCount, keyAccidentals, modeChordToVexKey, noteNameToVexflow,
   noteTokenToMidi, parseNoteToken,
-} from "../notation.js?v=171";
+} from "../notation.js?v=172";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
 export const METRICS = {
   PX_PER_WHOLE: 260,
   STAVE_PADDING: 26,
   MIN_BAR_WIDTH: 120,
-  BAR_GAP: 12,       // whitespace between adjacent bars
+  BAR_GAP: 6,        // whitespace between adjacent bars
   STAVE_Y: 26,       // y of the stave's first line within its row
   ROW_HEIGHT: 100,   // vertical pitch of each wrapped row
   MARGIN: 10,        // left margin inside the SVG
@@ -81,7 +81,7 @@ export const CLEF_MAP = {
  * lesson, or nothing at all, and get a complete style either way.
  */
 export const STYLE_DEFAULTS = {
-  barGap: 12,           // mid_bar_space: whitespace between bars, in pixels
+  barGap: 6,            // mid_bar_space: whitespace between bars, in pixels
   barsPerRow: 0,        // 0 = as many as the width allows
   centre: false,        // align_to_center
   stretch: false,       // auto_align: fill the line, or leave natural widths

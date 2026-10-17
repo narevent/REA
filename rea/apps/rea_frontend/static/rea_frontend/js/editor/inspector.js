@@ -19,8 +19,8 @@
 import {
   DURATIONS, MODIFIERS, MODIFIER_LABELS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX,
   OFFSET_GAIN, describeNote, splitToken, buildToken,
-} from "./scoreDoc.js?v=171";
-import { labelWithAccidental, labelWithDuration, labelWithNotehead } from "./glyphs.js?v=171";
+} from "./scoreDoc.js?v=172";
+import { labelWithAccidental, labelWithDuration, labelWithNotehead } from "./glyphs.js?v=172";
 
 const MIXED = "—"; // em dash: several selected items, several values
 

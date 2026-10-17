@@ -9,8 +9,8 @@
  * practice controller drives one as readily as the other.
  */
 
-import { NumericRenderer } from "../components/numericRenderer.js?v=171";
-import { keySigMap, midiFromEvent } from "../practiceData.js?v=171";
+import { NumericRenderer } from "../components/numericRenderer.js?v=172";
+import { keySigMap, midiFromEvent } from "../practiceData.js?v=172";
 
 let renderer = null;
 

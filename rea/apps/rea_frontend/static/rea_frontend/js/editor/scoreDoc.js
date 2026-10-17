@@ -13,7 +13,7 @@
  * teacher edits is what gets stored.
  */
 
-import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=171";
+import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=172";
 
 /** Note letters in staff order.  German naming: `h` is B-natural. */
 export const LETTERS = ["c", "d", "e", "f", "g", "a", "h"];
