@@ -167,3 +167,41 @@ class PracticeSession(models.Model):
 # Mirrors PASS_THRESHOLD in the frontend's chapters.js.  Kept here too so the
 # dashboard can label a session without asking the browser.
 PASS_THRESHOLD = 70
+
+
+class NoteOctave(models.Model):
+    """
+    One note a student sings an octave away from where it is written.
+
+    A phrase that climbs past the top of somebody's voice is not a phrase they
+    can practise, and being marked wrong for singing its top note an octave
+    down teaches nothing.  So a student can move a note: it is then drawn,
+    played and judged an octave (or two) from where the exercise writes it —
+    for them, and for nobody else.
+
+    Keyed by the note's own row rather than by lesson and position, because
+    the practice view assembles some exercises out of several lessons and
+    renumbers their bars as it goes; the note row is the one identity that
+    survives that.  A teacher re-saving the exercise in the editor rewrites
+    its notes, and the shift then quietly stops applying — a note that has
+    been rewritten may not be the note the student moved.
+    """
+
+    class System(models.TextChoices):
+        RELATIVE = "relative", "Relative"
+        ABSOLUTE = "absolute", "Absolute"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="note_octaves",
+    )
+    system = models.CharField(max_length=16, choices=System.choices)
+    event_id = models.PositiveIntegerField(help_text="The MusicEvent row in that system.")
+    shift = models.SmallIntegerField(help_text="Octaves up (+) or down (−), never 0.")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["user", "system", "event_id"], name="one_octave_per_note"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.user} {self.system}:{self.event_id} {self.shift:+d}"

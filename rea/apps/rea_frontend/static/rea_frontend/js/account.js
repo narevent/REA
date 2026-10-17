@@ -80,3 +80,41 @@ export async function recordServerSession(run) {
     return false;
   }
 }
+
+const OCTAVES_URL = "/api/accounts/octaves/";
+
+/**
+ * The notes this student sings an octave away from where they are written,
+ * as a Map of "system:eventId" -> shift.  Empty when signed out or offline:
+ * the exercise is then simply sung as written.
+ */
+export async function loadNoteOctaves() {
+  const map = new Map();
+  if (!isSignedIn()) return map;
+  try {
+    const res = await fetch(OCTAVES_URL, { headers: { Accept: "application/json" } });
+    if (!res.ok) return map;
+    (await res.json()).forEach((row) => map.set(row.system + ":" + row.event_id, row.shift));
+  } catch (e) { /* sung as written */ }
+  return map;
+}
+
+/** Move one note for this student; a shift of 0 puts it back.  Resolves to
+ *  whether the server kept it. */
+export async function saveNoteOctave(system, eventId, shift) {
+  if (!isSignedIn()) return false;
+  try {
+    const res = await fetch(OCTAVES_URL, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRFToken": csrfToken(),
+      },
+      body: JSON.stringify({ system, event_id: eventId, shift }),
+    });
+    return res.ok;
+  } catch (e) {
+    return false;
+  }
+}

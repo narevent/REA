@@ -13,7 +13,7 @@
 
 import {
   NOTEHEAD_REACH, drawScore, durationToType, noteHeadYs, resolveVexFlow,
-} from "./staveLayout.js?v=174";
+} from "./staveLayout.js?v=175";
 
 /** Accuracy bands for `setNoteAccuracy`.  The thresholds match the per-note
  *  chips in the feedback row, so the stave and the report agree. */
@@ -53,6 +53,9 @@ export class NotationRenderer {
     this.bars = []; // [{ staveEl, noteStart, noteEnd, barIndex }]
     this.onBarClick = null;
     this.onBarContext = null;
+    // A click on a notehead itself, when the owner wants one.  Returns true
+    // when it has dealt with the click, and the bar then does not get it.
+    this.onNoteClick = null;
 
     // A score is laid out against the width it is drawn into, so it has to be
     // redrawn whenever that width changes — on rotation, on a resize, and on
@@ -215,6 +218,10 @@ export class NotationRenderer {
 
       this.container.addEventListener("click", (e) => {
         if (!this._ownsStage()) return;
+        if (this.onNoteClick) {
+          const note = this.noteAt(e.clientX, e.clientY);
+          if (note && this.onNoteClick(note, e)) return;
+        }
         const idx = hitTest(e.clientX, e.clientY);
         if (idx != null && this.onBarClick) this.onBarClick(idx);
       });
@@ -244,6 +251,33 @@ export class NotationRenderer {
     }
 
     return this.notes;
+  }
+
+  /**
+   * The note whose *head* is under a client point, if any — the head, not the
+   * group VexFlow draws it in, which reaches far above and below the staff.
+   */
+  noteAt(clientX, clientY) {
+    if (!this.svgEl) return null;
+    const top = this.svgEl.getBoundingClientRect().top;
+    const PAD = 3;
+    let best = null;
+    let bestDistance = Infinity;
+    this.notes.forEach((entry) => {
+      if (!entry.el) return;
+      const r = entry.el.getBoundingClientRect();
+      if (clientX < r.left - PAD || clientX > r.right + PAD) return;
+      // Heights from the glyph baselines, not the box — see `noteHeadYs`.
+      noteHeadYs(entry.el).forEach((y) => {
+        const cy = top + y;
+        if (Math.abs(clientY - cy) > NOTEHEAD_REACH + PAD) return;
+        const dx = clientX - (r.left + r.width / 2);
+        const dy = clientY - cy;
+        const distance = dx * dx + dy * dy;
+        if (distance < bestDistance) { bestDistance = distance; best = entry; }
+      });
+    });
+    return best;
   }
 
   /**

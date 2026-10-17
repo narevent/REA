@@ -362,3 +362,38 @@ class PermissionTests(TestCase):
         from django.contrib.auth.models import AnonymousUser
         self.assertFalse(is_teacher(AnonymousUser()))
         self.assertFalse(is_student(AnonymousUser()))
+
+
+class NoteOctaveTests(TestCase):
+    url = "/api/accounts/octaves/"
+
+    def put(self, payload):
+        return self.client.put(self.url, data=json.dumps(payload), content_type="application/json")
+
+    def test_signed_out_cannot_read_or_set(self):
+        self.assertIn(self.client.get(self.url).status_code, (401, 403))
+        self.assertIn(self.put({"system": "relative", "event_id": 5, "shift": -1}).status_code, (401, 403))
+
+    def test_a_student_moves_a_note_and_reads_it_back(self):
+        self.client.force_login(make_user())
+        self.assertEqual(self.put({"system": "relative", "event_id": 5, "shift": -1}).status_code, 200)
+        self.assertEqual(self.client.get(self.url).json(), [{"system": "relative", "event_id": 5, "shift": -1}])
+
+    def test_moving_it_again_replaces_and_zero_removes(self):
+        self.client.force_login(make_user())
+        self.put({"system": "absolute", "event_id": 9, "shift": 1})
+        self.put({"system": "absolute", "event_id": 9, "shift": 2})
+        self.assertEqual(self.client.get(self.url).json()[0]["shift"], 2)
+        self.put({"system": "absolute", "event_id": 9, "shift": 0})
+        self.assertEqual(self.client.get(self.url).json(), [])
+
+    def test_a_shift_belongs_to_one_student_only(self):
+        """Moving a note for yourself must never move it for anybody else."""
+        self.client.force_login(make_user("ana"))
+        self.put({"system": "relative", "event_id": 5, "shift": -1})
+        self.client.force_login(make_user("ben"))
+        self.assertEqual(self.client.get(self.url).json(), [])
+
+    def test_shift_is_bounded(self):
+        self.client.force_login(make_user())
+        self.assertEqual(self.put({"system": "relative", "event_id": 5, "shift": 3}).status_code, 400)

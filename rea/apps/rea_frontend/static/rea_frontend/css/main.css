@@ -415,6 +415,9 @@ svg.rea-score .vf-bar-number {
 /* ...and the noteheads inside them, so the answer reads at note level too and
    not only as a box.  Below the accuracy rules, above the playback cursor
    rules — a guessing chapter never runs both. */
+/* A note this student sings an octave away from where it is written. */
+.notation .vf-stavenote.vf-octave-shifted .vf-notehead text { fill: var(--accent-3) !important; }
+
 .notation .vf-stavenote.vf-res-picked .vf-notehead text,
 .notation .vf-stavenote.vf-res-picked .vf-notehead path { fill: #3d4edb !important; stroke: #3d4edb !important; }
 .notation .vf-stavenote.vf-res-correct .vf-notehead text,
@@ -1892,3 +1895,14 @@ svg.rea-score .vf-bar-focus rect { stroke: var(--accent); }
 }
 .answer-key th { color: var(--muted); font-weight: 500; }
 .answer-key p { margin: 8px 0 0; color: var(--muted); }
+
+/* The little panel a singing chapter opens on a notehead: sing this note an
+   octave up or down, for this student only. */
+.octave-pop {
+  position: absolute; z-index: 50; display: flex; flex-direction: column; gap: 8px;
+  padding: 10px; background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-md); box-shadow: var(--shadow-1, 0 4px 16px rgba(0,0,0,.12));
+}
+.octave-pop-state { font-size: 12px; color: var(--muted); }
+.octave-pop-row { display: flex; gap: 6px; }
+.octave-pop-btn { padding: 6px 10px; font-size: 13px; }

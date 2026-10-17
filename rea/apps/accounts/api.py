@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from . import progress as progress_calc
-from .models import Difficulty, PracticeSession
+from .models import Difficulty, NoteOctave, PracticeSession
 from .permissions import is_teacher
 
 
@@ -118,4 +118,40 @@ class MeView(APIView):
                     if c["attempts"]
                 },
             }
+        return Response(data)
+
+
+class NoteOctaveSerializer(serializers.Serializer):
+    system = serializers.ChoiceField(choices=NoteOctave.System.choices)
+    event_id = serializers.IntegerField(min_value=1)
+    # Two octaves either way is as far as a voice reasonably needs moving; a
+    # shift of 0 is how a note is put back.
+    shift = serializers.IntegerField(min_value=-2, max_value=2)
+
+
+class NoteOctaveView(APIView):
+    """
+    The notes the signed-in student has moved an octave.
+
+    GET lists every one of them — a handful per student, so the practice app
+    takes them all once rather than asking per exercise.  PUT sets one; a
+    shift of 0 removes it.  Only ever the student's own: the user is the
+    session's, never the payload's.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        rows = NoteOctave.objects.filter(user=request.user).values("system", "event_id", "shift")
+        return Response(list(rows))
+
+    def put(self, request):
+        serializer = NoteOctaveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        key = {"user": request.user, "system": data["system"], "event_id": data["event_id"]}
+        if data["shift"] == 0:
+            NoteOctave.objects.filter(**key).delete()
+        else:
+            NoteOctave.objects.update_or_create(defaults={"shift": data["shift"]}, **key)
         return Response(data)

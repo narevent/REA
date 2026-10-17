@@ -26,22 +26,23 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=174";
+import { AudioPlayer } from "./audioPlayer.js?v=175";
 import {
   PitchDetector, midiToName, getVoiceVibratoCents, getVoiceOnsetFloor,
-} from "./pitchDetector.js?v=174";
-import { API } from "./api.js?v=174";
+} from "./pitchDetector.js?v=175";
+import { API } from "./api.js?v=175";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt, tempoOf,
-} from "./practiceData.js?v=174";
+} from "./practiceData.js?v=175";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=174";
-import { tuning } from "./difficulty.js?v=174";
-import { keyAccidentals, modeChordToVexKey, parseNoteToken } from "./notation.js?v=174";
-import { vexClef } from "./components/staveLayout.js?v=174";
-import { AnswerStaff, naturalMidi, tokenStep, writtenName } from "./components/answerStaff.js?v=174";
+} from "./practiceScore.js?v=175";
+import { tuning } from "./difficulty.js?v=175";
+import { keyAccidentals, modeChordToVexKey, parseNoteToken, shiftNoteOctave } from "./notation.js?v=175";
+import { isSignedIn, loadNoteOctaves, saveNoteOctave } from "./account.js?v=175";
+import { vexClef } from "./components/staveLayout.js?v=175";
+import { AnswerStaff, naturalMidi, tokenStep, writtenName } from "./components/answerStaff.js?v=175";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 // Above this many rounds the per-round pips stop being readable (a 39-bar
@@ -236,6 +237,15 @@ export class PracticeController {
     if (this._usesKeyModel()) {
       this.keyModel = await this._resolveKeyModel(lesson);
     }
+    // The exercise as written, kept apart from the one this student sings:
+    // their octave moves are applied to a copy, so moving a note back is
+    // always moving it back to what the teacher wrote.
+    this._rawLesson = this.lesson;
+    this._rawKeyModel = this.keyModel;
+    // Fetched once the account is known, and kept: a student's moves change
+    // only through this controller, which updates the map itself.
+    if (!this._octaves && isSignedIn()) this._octaves = await loadNoteOctaves();
+    this._applyOctaves();
     this.barSteps = buildBarSteps(this._source());
     // A different exercise has different bars, so a selection made in the
     // last one would point at the wrong music here.
@@ -353,6 +363,7 @@ export class PracticeController {
     this._clearTimers();
     this._stopMic();
     this._clickGuard = null;
+    this._closeOctavePopover();
     if (this.answerStaff) this.answerStaff.disarm();
     this._hideDoneButton();
     if (this.renderer && this.renderer.clearSungNote) this.renderer.clearSungNote();
@@ -610,7 +621,8 @@ export class PracticeController {
   _readyHint() {
     const mic = this.mode && this.mode.needsMic;
     return "Press <b>Start</b> for the whole set, or <b>click a bar</b> to practise just that one" +
-      (mic ? " (the mic is enabled for you)." : ".");
+      (mic ? " (the mic is enabled for you)." : ".") +
+      (mic && isSignedIn() ? " Too high or too low? <b>Click a note</b> to sing it an octave away." : "");
   }
 
   /** Write the round prompt.  `_feedback` replaces the whole report block, so
@@ -740,7 +752,9 @@ export class PracticeController {
     if (this.renderer) {
       this.renderer.onRelayout = () => {
         if (this._notesHidden) this._hideNotes(); else this._showNotes();
+        this._markOctaves();
       };
+      this.renderer.onNoteClick = (entry, event) => this._onNoteClick(entry, event);
     }
     this._lastAnswerBar = null;
     // A fresh stave: re-attach the focus handler and put back whatever the
@@ -750,6 +764,143 @@ export class PracticeController {
       this.renderer.onBarContext = (idx) => this._toggleFocusBar(idx);
       if (this.renderer.markFocus) this.renderer.markFocus(this.focusBars || []);
     }
+    this._markOctaves();
+  }
+
+  // ---- a student's own octave for a note -------------------------------------
+
+  /** Which system a note row belongs to: key models and relative lessons are
+   *  relative, everything else absolute. */
+  _lessonSystem() {
+    return this._rawLesson && this._rawLesson.key_model != null ? "relative" : "absolute";
+  }
+
+  /** The copies of the exercise this student sings — every note they moved,
+   *  moved.  Drawn, played and judged from these. */
+  _applyOctaves() {
+    const map = this._octaves || new Map();
+    const shift = (item, system) => {
+      if (!item || !map.size) return item;
+      return Object.assign({}, item, {
+        bars: (item.bars || []).map((bar) => Object.assign({}, bar, {
+          events: (bar.events || []).map((event) => {
+            const by = event.id != null ? map.get(system + ":" + event.id) : 0;
+            if (!by || event.is_rest) return event;
+            const name = shiftNoteOctave(event.note_name, by);
+            return name ? Object.assign({}, event, { note_name: name, octave_shift: by }) : event;
+          }),
+        })),
+      });
+    };
+    this.lesson = shift(this._rawLesson, this._lessonSystem());
+    this.keyModel = shift(this._rawKeyModel, "relative");
+  }
+
+  /** The note row behind a drawn note, and the system it lives in. */
+  _eventFor(entry) {
+    const r = this.renderer;
+    const bar = r && r.bars && r.bars.find((b) => b.barIndex === entry.barIndex);
+    const source = this._source();
+    if (!bar || !source || !source.bars[entry.barIndex]) return null;
+    const event = source.bars[entry.barIndex].events[entry.globalIndex - bar.noteStart];
+    if (!event) return null;
+    const system = this._usesKeyModel() && this.keyModel ? "relative" : this._lessonSystem();
+    return { event, system };
+  }
+
+  /** Colour the moved notes, so a student can see which ones they moved. */
+  _markOctaves() {
+    const r = this.renderer;
+    if (!r || !r.notes) return;
+    r.notes.forEach((entry) => {
+      if (!entry.el) return;
+      const found = this._eventFor(entry);
+      const by = found && found.event.octave_shift;
+      entry.el.classList.toggle("vf-octave-shifted", !!by);
+      let title = entry.el.querySelector(":scope > title");
+      if (by) {
+        if (!title) {
+          title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+          entry.el.prepend(title);
+        }
+        title.textContent = "Sung " + Math.abs(by) + " octave" + (Math.abs(by) > 1 ? "s " : " ")
+          + (by > 0 ? "higher" : "lower") + " than written";
+      } else if (title) {
+        title.remove();
+      }
+    });
+  }
+
+  /**
+   * A click on a notehead, in a singing chapter between runs: offer to move
+   * the note an octave for this student.  Anywhere else — a guessing round,
+   * a run in progress — the click is left to the bar.
+   */
+  _onNoteClick(entry, event) {
+    if (!this.mode || !this.mode.needsMic || this.running || !isSignedIn()) return false;
+    const found = this._eventFor(entry);
+    if (!found || found.event.is_rest || found.event.id == null) return false;
+    this._openOctavePopover(found, entry, event);
+    return true;
+  }
+
+  _closeOctavePopover() {
+    if (this._octavePopover) this._octavePopover.remove();
+    this._octavePopover = null;
+    if (this._octaveDismiss) document.removeEventListener("mousedown", this._octaveDismiss, true);
+    this._octaveDismiss = null;
+  }
+
+  _openOctavePopover(found, entry, clickEvent) {
+    this._closeOctavePopover();
+    const current = found.event.octave_shift || 0;
+    const original = current
+      ? shiftNoteOctave(found.event.note_name, -current)
+      : found.event.note_name;
+    const pop = document.createElement("div");
+    pop.className = "octave-pop";
+    pop.setAttribute("role", "dialog");
+    pop.setAttribute("aria-label", "Sing this note an octave away");
+    const state = current === 0 ? "Sung as written"
+      : "Sung " + Math.abs(current) + " octave" + (Math.abs(current) > 1 ? "s " : " ")
+        + (current > 0 ? "higher" : "lower");
+    pop.innerHTML = '<div class="octave-pop-state"></div><div class="octave-pop-row"></div>';
+    pop.querySelector(".octave-pop-state").textContent = state;
+    const row = pop.querySelector(".octave-pop-row");
+    const add = (label, next, enabled) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "btn octave-pop-btn";
+      button.textContent = label;
+      button.disabled = !enabled;
+      button.addEventListener("click", () => this._setOctave(found, next));
+      row.appendChild(button);
+    };
+    add("Octave up", current + 1, current < 2 && !!shiftNoteOctave(original, current + 1));
+    add("Octave down", current - 1, current > -2 && !!shiftNoteOctave(original, current - 1));
+    if (current) add("As written", 0, true);
+    document.body.appendChild(pop);
+    const head = entry.el.getBoundingClientRect();
+    const x = Math.min(window.innerWidth - pop.offsetWidth - 8, Math.max(8, head.left + head.width / 2 - pop.offsetWidth / 2));
+    pop.style.left = x + window.scrollX + "px";
+    pop.style.top = head.bottom + window.scrollY + 8 + "px";
+    this._octavePopover = pop;
+    this._octaveDismiss = (e) => { if (!pop.contains(e.target)) this._closeOctavePopover(); };
+    document.addEventListener("mousedown", this._octaveDismiss, true);
+    if (clickEvent) clickEvent.stopPropagation();
+  }
+
+  async _setOctave(found, shift) {
+    this._closeOctavePopover();
+    const ok = await saveNoteOctave(found.system, found.event.id, shift);
+    if (!ok) { this.setStatus("Could not save that — the note is sung as before."); return; }
+    const key = found.system + ":" + found.event.id;
+    if (shift) this._octaves.set(key, shift); else this._octaves.delete(key);
+    this._applyOctaves();
+    this.barSteps = buildBarSteps(this._source());
+    this._degreeBarCache = null;
+    this._renderScoreVisual();
+    this.setStatus(shift ? "Moved for you only — your teacher's exercise is unchanged." : "Back to the written note.");
   }
 
   /**
