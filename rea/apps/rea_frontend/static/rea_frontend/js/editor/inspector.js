@@ -19,8 +19,8 @@
 import {
   DURATIONS, MODIFIERS, MODIFIER_LABELS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX,
   OFFSET_GAIN, describeNote, splitToken, buildToken,
-} from "./scoreDoc.js?v=170";
-import { labelWithAccidental, labelWithDuration, labelWithNotehead } from "./glyphs.js?v=170";
+} from "./scoreDoc.js?v=171";
+import { labelWithAccidental, labelWithDuration, labelWithNotehead } from "./glyphs.js?v=171";
 
 const MIXED = "—"; // em dash: several selected items, several values
 
@@ -795,7 +795,7 @@ export class Inspector {
       },
       {
         key: "draw_only_note_heads", label: "Note heads only", type: "checkbox",
-        hint: "Hides stems, flags and beams.",
+        hint: "Hides stems, flags and beams. The Rhythm view still shows them here, faintly.",
       },
       {
         key: "are_all_notes_same_duration", label: "Draw all notes alike", type: "checkbox",

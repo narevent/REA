@@ -19,26 +19,29 @@
  *   3  guess              play bar (hidden) -> click bar -> score
  *   4  guess_timed        as 3, with a per-bar countdown
  *   5  sing_proposed      highlight random bar -> sing -> score
- *   6  guess_notes        play a note (hidden) -> pick the bar/degree
+ *   6  guess_notes        play a note (hidden) -> write it on the answer staff
  *   7  guess_notes_t      as 6, with a per-bar countdown
  *   8  sing_notes         highlight a single note -> sing -> score
  *   9  sing_notes_t       as 8, with a per-bar countdown
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=170";
+import { AudioPlayer } from "./audioPlayer.js?v=171";
 import {
   PitchDetector, midiToName, getVoiceVibratoCents, getVoiceOnsetFloor,
-} from "./pitchDetector.js?v=170";
-import { API } from "./api.js?v=170";
+} from "./pitchDetector.js?v=171";
+import { API } from "./api.js?v=171";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt, tempoOf,
-} from "./practiceData.js?v=170";
+} from "./practiceData.js?v=171";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=170";
-import { tuning } from "./difficulty.js?v=170";
+} from "./practiceScore.js?v=171";
+import { tuning } from "./difficulty.js?v=171";
+import { keyAccidentals, modeChordToVexKey, parseNoteToken } from "./notation.js?v=171";
+import { vexClef } from "./components/staveLayout.js?v=171";
+import { AnswerStaff, naturalMidi, tokenStep, writtenName } from "./components/answerStaff.js?v=171";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 // Above this many rounds the per-round pips stop being readable (a 39-bar
@@ -267,6 +270,30 @@ export class PracticeController {
            k === "guess_notes_t" || k === "guess_multi";
   }
 
+  /** True for the chapters answered by writing the note on the answer staff
+   *  (6, 7).  Their exercise stave is drawn without accidentals beside the
+   *  notes, because it is there to show where the notes lie, and a sharp
+   *  printed beside every answer would be the answer.  A relative exercise
+   *  keeps its key signature — that is the key being practised, not a hint. */
+  _isNoteWriting() {
+    const k = this.mode && this.mode.key;
+    return k === "guess_notes" || k === "guess_notes_t";
+  }
+
+  /** True when the exercise is in a key (relative, read from a key model),
+   *  false for an absolute one, which is answered note by note with its own
+   *  accidentals. */
+  _inKey() {
+    return !!(this._usesKeyModel() && this.keyModel);
+  }
+
+  /** The VexFlow key a bar is written in, or "" outside a key. */
+  _barKey(barIndex) {
+    if (!this._inKey()) return "";
+    const bar = this.keyModel.bars && this.keyModel.bars[barIndex];
+    return modeChordToVexKey((bar && bar.music_mode_chord) || "");
+  }
+
   /** Mark the bar the student just clicked, before it has been judged.
    *
    *  A click on a stave has nothing of a button's press about it — without
@@ -326,6 +353,7 @@ export class PracticeController {
     this._clearTimers();
     this._stopMic();
     this._clickGuard = null;
+    if (this.answerStaff) this.answerStaff.disarm();
     this._hideDoneButton();
     if (this.renderer && this.renderer.clearSungNote) this.renderer.clearSungNote();
     const bar = document.getElementById("countdown-bar");
@@ -398,7 +426,12 @@ export class PracticeController {
 
         // The staff itself is moved in below — it is a long-lived node the
         // renderer draws into, not markup we can rebuild here.
-        '<div class="deck-stage" id="deck-stage"></div>' +
+        '<div class="deck-stage" id="deck-stage">' +
+          (this._isNoteWriting()
+            ? '<div class="answer-staff-wrap"><div class="answer-staff" id="d-answer"'
+              + ' aria-label="Answer staff: write the note you heard"></div></div>'
+            : "") +
+        "</div>" +
 
         '<div class="deck-foot">' +
           '<div class="deck-controls">' +
@@ -422,6 +455,8 @@ export class PracticeController {
     const slot = this.info.querySelector("#deck-stage");
     const stageWrap = this.stage.closest(".session-stage");
     if (slot && stageWrap) slot.appendChild(stageWrap);
+
+    this._mountAnswerStaff();
 
     this.info.querySelector("#d-start").addEventListener("click", () => this.start());
     // On a narrow screen the idle instruction is folded behind this; on a wide
@@ -686,10 +721,15 @@ export class PracticeController {
   _renderScoreVisual() {
     const source = this._source();
     if (!source) return;
+    const writing = this._isNoteWriting();
+    const drawOpts = {
+      keySignature: !writing || this._inKey(),
+      accidentals: !writing,
+    };
     if (this._usesKeyModel() && this.keyModel) {
-      this.renderer = this.renderKeyModelNotation(this.keyModel, (idx) => this._onBarClick(idx));
+      this.renderer = this.renderKeyModelNotation(this.keyModel, (idx) => this._onBarClick(idx), drawOpts);
     } else {
-      this.renderer = this.renderNotation(source, (idx) => this._onBarClick(idx));
+      this.renderer = this.renderNotation(source, (idx) => this._onBarClick(idx), drawOpts);
     }
     // A fresh run starts from a clean stave — accuracy colours accumulate
     // across the rounds of one session, not across sessions.
@@ -1354,14 +1394,54 @@ export class PracticeController {
 
   // ---- 6/7. Guessing notes -------------------------------------------------
 
+  /** The written notes of a bar's pitched steps, index for index with
+   *  `barPitches` — what the stave draws for each note it sounds. */
+  _barNoteNames(barIndex) {
+    const source = this._source();
+    const bar = source && source.bars && source.bars[barIndex];
+    const events = (bar && bar.events) || [];
+    const steps = (this.barSteps[barIndex] && this.barSteps[barIndex].steps) || [];
+    const names = [];
+    steps.forEach((step, i) => {
+      if (!step.isRest && step.midi != null) names.push(events[i] ? events[i].note_name : null);
+    });
+    return names;
+  }
+
+  /** Put the answer staff into the deck, drawn in the exercise's clef. */
+  _mountAnswerStaff() {
+    this.answerStaff = null;
+    const host = this.info.querySelector("#d-answer");
+    if (!host) return;
+    this.answerStaff = new AnswerStaff(host, { onAnswer: (note) => this._onStaffAnswer(note) });
+    const source = this._source();
+    const first = source && source.bars && source.bars[0];
+    this.answerStaff.draw(first && first.music_clef, this._barKey(0));
+  }
+
+  _onStaffAnswer(note) {
+    if (this._staffAnswer) this._staffAnswer(note);
+  }
+
   _roundGuessNotes(timed) {
     const barIndex = this.order[this.round];
     const pitches = barPitches(this.barSteps[barIndex]);
     const degrees = barDegrees(this.barSteps[barIndex]);
     if (!pitches.length) { this._advance(); return; }
     const noteIdx = randInt(pitches.length);
-    const targetMidi = pitches[noteIdx];
-    const targetDegree = degrees[noteIdx];
+    const name = this._barNoteNames(barIndex)[noteIdx];
+    const source = this._source();
+    const target = {
+      bar: barIndex,
+      midi: pitches[noteIdx],
+      degree: degrees[noteIdx],
+      step: tokenStep(parseNoteToken(name)),
+      clef: source.bars[barIndex] && source.bars[barIndex].music_clef,
+      key: this._barKey(barIndex),
+    };
+    // How the note is written: in a key the signature carries its accidental,
+    // so the answer is the position alone; outside one it is spelled out.
+    target.alteration = (target.key || target.step == null) ? 0 : target.midi - naturalMidi(target.step);
     this._lastAnswerBar = barIndex;
 
     this._roundToken++;          // invalidate any stale onStep(-1) from the previous round
@@ -1371,62 +1451,76 @@ export class PracticeController {
     const single = steps.filter((s) => !s.isRest).slice(noteIdx, noteIdx + 1).map((s) => ({ ...s, startMs: 0 }));
     const sched = single.length ? single : steps.filter((s) => !s.isRest).slice(0, 1).map((s) => ({ ...s, startMs: 0 }));
     this._clearAnswerMarks();
-    this._setLegend("Hear the note, click the bar of its scale degree." + (timed ? " (" + TIMED_DEFAULT + "s)" : ""));
-    this._prompt("Hear the note, click the bar of its degree. <b>" + (this.round + 1) + "/" + this.order.length + "</b>" +
+    if (this.answerStaff) {
+      // A bar in another clef gets a staff in that clef: the same height
+      // means a different note in each, and the answer has to be read the
+      // way the exercise is.
+      if ((target.clef && this.answerStaff.clef !== vexClef(target.clef)) || this.answerStaff.key !== target.key) {
+        this.answerStaff.draw(target.clef, target.key);
+      }
+      this.answerStaff.reset();
+    }
+    this._setLegend("Hear the note, then write it on the staff." + (timed ? " (" + TIMED_DEFAULT + "s)" : ""));
+    this._prompt("Hear the note, write it on the staff above. <b>" + (this.round + 1) + "/" + this.order.length + "</b>" +
       (timed ? ' <span class="cd" id="d-countdown">' + TIMED_DEFAULT + "s</span>" : ""));
     const ok = this.player.play(sched, {
-      onStep: (i) => { if (i < 0 && token === this._roundToken) this._awaitNoteGuess(barIndex, targetDegree, timed); },
+      onStep: (i) => { if (i < 0 && token === this._roundToken) this._awaitNoteGuess(target, timed); },
     });
     if (!ok) { this.setStatus("Audio unavailable."); if (token === this._roundToken) this._advance(); }
   }
 
-  _awaitNoteGuess(answerBar, answerDegree, timed) {
+  /**
+   * Wait for the note to be written on the answer staff, and mark it.
+   *
+   * In a key the answer is a line or a space, right when it is the one the
+   * played note is written on — the key signature says the rest.  Outside a
+   * key it is a line or space plus an accidental, right when together they
+   * sound the note that was played, however it is spelled: B♭ and A♯ are
+   * both the note a student heard.
+   *
+   * Neither compares degree labels.  Every absolute lesson's labels are
+   * empty, so "same degree" was true of every bar and every answer was right.
+   */
+  _awaitNoteGuess(target, timed) {
     if (!this.running) return;
     let resolved = false;
-    // The note played here is one of the exercise's own, so the answer is the
-    // bare degree — but the student can still say "sharpened", and saying so
-    // about a note that was not is a wrong answer rather than an impossible
-    // one.  That is the point of the buttons being there in every guessing
-    // round and not only in the generated ones.
-    this._armAccidental(0);
-    const prompt = this.info.querySelector("#d-prompt");
-    if (prompt) this._renderAccidentalPicker(prompt);
-    this._clickGuard = (idx) => {
-      if (resolved || !this.running) return;
+    // The exercise stave is the map, not the answer sheet: a click on it
+    // while the question stands must neither answer nor start another round.
+    this._clickGuard = () => {};
+    const playedName = target.step != null ? writtenName(target.step, target.midi) : midiToName(target.midi);
+    const said = (target.degree !== "" && target.degree != null ? "degree " + target.degree + ", " : "")
+      + "bar " + (target.bar + 1);
+    const answer = { step: target.step, alteration: target.alteration };
+    const keyMap = keyAccidentals(target.key);
+    /** The pitch a written answer sounds, the key signature included. */
+    const sounds = (note) => naturalMidi(note.step)
+      + (target.key ? (keyMap["cdefgah"[((note.step % 7) + 7) % 7]] || 0) : note.alteration);
+    const finish = (score, verdict, head, detail, picked) => {
       resolved = true;
-      this._stopCountdown();
-      this._markPick(idx);
-      const guessedDegrees = barDegrees(this.barSteps[idx]);
-      const guessedDegree = guessedDegrees.length ? guessedDegrees[0] : null;
-      const alteration = this._guessAlteration || 0;
-      const hit = alteration === 0
-        && guessedDegrees.some((d) => String(d) === String(answerDegree));
-      this._armAccidental(0);
-      const score = hit ? 100 : 0;
+      this._staffAnswer = null;
+      this._clickGuard = null;
       this.scores.push(score);
       this._renderScore(); this._renderProgress();
-      // A hit is a hit whichever bar carries the degree, so the bar clicked is
-      // the one marked correct — pointing at `answerBar` instead would tell a
-      // student who got it right that they got it wrong.
-      this._showAnswer(idx, hit ? idx : answerBar, hit);
-      this._feedback({
-        score, verdict: hit ? "Perfect" : "Miss",
-        head: "Note was degree " + answerDegree + " (bar " + (answerBar + 1) + ")",
-        detail: "You clicked bar " + (idx + 1)
-          + " (deg " + this._sayDegree(guessedDegree, alteration) + ")",
-      });
-      this._setLegend("Note guess: " + score + "/100");
-      this._advanceAfter(1100);
+      if (this.answerStaff) this.answerStaff.showResult(picked, answer, score === 100);
+      this._showAnswer(null, target.bar, score === 100);
+      this._feedback({ score, verdict, head, detail });
     };
+    this._staffAnswer = (note) => {
+      if (resolved || !this.running) return;
+      this._stopCountdown();
+      const hit = target.key ? note.step === target.step : sounds(note) === target.midi;
+      finish(hit ? 100 : 0, hit ? "Perfect" : "Miss",
+        "Note was " + playedName + " (" + said + ")",
+        "You wrote " + writtenName(note.step, sounds(note)), note);
+      this._setLegend("Note guess: " + (hit ? 100 : 0) + "/100");
+      this._advanceAfter(1500);
+    };
+    if (this.answerStaff) this.answerStaff.arm();
     if (timed) this._startCountdown(() => {
       if (resolved || !this.running) return;
-      resolved = true;
-      this.scores.push(0);
-      this._renderScore(); this._renderProgress();
-      this._showAnswer(null, answerBar, false);
-      this._feedback({ score: 0, verdict: "Miss", head: "Time up! Note was degree " + answerDegree + " (bar " + (answerBar + 1) + ")", detail: "" });
+      finish(0, "Miss", "Time up! Note was " + playedName + " (" + said + ")", "", null);
       this._setLegend("Time up");
-      this._advanceAfter(900);
+      this._advanceAfter(1200);
     });
   }
 
@@ -1551,6 +1645,24 @@ export class PracticeController {
     return arr.length >= 2 ? arr : null;
   }
 
+  /**
+   * Whether a guess names the note that was played.
+   *
+   * Judged by pitch: the bar's note plus the armed accidental against the
+   * note that sounded.  Degree labels cannot decide it — an absolute lesson
+   * carries none, and with every label empty every bar "matched".
+   */
+  _sameNote(guess, answer) {
+    return guess != null && answer != null && guess.midi != null && guess.midi === answer.midi;
+  }
+
+  /** A note as this exercise says it: its degree when the exercise labels
+   *  degrees, its name when it does not (absolute lessons). */
+  _sayNote(entry) {
+    if (entry.degree === "" || entry.degree == null) return midiToName(entry.midi);
+    return this._sayDegree(entry.degree, entry.alteration);
+  }
+
   /** A degree with its alteration, as a student reads it: "4♯". */
   _sayDegree(degree, alteration) {
     const sign = alteration > 0 ? "\u266f" : alteration < 0 ? "\u266d" : "";
@@ -1594,17 +1706,13 @@ export class PracticeController {
     if (!this.running) return;
     const guesses = [];
     let resolved = false;
-    const same = (guess, answer) => (
-      guess != null
-      && String(guess.degree) === String(answer.degree)
-      && guess.alteration === answer.alteration
-    );
+    const same = (guess, answer) => this._sameNote(guess, answer);
     const renderProgress = () => {
       const cells = question.map((a, i) => {
         const g = guesses[i];
         const ok = same(g, a);
         return "<span class='mg-cell " + (g == null ? "pending" : ok ? "good" : "wrong") + "'>"
-          + (i + 1) + ": " + (g ? this._sayDegree(g.degree, g.alteration) : "?") + "</span>";
+          + (i + 1) + ": " + (g ? this._sayNote(g) : "?") + "</span>";
       }).join("");
       this._prompt("Click bar for note <b>" + (guesses.length + 1) + "/" + question.length + "</b>");
       const rep = this.info.querySelector("#d-prompt");
@@ -1620,11 +1728,14 @@ export class PracticeController {
     this._clickGuard = (idx) => {
       if (resolved || !this.running) return;
       const degrees = barDegrees(this.barSteps[idx]);
+      const pitches = barPitches(this.barSteps[idx]);
+      // The accidental the student armed applies to this answer and no
+      // further, the way a written accidental applies to its own note.
+      const alteration = this._guessAlteration || 0;
       guesses.push({
         degree: degrees.length ? degrees[0] : null,
-        // The accidental the student armed applies to this answer and no
-        // further, the way a written accidental applies to its own note.
-        alteration: this._guessAlteration || 0,
+        alteration,
+        midi: pitches.length ? pitches[0] + alteration : null,
         barIndex: idx,
       });
       this._armAccidental(0);
@@ -1644,8 +1755,8 @@ export class PracticeController {
         const cells = question.map((a, i) => {
           const g = guesses[i];
           return "<span class='mg-cell " + (same(g, a) ? "good" : "wrong") + "'>" + (i + 1) + ": "
-            + (g ? this._sayDegree(g.degree, g.alteration) : "?")
-            + " / " + this._sayDegree(a.degree, a.alteration) + "</span>";
+            + (g ? this._sayNote(g) : "?")
+            + " / " + this._sayNote(a) + "</span>";
         }).join("");
         this._feedback({
           score, verdict: scoreLabel(score),
@@ -1701,11 +1812,7 @@ export class PracticeController {
   _markMultiResults(pickedBars, guesses, question) {
     const r = this.renderer;
     if (!r || !r.markBarResult) return;
-    const ok = (i) => (
-      guesses[i] != null
-      && String(guesses[i].degree) === String(question[i].degree)
-      && guesses[i].alteration === question[i].alteration
-    );
+    const ok = (i) => this._sameNote(guesses[i], question[i]);
     pickedBars.forEach((bar, i) => { if (ok(i)) r.markBarResult(bar, "correct"); });
     pickedBars.forEach((bar, i) => { if (!ok(i)) r.markBarResult(bar, "wrong"); });
     const firstWrong = pickedBars.find((bar, i) => !ok(i));

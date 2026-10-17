@@ -359,6 +359,12 @@ svg.rea-score.heads-only .vf-beam { display: none !important; }
 .shows-rhythm svg.rea-score .vf-stavenote .vf-stem,
 .shows-rhythm svg.rea-score .vf-stavenote .vf-flag,
 .shows-rhythm svg.rea-score .vf-beam { display: inline !important; }
+/* When the exercise is set to note heads only, the stems the Rhythm view puts
+   back are drawn faint: there to edit by, and plainly not what a student
+   will see. */
+.shows-rhythm svg.rea-score.heads-only .vf-stavenote .vf-stem,
+.shows-rhythm svg.rea-score.heads-only .vf-stavenote .vf-flag,
+.shows-rhythm svg.rea-score.heads-only .vf-beam { opacity: 0.25; }
 
 /* A separator: a breath, a phrase end, a tick over the note before it.  Drawn
    into the score by `staveLayout`, and coloured here so both views agree. */
@@ -577,6 +583,35 @@ svg.rea-score .vf-bar-number {
    inside here rather than pushing the transport off the bottom of the page. */
 .deck-stage { flex: 1; min-height: 0; overflow-y: auto; }
 .deck-stage .session-stage { padding: 16px 0 4px; max-width: none; }
+
+/* The note-guessing chapters' answer: an empty staff above the exercise,
+   written on by hovering and clicking.  Quiet until a question stands. */
+.answer-staff-wrap { display: flex; justify-content: center; padding-top: 12px; }
+.answer-staff {
+  width: 240px; max-width: 100%; line-height: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  opacity: 0.55; transition: opacity 0.15s, border-color 0.15s, box-shadow 0.15s;
+  touch-action: none;
+}
+.answer-staff svg { display: block; width: 100%; height: auto; outline: none; }
+.answer-staff.is-armed { opacity: 1; cursor: pointer; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+.answer-staff .as-head { fill: var(--ink); }
+.answer-staff .as-ledger { stroke: var(--ink); stroke-width: 1; }
+.answer-staff .is-ghost .as-head { fill: var(--accent); opacity: 0.55; }
+.answer-staff .is-ghost .as-ledger { stroke: var(--accent); opacity: 0.55; }
+.answer-staff .is-picked .as-head { fill: var(--accent); }
+.answer-staff .is-correct .as-head { fill: var(--good); }
+.answer-staff .is-wrong .as-head { fill: var(--bad); }
+.answer-staff .as-acc { font-size: 17px; fill: var(--ink); }
+.answer-staff .is-ghost .as-acc { fill: var(--accent); opacity: 0.55; }
+.answer-staff .is-picked .as-acc { fill: var(--accent); }
+.answer-staff .is-correct .as-acc { fill: var(--good); }
+.answer-staff .is-wrong .as-acc { fill: var(--bad); }
+/* Without a key, where across the staff you hover picks the accidental:
+   left flattens, middle leaves it, right sharpens.  The labels say so. */
+.answer-staff .as-zone { font-size: 15px; fill: var(--muted-2); visibility: hidden; }
+.answer-staff.is-armed .as-zone { visibility: visible; }
+.answer-staff .as-zone.is-on { fill: var(--accent); font-weight: 600; }
 
 /* --- the band below: transport, then the instruction --------------------- */
 

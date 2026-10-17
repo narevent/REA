@@ -20,12 +20,13 @@
  */
 
 import {
-  CLEF_TOP_LINE, METRICS, NOTEHEAD_REACH, drawScore, noteHeadYs, resolveVexFlow, vexClef,
-} from "../components/staveLayout.js?v=170";
+  CLEF_TOP_LINE, METRICS, NOTEHEAD_REACH, drawScore, noteHeadYs, resolveVexFlow, scoreStyle,
+  vexClef,
+} from "../components/staveLayout.js?v=171";
 import {
   LETTERS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX, OFFSET_GAIN,
   buildToken, offsetMs, splitToken,
-} from "./scoreDoc.js?v=170";
+} from "./scoreDoc.js?v=171";
 
 /** Vertical room added to each row when annotation lanes are showing. */
 const LANE_SPACE = 58;
@@ -83,10 +84,13 @@ export class ScoreCanvas {
     return ((degrees || offsets || volumes) ? LANE_SPACE : 0) + (rhythm ? STEM_SPACE : 0);
   }
 
-  /** Whether the exercise's style is already numbering the bars. */
-  _styleNumbersBars() {
+  /** Whether the exercise's style already numbers this bar: every bar, or
+   *  the first bar of each line. */
+  _styleNumbersBar(box) {
     const kind = this.doc && this.doc.meta && this.doc.meta.bar_number_type;
-    return kind === "all";
+    if (kind === "all") return true;
+    if (kind !== "row") return false;
+    return this.barBoxes.find((b) => b.row === box.row) === box;
   }
 
   setView(view) {
@@ -212,7 +216,7 @@ export class ScoreCanvas {
       // them.  The editor adds a number of its own only when the style draws
       // none, because a teacher editing bar 14 needs to know it is bar 14
       // whatever the students will see.
-      if (!this._styleNumbersBars()) {
+      if (!this._styleNumbersBar(box)) {
         const number = el("text", {
           x: box.x + 3, y: span.line0 - 18, class: "ed-bar-number",
         });
@@ -490,9 +494,11 @@ export class ScoreCanvas {
     const x = clientX - svgRect.left;
     const y = clientY - svgRect.top;
     let fallback = null;
+    // Half the exercise's own gap on each side, so a click between two bars
+    // goes to the nearer one whatever the gap has been set to.
+    const half = scoreStyle(this.doc && this.doc.meta).barGap / 2;
     for (const box of this.barBoxes) {
-      const withinX = x >= box.x - METRICS.BAR_GAP / 2
-        && x <= box.x + box.width + METRICS.BAR_GAP / 2;
+      const withinX = x >= box.x - half && x <= box.x + box.width + half;
       if (!withinX) continue;
       const span = this._barSpan(box);
       if (y >= span.top && y <= span.bottom) return box;

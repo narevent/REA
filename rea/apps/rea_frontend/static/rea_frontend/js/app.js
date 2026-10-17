@@ -11,36 +11,36 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=170";
-import { renderLessonNotation } from "./views/lessonView.js?v=170";
-import { renderScaleNotation } from "./views/scaleView.js?v=170";
-import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=170";
+import { API } from "./api.js?v=171";
+import { renderLessonNotation } from "./views/lessonView.js?v=171";
+import { renderScaleNotation } from "./views/scaleView.js?v=171";
+import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=171";
 import {
   renderLessonInstrument, renderScaleInstrument, resetRenderer as resetInstrument,
-} from "./views/instrumentView.js?v=170";
-import { SoundcheckView } from "./views/soundcheckView.js?v=170";
-import { AudioPlayer } from "./audioPlayer.js?v=170";
-import { PracticeController } from "./practiceController.js?v=170";
-import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=170";
+} from "./views/instrumentView.js?v=171";
+import { SoundcheckView } from "./views/soundcheckView.js?v=171";
+import { AudioPlayer } from "./audioPlayer.js?v=171";
+import { PracticeController } from "./practiceController.js?v=171";
+import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=171";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=170";
+} from "./chapters.js?v=171";
 import {
   AREAS, AREA_BY_ID, contextFor, kindOf, isPractisable, defaultCategory, setDictations,
   categoryByUid, firstCategory, pathOf, neighbourCategory,
-} from "./curriculum.js?v=170";
-import { createNav } from "./curriculumNav.js?v=170";
+} from "./curriculum.js?v=171";
+import { createNav } from "./curriculumNav.js?v=171";
 import {
   DIFFICULTIES, DIFFICULTY_LABELS, getDifficulty, setDifficulty,
   adoptAccountDifficulty,
-} from "./difficulty.js?v=170";
+} from "./difficulty.js?v=171";
 import {
   TEMPO_SCALES, tempoLabel, getTempoScale, setTempoScale,
-} from "./tempo.js?v=170";
+} from "./tempo.js?v=171";
 // Shared with the score editor's tree, so both call the same thing by the
 // same name.
-import { absPartKey, absPartLabel } from "./lessonNaming.js?v=170";
+import { absPartKey, absPartLabel } from "./lessonNaming.js?v=171";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -664,19 +664,19 @@ const practice = new PracticeController({
   // different lesson — it is the same one shown as scale degrees, so the
   // choice is made here, at the one place the score is drawn, and nothing
   // downstream has to know which of the two it is driving.
-  renderNotation: (lesson, onBarClick) => {
+  renderNotation: (lesson, onBarClick, opts) => {
     const view = getView();
     if (view !== "score") return renderLessonInstrument(lesson, onBarClick, view);
     return isNumericCategory()
       ? renderLessonNumeric(lesson, onBarClick)
-      : renderLessonNotation(lesson, onBarClick);
+      : renderLessonNotation(lesson, onBarClick, opts);
   },
-  renderKeyModelNotation: (keyModel, onBarClick) => {
+  renderKeyModelNotation: (keyModel, onBarClick, opts) => {
     const view = getView();
     if (view !== "score") return renderScaleInstrument(keyModel, onBarClick, view);
     return isNumericCategory()
       ? renderScaleNumeric(keyModel, onBarClick)
-      : renderScaleNotation(keyModel, onBarClick);
+      : renderScaleNotation(keyModel, onBarClick, opts);
   },
   getKeyModel: (id) => API.getKey(id),
   setStatus: (m) => setStatus(m),

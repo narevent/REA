@@ -86,7 +86,7 @@ class StyledScore(models.Model):
 
     # -- on the page -------------------------------------------------------
     mid_bar_space = models.PositiveSmallIntegerField(
-        default=22,
+        default=12,
         help_text="Whitespace between two bars on the page, in pixels.",
     )
     bars_per_row = models.PositiveSmallIntegerField(
@@ -170,10 +170,10 @@ STYLE_FIELDS = (
 
 
 #: The source measures the gap between bars in its own unit, and writes 3 for
-#: every file in the library.  The renderer has always drawn that gap as 22
-#: pixels, so one source unit is a little over seven of them — which is how a
-#: re-imported lesson keeps the spacing it has always been drawn with.
-SOURCE_SPACE_PX = 22 / 3
+#: every file in the library.  That 3 is drawn as the default gap, 12 pixels,
+#: so one source unit is four of them — which is how a re-imported lesson
+#: lands on the same spacing as every other exercise.
+SOURCE_SPACE_PX = 12 / 3
 
 
 def style_from_source(data: dict) -> dict:

@@ -13,7 +13,7 @@
 
 import {
   NOTEHEAD_REACH, drawScore, durationToType, noteHeadYs, resolveVexFlow,
-} from "./staveLayout.js?v=170";
+} from "./staveLayout.js?v=171";
 
 /** Accuracy bands for `setNoteAccuracy`.  The thresholds match the per-note
  *  chips in the feedback row, so the stave and the report agree. */
@@ -143,7 +143,7 @@ export class NotationRenderer {
    * that answer to a click, and the highlighting the practice session drives.
    */
   render(bars, opts = {}, isRelayout = false) {
-    const { clef = "treble", title = "", onBarClick = null, style = null } = opts;
+    const { clef = "treble", title = "", onBarClick = null, style = null, keySignature = true, accidentals = true } = opts;
     this.clear();
     if (!isRelayout) this._relayouts = 0;
     this._lastDraw = { bars, opts };
@@ -159,7 +159,7 @@ export class NotationRenderer {
     // stems are drawn, what is written under its notes.  A student sees the
     // exercise as the teacher set it, which is the whole point of the
     // settings being on the exercise.
-    const drawn = drawScore(this.container, bars, { style });
+    const drawn = drawScore(this.container, bars, { style, keySignature, accidentals });
     if (!drawn) return [];
     this._drawnFor = this.container.clientWidth;
 
