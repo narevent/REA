@@ -8,7 +8,7 @@
  * fermata change length and weight the way a player would.
  */
 
-import * as S from "./score.js?v=176";
+import * as S from "./score.js?v=177";
 
 const LEVELS = { ppp: 28, pp: 40, p: 54, mp: 66, mf: 78, f: 92, ff: 106, fff: 118 };
 const START_LEVEL = 74;

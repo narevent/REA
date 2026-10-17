@@ -16,17 +16,17 @@
  * belongs to.
  */
 
-import { resolveVexFlow } from "../components/staveLayout.js?v=176";
-import * as S from "./score.js?v=176";
+import { resolveVexFlow } from "../components/staveLayout.js?v=177";
+import * as S from "./score.js?v=177";
 
 export const METRICS = {
   margin: 14,          // left and right
   nameWidth: 76,       // room for part names on the first system
-  top: 78,             // above the first system: tempo, endings, phrases
+  top: 96,             // above the first system: phrases, then tempo and endings
   staffGap: 78,        // top line to top line within a part
   laneOffset: 17,      // under a staff, the centre of its dynamics lane
   partGap: 84,         // between parts
-  systemGap: 84,       // between systems
+  systemGap: 96,       // between systems
   minMeasure: 70,
   clefWidth: 34,
   keyAccWidth: 10,
@@ -613,7 +613,10 @@ function drawPhrases(context, score, layout, phrases) {
       const x2 = si === to.system
         ? (lastNote ? lastNote.getAbsoluteX() + 16 : to.x + 16)
         : measures[measures.length - 1].x + measures[measures.length - 1].width;
-      const y = sys.top - 30 - (i % 2) * 12;
+      // Above the tempo mark and the endings, which sit just over the staff;
+      // neighbouring phrases alternate height so where one ends and the next
+      // begins is never in doubt.
+      const y = sys.top - 54 - (i % 2) * 12;
       const path = document.createElementNS(svgNS, "path");
       const openLeft = si !== from.system;
       const openRight = si !== to.system;

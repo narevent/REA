@@ -71,6 +71,13 @@ export const API = {
     return data.results || data;
   },
 
+  /** The scores written in the dictation editor that this person may read:
+   *  the published ones (and, for a teacher, their own). */
+  async listDictationScores() {
+    const data = await fetchJSON("/api/dictation-scores/");
+    return data.results || data;
+  },
+
   /** One dictation, whole.  Dictations are not served by the intonation
    *  detail endpoints — those are the curriculum's — so they have a door of
    *  their own. */

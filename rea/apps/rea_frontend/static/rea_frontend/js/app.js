@@ -11,37 +11,38 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=176";
-import { renderLessonNotation } from "./views/lessonView.js?v=176";
-import { renderScaleNotation } from "./views/scaleView.js?v=176";
-import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=176";
+import { API } from "./api.js?v=177";
+import { renderLessonNotation } from "./views/lessonView.js?v=177";
+import { renderScaleNotation } from "./views/scaleView.js?v=177";
+import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=177";
 import {
   renderLessonInstrument, renderScaleInstrument, resetRenderer as resetInstrument,
-} from "./views/instrumentView.js?v=176";
-import { pairRenderers } from "./components/pairedRenderer.js?v=176";
-import { SoundcheckView } from "./views/soundcheckView.js?v=176";
-import { AudioPlayer } from "./audioPlayer.js?v=176";
-import { PracticeController } from "./practiceController.js?v=176";
-import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=176";
+} from "./views/instrumentView.js?v=177";
+import { pairRenderers } from "./components/pairedRenderer.js?v=177";
+import { DictationPractice } from "./dictation/practice.js?v=177";
+import { SoundcheckView } from "./views/soundcheckView.js?v=177";
+import { AudioPlayer } from "./audioPlayer.js?v=177";
+import { PracticeController } from "./practiceController.js?v=177";
+import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=177";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=176";
+} from "./chapters.js?v=177";
 import {
   AREAS, AREA_BY_ID, contextFor, kindOf, isPractisable, defaultCategory, setDictations,
   categoryByUid, firstCategory, pathOf, neighbourCategory,
-} from "./curriculum.js?v=176";
-import { createNav } from "./curriculumNav.js?v=176";
+} from "./curriculum.js?v=177";
+import { createNav } from "./curriculumNav.js?v=177";
 import {
   DIFFICULTIES, DIFFICULTY_LABELS, getDifficulty, setDifficulty,
   adoptAccountDifficulty,
-} from "./difficulty.js?v=176";
+} from "./difficulty.js?v=177";
 import {
   TEMPO_SCALES, tempoLabel, getTempoScale, setTempoScale,
-} from "./tempo.js?v=176";
+} from "./tempo.js?v=177";
 // Shared with the score editor's tree, so both call the same thing by the
 // same name.
-import { absPartKey, absPartLabel } from "./lessonNaming.js?v=176";
+import { absPartKey, absPartLabel } from "./lessonNaming.js?v=177";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -1467,6 +1468,16 @@ async function applyCategory(node, part, exercise) {
     renderNav();
   }
 
+  // A score from the dictation editor is given in the dictation player, not
+  // run through the chapters.
+  if (kindOf(node) === "dictation-score") {
+    practice.stop();
+    state.activeChapter = null;
+    await showDictationScore(node, ctx.scoreDictation.id);
+    renderTopbar();
+    return;
+  }
+
   if (!isPractisable(node)) {
     practice.stop();
     state.activeChapter = null;
@@ -1541,6 +1552,9 @@ function showPlaceholder(node) {
   const ph = document.getElementById("placeholder");
   if (stage) stage.hidden = true;
   if (info) info.hidden = true;
+  const dictation = document.getElementById("dictation-view");
+  if (dictation) dictation.hidden = true;
+  if (dictationPlayer) dictationPlayer.stop();
   if (!ph) return;
   ph.hidden = false;
   const copy = {
@@ -1563,6 +1577,32 @@ function hidePlaceholder() {
   if (stage) stage.hidden = false;
   if (info) info.hidden = false;
   if (ph) ph.hidden = true;
+  const dictation = document.getElementById("dictation-view");
+  if (dictation) dictation.hidden = true;
+  if (dictationPlayer) dictationPlayer.stop();
+}
+
+/** Open a dictation score in the dictation player, in place of the deck. */
+let dictationPlayer = null;
+async function showDictationScore(node, id) {
+  showSession();
+  const stage = document.querySelector(".session-stage");
+  const info = document.getElementById("info");
+  const ph = document.getElementById("placeholder");
+  const host = document.getElementById("dictation-view");
+  if (stage) stage.hidden = true;
+  if (info) info.hidden = true;
+  if (ph) ph.hidden = true;
+  if (!host) return;
+  host.hidden = false;
+  if (!dictationPlayer) dictationPlayer = new DictationPractice(host, { player, setStatus });
+  try {
+    await dictationPlayer.open(id);
+  } catch (e) {
+    host.innerHTML = '<div class="ph-card"><div class="ph-kind">Dictation</div><h2></h2><p></p></div>';
+    host.querySelector("h2").textContent = node.name;
+    host.querySelector("p").textContent = e.message;
+  }
 }
 
 // --- position memory -------------------------------------------------------
@@ -2220,7 +2260,11 @@ viewSession.addEventListener("rea:next-chapter", (e) => {
   // in the app depends on the list, so a failure here must not stop a student
   // reaching their intonation exercises.
   try {
-    setDictations(await API.listDictations());
+    const [lessons, scores] = await Promise.all([
+      API.listDictations().catch(() => []),
+      API.listDictationScores().catch(() => []),
+    ]);
+    setDictations(lessons, scores);
   } catch (e) { /* the area keeps its outline */ }
 
   // Straight into an exercise — where the student left off, or the method's

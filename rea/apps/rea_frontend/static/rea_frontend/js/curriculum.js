@@ -416,15 +416,24 @@ AREAS.forEach(linkArea);
  * They go at the top of the area, above the outline of dictation types that
  * is still to be built, because they are the part of it that exists.
  *
+ * Scores from the dictation editor sit beside them.  They are not lessons —
+ * no chapters run on them — so they carry a kind of their own, and the app
+ * opens them in the dictation player instead.
+ *
  * @param {Array<{id, system, name}>} lessons
+ * @param {Array<{id, title, composer}>} scores
  */
-export function setDictations(lessons) {
+export function setDictations(lessons, scores = []) {
   const area = AREA_BY_ID.dictates;
   if (!area) return;
-  const written = (lessons || []).map((lesson) => ({
+  const written = (scores || []).map((score) => ({
+    name: score.composer ? `${score.title} (${score.composer})` : score.title,
+    kind: "dictation-score",
+    ctx: { scoreDictation: { id: score.id } },
+  })).concat((lessons || []).map((lesson) => ({
     name: lesson.name,
     ctx: { dictation: { id: lesson.id, system: lesson.system } },
-  }));
+  })));
   area.tree = written.length
     ? [{ name: "Written for you", children: written }].concat(DICTATES)
     : DICTATES.slice();
@@ -455,7 +464,8 @@ export function contextFor(node) {
   return ctx;
 }
 
-/** "todo" | "numeric" | "combo" | "score" — which view a category renders. */
+/** "todo" | "numeric" | "combo" | "score" | "dictation-score" — which view a
+ *  category renders. */
 export function kindOf(node) {
   if (node.kind) return node.kind;
   for (const n of pathOf(node)) if (n.kind) return n.kind;
