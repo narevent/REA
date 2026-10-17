@@ -18,7 +18,7 @@
  * the same code runs in node and is tested there (`tests/dictation/musicxml.mjs`).
  */
 
-import * as S from "./score.js?v=180";
+import * as S from "./score.js?v=181";
 
 // ---------------------------------------------------------------------------
 // A small XML reader — enough for MusicXML, no more.

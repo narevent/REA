@@ -15,14 +15,14 @@
  * panel are built in `ui.js` from the state kept here.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=180";
-import * as S from "./score.js?v=180";
+import { AudioPlayer } from "../audioPlayer.js?v=181";
+import * as S from "./score.js?v=181";
 import {
   eventAt, measureAt, paintState, renderScore, stepAt, stepY, tickX,
-} from "./layout.js?v=180";
-import { readMusicXml, unzipMxl, writeMusicXml } from "./musicxml.js?v=180";
-import { schedule } from "./playback.js?v=180";
-import { buildPalette, buildPanel, buildToolbar, openDialog } from "./ui.js?v=180";
+} from "./layout.js?v=181";
+import { readMusicXml, unzipMxl, writeMusicXml } from "./musicxml.js?v=181";
+import { schedule } from "./playback.js?v=181";
+import { buildPalette, buildPanel, buildToolbar, openDialog } from "./ui.js?v=181";
 
 const API = "/api/dictation-scores/";
 const DURATION_KEYS = { 1: "64", 2: "32", 3: "16", 4: "8", 5: "q", 6: "h", 7: "w" };

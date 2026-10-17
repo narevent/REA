@@ -51,8 +51,22 @@
  *  is tuned for monophonic pitch playback: clear fundamental, musical
  *  envelope, and a timbre that reads well at the short-to-medium note lengths
  *  the exercises use. */
+import { loadPiano, pianoReady, pianoVoice } from "./sampler.js?v=181";
+
 export const SOUND_PRESETS = [
   // ---- Acoustic ------------------------------------------------------------
+  // A real piano, recorded — the default.  `sampled` marks it as played from
+  // the Salamander samples (see `sampler.js`) rather than synthesised; while
+  // they are still loading, the synthesised grand below plays instead.
+  {
+    id: "salamander_piano",
+    label: "Grand Piano (recorded)",
+    group: "Acoustic",
+    sampled: "salamander",
+    fallback: "grand_piano",
+    level: 0.95,
+    voices: [],
+  },
   // The plain instruments, first and default.  Everything below them is a
   // characterful synth voice, which is fine to practise against and wrong to
   // meet first: an ear-training exercise should sound like music being played,
@@ -411,7 +425,7 @@ export const SOUND_PRESETS = [
   },
 ];
 
-const DEFAULT_PRESET_ID = "grand_piano";
+const DEFAULT_PRESET_ID = "salamander_piano";
 const STORAGE_KEY = "rea.soundPreset";
 
 /** The default preset, by id — not by position, so reordering the list above
@@ -471,7 +485,13 @@ export function soundPresetGroups() {
  * rings on *after* the note's length — the score's per-note `attack_decay_time`.
  */
 export function buildVoice(ctx, freq, t, durSec, vol, preset, { release = null } = {}) {
-  const p = preset || _current;
+  let p = preset || _current;
+  if (p.sampled) {
+    if (pianoReady()) return pianoVoice(ctx, freq, t, durSec, vol, { release, level: p.level });
+    // Not loaded yet: start loading, and let the synthesised piano play this note.
+    loadPiano(ctx);
+    p = SOUND_PRESETS.find((x) => x.id === p.fallback) || SOUND_PRESETS.find((x) => !x.sampled);
+  }
   const out = ctx.createGain();
   out.gain.setValueAtTime(0.0001, t);
 

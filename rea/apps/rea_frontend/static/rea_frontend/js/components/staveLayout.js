@@ -34,7 +34,7 @@
 import {
   keyAccidentalCount, keyAccidentals, modeChordToVexKey, noteNameToVexflow,
   noteTokenToMidi, parseNoteToken,
-} from "../notation.js?v=180";
+} from "../notation.js?v=181";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
 export const METRICS = {
