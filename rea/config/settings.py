@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "rea.apps.rea_api.intonation.relative",
     "rea.apps.rea_api.intonation.absolute",
     "rea.apps.rea_frontend",
+    "rea.apps.dictation",
 ]
 
 MIDDLEWARE = [

@@ -39,6 +39,7 @@ server.{% endcomment %}
       <a class="app-nav-btn" href="{% url 'rea_frontend:about' %}">About</a>
       {% if user.profile.is_teacher or user.is_staff %}
         <a class="app-nav-btn" href="{% url 'rea_frontend:editor' %}">Editor</a>
+        <a class="app-nav-btn" href="{% url 'rea_frontend:dictation-editor' %}">Dictations</a>
       {% endif %}
       <div class="header-stats" id="header-stats"></div>
       {% include "accounts/_account_chip.html" %}

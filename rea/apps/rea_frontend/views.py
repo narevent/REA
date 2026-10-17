@@ -55,3 +55,16 @@ class EditorView(UserPassesTestMixin, TemplateView):
 
     def test_func(self):
         return is_teacher(self.request.user)
+
+
+@method_decorator(ensure_csrf_cookie, name="dispatch")
+class DictationEditorView(EditorView):
+    """
+    The dictation editor — a full score editor, teachers only.
+
+    A page of its own rather than a mode of the exercise editor: an exercise
+    is a row of bars to sing, a dictation is a piece of music to write down,
+    and the two editors share almost nothing a teacher would see.
+    """
+
+    template_name = "rea_frontend/dictation_editor.html"
