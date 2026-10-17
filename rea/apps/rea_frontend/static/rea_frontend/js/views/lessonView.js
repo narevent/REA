@@ -1,4 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=175";
+import { NotationRenderer } from "../components/notationRenderer.js?v=176";
 
 let renderer = null;
 
@@ -81,6 +81,8 @@ export function renderLessonNotation(lesson, onBarClick, drawOpts = {}) {
       separator: e.separator,
       notehead: e.notehead,
       accidental_offset_px: e.accidental_offset_px,
+      voice: e.voice,
+      stacked: e.stacked,
     })),
   }));
   const title = (lesson.key_model_name || "") + " " +

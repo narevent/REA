@@ -13,7 +13,7 @@
 
 import {
   NOTEHEAD_REACH, drawScore, durationToType, noteHeadYs, resolveVexFlow,
-} from "./staveLayout.js?v=175";
+} from "./staveLayout.js?v=176";
 
 /** Accuracy bands for `setNoteAccuracy`.  The thresholds match the per-note
  *  chips in the feedback row, so the stave and the report agree. */
@@ -168,6 +168,7 @@ export class NotationRenderer {
 
     this.notes = drawn.notes.map((entry) => ({
       note: entry.note, el: entry.el, globalIndex: entry.globalIndex, barIndex: entry.barIndex,
+      keyIndex: entry.keyIndex || 0, voice: entry.voice || 1,
     }));
     this.bars = drawn.bars.map((bar) => ({
       staveEl: bar.staveEl, stave: bar.stave, noteStart: bar.noteStart, noteEnd: bar.noteEnd,
@@ -267,8 +268,10 @@ export class NotationRenderer {
       if (!entry.el) return;
       const r = entry.el.getBoundingClientRect();
       if (clientX < r.left - PAD || clientX > r.right + PAD) return;
-      // Heights from the glyph baselines, not the box — see `noteHeadYs`.
-      noteHeadYs(entry.el).forEach((y) => {
+      // Heights from the glyph baselines, not the box — see `noteHeadYs`.  A
+      // chord's entries share one group, so each is tested at its own head.
+      const ys = entry.note && entry.note.getYs ? [entry.note.getYs()[entry.keyIndex || 0]] : noteHeadYs(entry.el);
+      ys.filter((y) => y != null).forEach((y) => {
         const cy = top + y;
         if (Math.abs(clientY - cy) > NOTEHEAD_REACH + PAD) return;
         const dx = clientX - (r.left + r.width / 2);
@@ -733,13 +736,15 @@ export class NotationRenderer {
     try {
       const keys = entry.note.keys || [];
       if (!keys.length) return this._currentTargetMidi;
-      return this._vexKeyToMidi(keys[0]);
+      return this._vexKeyToMidi(keys[entry.keyIndex || 0] || keys[0]);
     } catch (e) { return this._currentTargetMidi; }
   }
 
   _vexKeyToMidi(key) {
     // e.g. "c/4", "f#/5" -> MIDI
-    const m = key.match(/^([a-g])([#b]*)(?:\/(\d+))?$/);
+    // A notehead shape rides on the end of the key ("c/4/x2") and says
+    // nothing about the pitch.
+    const m = key.match(/^([a-g])([#b]*)(?:\/(\d+))?(?:\/.*)?$/);
     if (!m) return null;
     const base = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 }[m[1]];
     let pc = base;
@@ -748,12 +753,15 @@ export class NotationRenderer {
     return 12 * (oct + 1) + pc;
   }
 
-  /** Pitched (non-rest) note entries in a bar, each with globalIndex + MIDI. */
+  /** The bar's melody notes — pitched, first voice, not stacked into a chord
+   *  (the same notes `practiceData.barPitches` lists) — each with its global
+   *  index and MIDI. */
   getPitchedNotesInBar(barIndex) {
     const out = [];
     this.notes.forEach((entry) => {
       if (entry.barIndex !== barIndex) return;
       if (!this._isPitched(entry)) return;
+      if ((entry.voice || 1) !== 1 || (entry.keyIndex || 0) !== 0) return;
       const midi = this._noteEntryMidi(entry);
       out.push({ globalIndex: entry.globalIndex, midi });
     });

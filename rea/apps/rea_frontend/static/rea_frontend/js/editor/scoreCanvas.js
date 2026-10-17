@@ -22,11 +22,11 @@
 import {
   CLEF_TOP_LINE, METRICS, NOTEHEAD_REACH, drawScore, noteHeadYs, resolveVexFlow, scoreStyle,
   vexClef,
-} from "../components/staveLayout.js?v=175";
+} from "../components/staveLayout.js?v=176";
 import {
   LETTERS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX, OFFSET_GAIN,
   buildToken, offsetMs, splitToken,
-} from "./scoreDoc.js?v=175";
+} from "./scoreDoc.js?v=176";
 
 /** Vertical room added to each row when annotation lanes are showing. */
 const LANE_SPACE = 58;
@@ -131,6 +131,8 @@ export class ScoreCanvas {
         separator: event.separator,
         notehead: event.notehead,
         accidental_offset_px: event.accidental_offset_px,
+        voice: event.voice,
+        stacked: event.stacked,
         alias: event.alias_degree,
       })),
     }));
@@ -150,6 +152,7 @@ export class ScoreCanvas {
     this.container.classList.toggle("shows-rhythm", !!this.view.rhythm);
     this.notes = drawn.notes.map((entry) => ({
       barIndex: entry.barIndex, noteIndex: entry.noteIndex, el: entry.el,
+      note: entry.note, keyIndex: entry.keyIndex || 0, voice: entry.voice || 1,
     }));
     this.barBoxes = drawn.bars.map((bar) => ({
       barIndex: bar.barIndex, stave: bar.stave, bass: bar.bass, staveEl: bar.staveEl,
@@ -266,7 +269,7 @@ export class ScoreCanvas {
         // made this loop dead code: `bottom` always came out far below the
         // row, the clamp always won, and the lanes always sat at the bottom
         // of the row instead of under the notes they label.
-        noteHeadYs(entry.el).forEach((y) => {
+        this._headYs(entry).forEach((y) => {
           bottom = Math.max(bottom, y + NOTEHEAD_REACH);
         });
       });
@@ -279,8 +282,20 @@ export class ScoreCanvas {
       const event = bar && bar.events[entry.noteIndex];
       if (!event || !entry.el) return;
       entry.el.classList.add("ed-note");
-      entry.el.dataset.bar = entry.barIndex;
-      entry.el.dataset.note = entry.noteIndex;
+      // Coloured by voice in the editor only, as MuseScore does, so two parts
+      // on one staff can be told apart while they are written.
+      entry.el.dataset.voice = String(entry.voice || 1);
+      // A chord's notes share the group; it is named after its first note.
+      if (!entry.keyIndex) {
+        entry.el.dataset.bar = entry.barIndex;
+        entry.el.dataset.note = entry.noteIndex;
+      }
+      // The lanes belong to the moment, not to each head of a chord: the
+      // chord's first note writes them, its degrees joined ("1/3/5").
+      if (entry.keyIndex) return;
+      const degree = this._inChord(entry)
+        ? entry.note.reaMembers.map((m) => m.n.alias).filter(Boolean).join("/")
+        : event.alias_degree;
 
       const rect = entry.el.getBoundingClientRect();
       const cx = rect.left + rect.width / 2 - svgRect.left;
@@ -290,9 +305,9 @@ export class ScoreCanvas {
       // which case the editor's own lane would print them twice.
       const styleWritesDegrees = (this.doc && this.doc.meta
         && this.doc.meta.note_label_type === "degree");
-      if (this.view.degrees && !styleWritesDegrees && event.alias_degree) {
+      if (this.view.degrees && !styleWritesDegrees && degree) {
         const text = el("text", { x: cx, y: baseY, class: "ed-ann ed-ann-degree", "text-anchor": "middle" });
-        text.textContent = event.alias_degree;
+        text.textContent = degree;
         svg.appendChild(text);
       }
       if (this.view.offsets && event.horizontal_offset_ms) {
@@ -371,12 +386,14 @@ export class ScoreCanvas {
         (n) => n.barIndex === pos.barIndex && n.noteIndex === pos.noteIndex
       );
       if (!entry || !entry.el) return;
-      entry.el.classList.add("is-selected");
+      // In a chord only the frame says which head is meant; colouring the
+      // group would colour the whole chord.
+      if (!this._inChord(entry)) entry.el.classList.add("is-selected");
       // Horizontally the element's own rectangle is honest; vertically it is
       // the music font's em box, which is the same ~161 units for every note
       // and made this frame taller than the canvas.  See `noteHeadYs`.
       const rect = entry.el.getBoundingClientRect();
-      const ys = noteHeadYs(entry.el);
+      const ys = this._headYs(entry);
       const pad = 5;
       const top = (ys.length ? Math.min(...ys) - NOTEHEAD_REACH : rect.top - svgRect.top) - pad;
       const bottom = (ys.length ? Math.max(...ys) + NOTEHEAD_REACH : rect.bottom - svgRect.top) + pad;
@@ -451,6 +468,22 @@ export class ScoreCanvas {
   // -- pointer -----------------------------------------------------------
 
   /**
+   * The baseline of one written note's head.  A chord's notes share one
+   * drawn group, so the group's heads cannot say which is whose; the stave
+   * note can, by the key's own index.
+   */
+  _headYs(entry) {
+    const ys = entry.note && entry.note.getYs ? entry.note.getYs() : null;
+    if (ys && ys[entry.keyIndex] != null) return [ys[entry.keyIndex]];
+    return noteHeadYs(entry.el);
+  }
+
+  /** Whether an entry is one of several heads on one stem. */
+  _inChord(entry) {
+    return !!(entry.note && entry.note.reaMembers && entry.note.reaMembers.length > 1);
+  }
+
+  /**
    * The note under a client point — meaning under its *notehead*.
    *
    * The group VexFlow draws a note into is the size of the music font's em
@@ -474,7 +507,7 @@ export class ScoreCanvas {
       if (clientX < r.left - PAD || clientX > r.right + PAD) return;
       // A rest has no notehead; its glyph really does sit where the box says,
       // so for a rest the box is the answer.
-      const ys = noteHeadYs(entry.el);
+      const ys = this._headYs(entry);
       const centres = ys.length
         ? ys.map((y) => y + svgRect.top)
         : [r.top + r.height / 2];

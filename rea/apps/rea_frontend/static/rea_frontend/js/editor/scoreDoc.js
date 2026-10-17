@@ -13,7 +13,7 @@
  * teacher edits is what gets stored.
  */
 
-import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=175";
+import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=176";
 
 /** Note letters in staff order.  German naming: `h` is B-natural. */
 export const LETTERS = ["c", "d", "e", "f", "g", "a", "h"];
@@ -199,6 +199,10 @@ export function blankEvent(previous = null, overrides = {}) {
     // compare against these values, and `undefined` is not `0`.
     tuplet_num: 0,
     tuplet_den: 0,
+    // A new note is in the voice it is written into and starts a moment of
+    // its own; the caller says otherwise for a chord note.
+    voice: 1,
+    stacked: false,
     attack_decay_time: previous ? previous.attack_decay_time : null,
     volume: previous ? previous.volume : 80,
     is_rest: false,
@@ -229,6 +233,55 @@ export function blankBar(system, previous = null) {
     bar.quality = previous ? previous.quality : "natural";
   }
   return bar;
+}
+
+/** The voice a note is in, 1-4. */
+export function voiceOf(event) {
+  const voice = Number(event && event.voice);
+  return voice >= 1 && voice <= 4 ? voice : 1;
+}
+
+/**
+ * The positions of the chord a note belongs to, first note first.
+ *
+ * A chord is a note and the notes stacked after it in the same voice; the
+ * other voices' notes may be written in between and do not end it.
+ */
+export function chordAt(bar, noteIndex) {
+  const events = (bar && bar.events) || [];
+  const target = events[noteIndex];
+  if (!target) return [];
+  const voice = voiceOf(target);
+  let head = noteIndex;
+  while (events[head] && events[head].stacked) {
+    let previous = head - 1;
+    while (previous >= 0 && voiceOf(events[previous]) !== voice) previous -= 1;
+    if (previous < 0) break;
+    head = previous;
+  }
+  const members = [head];
+  for (let i = head + 1; i < events.length; i += 1) {
+    if (voiceOf(events[i]) !== voice) continue;
+    if (!events[i].stacked) break;
+    members.push(i);
+  }
+  return members;
+}
+
+/**
+ * Put right any chord an edit has left impossible: a note stacked on nothing
+ * in its voice, or a rest stacked at all.  Run after every edit, so the
+ * document the server receives is always one it accepts.
+ */
+export function normaliseChords(doc) {
+  (doc.bars || []).forEach((bar) => {
+    const seen = new Set();
+    (bar.events || []).forEach((event) => {
+      const voice = voiceOf(event);
+      if (event.stacked && (event.is_rest || !seen.has(voice))) event.stacked = false;
+      seen.add(voice);
+    });
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +332,7 @@ export class ScoreDoc extends EventTarget {
     const before = clone(this.doc);
     const result = mutate(this.doc);
     if (result === false) return false; // the mutation declined; no history
+    normaliseChords(this.doc);
     this.undoStack.push({ label, doc: before });
     if (this.undoStack.length > 200) this.undoStack.shift();
     this.redoStack = [];
@@ -317,6 +371,7 @@ export class ScoreDoc extends EventTarget {
     const live = this._live;
     this._live = null;
     if (!live) return;
+    normaliseChords(this.doc);
     if (JSON.stringify(live.before) === JSON.stringify(this.doc)) return;
     this.undoStack.push({ label: live.label, doc: live.before });
     if (this.undoStack.length > 200) this.undoStack.shift();
@@ -401,6 +456,17 @@ export class ScoreDoc extends EventTarget {
       const sorted = positions.slice().sort(
         (a, b) => b.barIndex - a.barIndex || b.noteIndex - a.noteIndex
       );
+      // Deleting a chord's first note leaves the chord standing on its next
+      // note, rather than letting it fall onto whatever came before.
+      positions.forEach(({ barIndex, noteIndex }) => {
+        const bar = doc.bars[barIndex];
+        const event = bar && bar.events[noteIndex];
+        if (!event || event.stacked) return;
+        const members = chordAt(bar, noteIndex);
+        const heir = members.find((i) => i !== noteIndex
+          && !positions.some((p) => p.barIndex === barIndex && p.noteIndex === i));
+        if (heir != null) bar.events[heir].stacked = false;
+      });
       let removed = 0;
       sorted.forEach(({ barIndex, noteIndex }) => {
         const bar = doc.bars[barIndex];
@@ -410,6 +476,49 @@ export class ScoreDoc extends EventTarget {
         }
       });
       if (!removed) return false;
+    });
+  }
+
+  /**
+   * Add a note to the chord at `position`, after its last note: same voice,
+   * same length, sounding with it.  Returns where it landed.
+   */
+  addChordNote(position, noteName) {
+    let inserted = null;
+    this.edit("add to chord", (doc) => {
+      const bar = doc.bars[position.barIndex];
+      const members = chordAt(bar, position.noteIndex);
+      if (!members.length) return false;
+      const head = bar.events[members[0]];
+      if (head.is_rest) return false;
+      const at = members[members.length - 1] + 1;
+      bar.events.splice(at, 0, blankEvent(head, {
+        note_name: noteName, duration: head.duration, voice: voiceOf(head), stacked: true,
+        is_rest: false, tuplet_num: head.tuplet_num || 0, tuplet_den: head.tuplet_den || 0,
+      }));
+      inserted = { barIndex: position.barIndex, noteIndex: at };
+    });
+    return inserted;
+  }
+
+  /**
+   * Move notes into another voice — whole chords at a time, because a chord
+   * split across two voices is two chords neither of which was asked for.
+   */
+  setVoice(positions, voice) {
+    return this.edit(`voice ${voice}`, (doc) => {
+      let touched = 0;
+      const done = new Set();
+      positions.forEach(({ barIndex, noteIndex }) => {
+        const bar = doc.bars[barIndex];
+        chordAt(bar, noteIndex).forEach((i) => {
+          const key = barIndex + ":" + i;
+          if (done.has(key)) return;
+          done.add(key);
+          if (voiceOf(bar.events[i]) !== voice) { bar.events[i].voice = voice; touched += 1; }
+        });
+      });
+      if (!touched) return false;
     });
   }
 

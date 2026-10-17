@@ -481,3 +481,15 @@
   .ed-panel { max-height: 420px; border: 0; border-top: 1px solid var(--border); }
   .ed-help { position: static; width: auto; right: auto; bottom: auto; margin: 0 24px 20px; }
 }
+
+/* Voices, as MuseScore colours them: the melody stays ink, the others take a
+   colour each — on the stave and on their toolbar buttons. */
+.ed-canvas g.ed-note[data-voice="2"] .vf-notehead text,
+.ed-canvas g.ed-note[data-voice="2"] .vf-stem path { fill: #1f8a4c; stroke: #1f8a4c; }
+.ed-canvas g.ed-note[data-voice="3"] .vf-notehead text,
+.ed-canvas g.ed-note[data-voice="3"] .vf-stem path { fill: #c2681a; stroke: #c2681a; }
+.ed-canvas g.ed-note[data-voice="4"] .vf-notehead text,
+.ed-canvas g.ed-note[data-voice="4"] .vf-stem path { fill: #8a3fb5; stroke: #8a3fb5; }
+.ed-dur.ed-voice-2.is-on { background: #1f8a4c; border-color: #1f8a4c; color: #fff; }
+.ed-dur.ed-voice-3.is-on { background: #c2681a; border-color: #c2681a; color: #fff; }
+.ed-dur.ed-voice-4.is-on { background: #8a3fb5; border-color: #8a3fb5; color: #fff; }

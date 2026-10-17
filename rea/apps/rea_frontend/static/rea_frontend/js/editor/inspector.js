@@ -19,8 +19,8 @@
 import {
   DURATIONS, MODIFIERS, MODIFIER_LABELS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX,
   OFFSET_GAIN, describeNote, splitToken, buildToken,
-} from "./scoreDoc.js?v=175";
-import { labelWithAccidental, labelWithDuration, labelWithNotehead } from "./glyphs.js?v=175";
+} from "./scoreDoc.js?v=176";
+import { labelWithAccidental, labelWithDuration, labelWithNotehead } from "./glyphs.js?v=176";
 
 const MIXED = "—"; // em dash: several selected items, several values
 
@@ -501,6 +501,31 @@ export class Inspector {
           "the notation itself does not move.",
       },
     ], events, commit);
+
+    // Polyphony.  The voice moves whole chords (see `ScoreDoc.setVoice`), so
+    // it goes through the editor rather than writing the field directly.
+    renderGroup(body, "Voice and chord", [
+      {
+        key: "voice", label: "Voice", type: "buttons",
+        get: (items) => {
+          const first = items[0].voice || 1;
+          return items.every((e) => (e.voice || 1) === first) ? first : MIXED;
+        },
+        options: [1, 2, 3, 4].map((v) => ({ value: v, label: String(v) })),
+        hint: "Voice 1 is the melody a student sings. Ctrl+Alt+1…4.",
+      },
+      {
+        key: "stacked", label: "Sounds with the note before (chord)", type: "checkbox",
+        get: (items) => {
+          const first = !!items[0].stacked;
+          return items.every((e) => !!e.stacked === first) ? first : MIXED;
+        },
+        hint: "Shift+letter or Alt+2…9 adds a note to a chord.",
+      },
+    ], events, (key, value) => {
+      if (key === "voice") this.hooks.onVoice(positions, value);
+      else commit(key, value);
+    });
 
     // Its counterpart, and deliberately in a group of its own so the two are
     // never read as one control with two spellings: this one moves the

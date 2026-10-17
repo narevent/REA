@@ -61,6 +61,7 @@ EVENT_FIELDS = (
     "horizontal_offset_ms", "visual_offset_px", "duration", "attack_decay_time",
     "volume", "note_name", "alias_degree", "is_rest", "is_enharmonic", "event_type",
     "tuplet_num", "tuplet_den", "separator", "notehead", "accidental_offset_px",
+    "voice", "stacked",
 )
 
 
@@ -92,6 +93,8 @@ def event_document(event):
         "separator": event.separator,
         "notehead": event.notehead,
         "accidental_offset_px": event.accidental_offset_px,
+        "voice": event.voice,
+        "stacked": event.stacked,
     }
 
 

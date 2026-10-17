@@ -26,23 +26,23 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=175";
+import { AudioPlayer } from "./audioPlayer.js?v=176";
 import {
   PitchDetector, midiToName, getVoiceVibratoCents, getVoiceOnsetFloor,
-} from "./pitchDetector.js?v=175";
-import { API } from "./api.js?v=175";
+} from "./pitchDetector.js?v=176";
+import { API } from "./api.js?v=176";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
-  vexKeyOf, shuffle, randInt, tempoOf,
-} from "./practiceData.js?v=175";
+  vexKeyOf, shuffle, randInt, tempoOf, isMelodic,
+} from "./practiceData.js?v=176";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=175";
-import { tuning } from "./difficulty.js?v=175";
-import { keyAccidentals, modeChordToVexKey, parseNoteToken, shiftNoteOctave } from "./notation.js?v=175";
-import { isSignedIn, loadNoteOctaves, saveNoteOctave } from "./account.js?v=175";
-import { vexClef } from "./components/staveLayout.js?v=175";
-import { AnswerStaff, naturalMidi, tokenStep, writtenName } from "./components/answerStaff.js?v=175";
+} from "./practiceScore.js?v=176";
+import { tuning } from "./difficulty.js?v=176";
+import { keyAccidentals, modeChordToVexKey, parseNoteToken, shiftNoteOctave } from "./notation.js?v=176";
+import { isSignedIn, loadNoteOctaves, saveNoteOctave } from "./account.js?v=176";
+import { vexClef } from "./components/staveLayout.js?v=176";
+import { AnswerStaff, naturalMidi, tokenStep, writtenName } from "./components/answerStaff.js?v=176";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 // Above this many rounds the per-round pips stop being readable (a 39-bar
@@ -1554,7 +1554,7 @@ export class PracticeController {
     const steps = (this.barSteps[barIndex] && this.barSteps[barIndex].steps) || [];
     const names = [];
     steps.forEach((step, i) => {
-      if (!step.isRest && step.midi != null) names.push(events[i] ? events[i].note_name : null);
+      if (!step.isRest && step.midi != null && isMelodic(step)) names.push(events[i] ? events[i].note_name : null);
     });
     return names;
   }

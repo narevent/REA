@@ -103,6 +103,9 @@ class EventSerializer(serializers.Serializer):
     # The accidental's own nudge, apart from its note's — see
     # `SeparatedEvent.accidental_offset_px`.
     accidental_offset_px = serializers.IntegerField(default=0, min_value=-40, max_value=40)
+    # Polyphony — see `SeparatedEvent.voice`.
+    voice = serializers.IntegerField(default=1, min_value=1, max_value=4)
+    stacked = serializers.BooleanField(default=False)
 
     def validate_duration(self, value):
         if value not in DURATIONS:
@@ -170,6 +173,27 @@ class BarSerializer(serializers.Serializer):
         choices=["natural", "raised", "lowered"], required=False, default="natural"
     )
     events = EventSerializer(many=True, default=list)
+
+    def validate_events(self, events):
+        # A chord note sounds with the note before it in its own voice, so it
+        # needs one; and a rest is a silence, not a chord.  Both are refused
+        # rather than repaired, because which note was meant to carry the
+        # chord is not something to guess at.
+        seen = set()
+        for position, event in enumerate(events, start=1):
+            voice = event.get("voice", 1)
+            if event.get("stacked"):
+                if event.get("is_rest"):
+                    raise serializers.ValidationError(
+                        f"Note {position} is a rest and cannot be part of a chord."
+                    )
+                if voice not in seen:
+                    raise serializers.ValidationError(
+                        f"Note {position} is stacked on a chord, but voice {voice} "
+                        "has no note before it in this bar."
+                    )
+            seen.add(voice)
+        return events
 
 
 def _meta_kwargs(model, field_names):

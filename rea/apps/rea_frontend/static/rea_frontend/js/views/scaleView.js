@@ -1,4 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=175";
+import { NotationRenderer } from "../components/notationRenderer.js?v=176";
 
 let renderer = null;
 
@@ -68,6 +68,8 @@ export function renderScaleNotation(keyModel, onBarClick, drawOpts = {}) {
       separator: e.separator,
       notehead: e.notehead,
       accidental_offset_px: e.accidental_offset_px,
+      voice: e.voice,
+      stacked: e.stacked,
     })),
   }));
   r.render(bars, { title: keyModel.name || "", onBarClick, style: keyModel, ...drawOpts });

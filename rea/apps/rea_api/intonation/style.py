@@ -185,6 +185,18 @@ class SeparatedEvent(models.Model):
         default=0,
         help_text="Moves the note's accidental sideways, in pixels; positive is to the right.",
     )
+    # Polyphony.  A bar holds up to four voices, each with its own rhythm from
+    # the start of the bar; a note marked `stacked` sounds together with the
+    # note before it in the same voice, which is how a chord is written.  An
+    # exercise written before either existed is one voice of single notes,
+    # which is exactly what the defaults say.
+    voice = models.PositiveSmallIntegerField(
+        default=1, help_text="Which voice (1-4) the note belongs to.",
+    )
+    stacked = models.BooleanField(
+        default=False,
+        help_text="Sounds together with the note before it in the same voice: a chord.",
+    )
 
 
 #: Every field a style carries, in the order a panel should show them.  Used by
