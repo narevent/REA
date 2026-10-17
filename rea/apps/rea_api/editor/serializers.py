@@ -100,6 +100,9 @@ class EventSerializer(serializers.Serializer):
     notehead = serializers.ChoiceField(
         choices=Notehead.choices, required=False, allow_blank=True, default="",
     )
+    # The accidental's own nudge, apart from its note's — see
+    # `SeparatedEvent.accidental_offset_px`.
+    accidental_offset_px = serializers.IntegerField(default=0, min_value=-40, max_value=40)
 
     def validate_duration(self, value):
         if value not in DURATIONS:
@@ -157,6 +160,10 @@ class BarSerializer(serializers.Serializer):
     is_incomplete_bar = serializers.BooleanField(default=False)
     incomplete_bar_playback_count = serializers.IntegerField(default=0, min_value=0, max_value=99)
     label = serializers.CharField(max_length=32, required=False, allow_blank=True, default="")
+    # How the bar is drawn — see `ShapedBar`.  Bounded so a stray drag cannot
+    # shrink a bar to nothing or push the rest of the line off the page.
+    width_scale = serializers.FloatField(default=1.0, min_value=0.25, max_value=4.0)
+    note_align = serializers.FloatField(required=False, allow_null=True, default=None, min_value=0, max_value=1)
     # Relative bars only; ignored when saving an absolute lesson.
     degree = serializers.CharField(max_length=16, required=False, allow_blank=True, default="")
     quality = serializers.ChoiceField(

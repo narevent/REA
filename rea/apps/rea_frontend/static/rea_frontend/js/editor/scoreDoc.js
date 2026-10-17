@@ -13,7 +13,7 @@
  * teacher edits is what gets stored.
  */
 
-import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=172";
+import { LETTER_PC, keySignatureMap, noteNameToMidi, parseNoteToken } from "../notation.js?v=173";
 
 /** Note letters in staff order.  German naming: `h` is B-natural. */
 export const LETTERS = ["c", "d", "e", "f", "g", "a", "h"];
@@ -218,6 +218,10 @@ export function blankBar(system, previous = null) {
     is_incomplete_bar: false,
     incomplete_bar_playback_count: 0,
     label: "",
+    // Drawn at the width its notes ask for, with its notes spread: a new bar
+    // has no layout of its own to inherit.
+    width_scale: 1,
+    note_align: null,
     events: [],
   };
   if (system === "relative") {

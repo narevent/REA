@@ -34,7 +34,7 @@
 import {
   keyAccidentalCount, keyAccidentals, modeChordToVexKey, noteNameToVexflow,
   noteTokenToMidi, parseNoteToken,
-} from "../notation.js?v=172";
+} from "../notation.js?v=173";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
 export const METRICS = {
@@ -221,6 +221,20 @@ function applyVisualOffset(note, px) {
   const context = note.getTickContext();
   if (!context || !context.setX) return;
   context.setX(context.getX() + shift);
+}
+
+/** A bar's own width, as a multiple of what its notes ask for. */
+function barWidthScale(bar) {
+  const scale = Number(bar && bar.widthScale);
+  return Number.isFinite(scale) && scale > 0 ? Math.min(4, Math.max(0.25, scale)) : 1;
+}
+
+/** Where a bar's notes sit in it (0..1), or null to spread them across it. */
+function barNoteAlign(bar) {
+  const align = bar && bar.noteAlign;
+  if (align == null || align === "") return null;
+  const value = Number(align);
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null;
 }
 
 /**
@@ -591,6 +605,7 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
     key: !keySignature ? "" : modeChordToVexKey(bar.modeChord || ""),
   }));
 
+  const naturalNotes = new Array(bars.length);
   const prefWidths = bars.map((bar, i) => {
     const notes = bar.notes || [];
     // A tuplet's notes keep their written value and occupy less time than it,
@@ -605,9 +620,13 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
     const separators = notes.filter((n) => n.separator).length;
     const noteArea = Math.max(durArea, countArea)
       + separators * look.separatorSpace + METRICS.STAVE_PADDING * 2;
+    // The width the notes themselves ask for, kept for a bar whose notes are
+    // aligned rather than spread: they are formatted into this, not the bar.
+    naturalNotes[i] = Math.max(durArea, countArea);
     // The clef and key signature are added below, to the bars that actually
-    // draw them — which is not known until the bars have been wrapped.
-    return Math.max(METRICS.MIN_BAR_WIDTH, noteArea);
+    // draw them — which is not known until the bars have been wrapped.  The
+    // teacher's own width for the bar (a dragged barline) scales the rest.
+    return Math.max(METRICS.MIN_BAR_WIDTH, noteArea) * barWidthScale(bar);
   });
 
   /** The room a bar's clef and key signature need before its first note. */
@@ -809,7 +828,15 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
         const accVal = soundedAlteration(tok, keyMap);
         if (accidentals && accVal !== (barStart[tok.letter] || 0)) {
           const accStr = ALTERATION_TO_ACC[String(accVal)];
-          if (accStr) note.addModifier(new VF.Accidental(accStr), 0);
+          if (accStr) {
+            const acc = new VF.Accidental(accStr);
+            // The accidental's own nudge, applied once the formatter has
+            // placed it — the formatter sets every accidental's shift itself
+            // while it stacks them, so anything set now would be overwritten.
+            const nudge = Number(n.accidental_offset_px) || 0;
+            if (nudge) note.reaAccidentalNudge = { acc, nudge };
+            note.addModifier(acc, 0);
+          }
           barStart[tok.letter] = accVal;
         }
       }
@@ -916,7 +943,7 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
     }
   });
 
-  formatted.forEach(({ voice, stave, notes }) => {
+  formatted.forEach(({ voice, stave, notes, barIndex }) => {
     if (!voice) return;
     // The separators' room is held back from the formatter: it is opened up
     // below, by moving the notes after each separator along.  Formatting into
@@ -926,7 +953,18 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
       * look.separatorSpace;
     const noteAreaWidth = stave.getWidth()
       - (stave.getNoteStartX() - stave.getX()) - METRICS.STAVE_PADDING - separatorRoom;
-    new VF.Formatter().joinVoices([voice]).format([voice], Math.max(40, noteAreaWidth));
+    // Spread across the bar, or — when the bar says where its notes sit — set
+    // at the width they ask for and placed in what is left: 0 against the
+    // left barline, 1 against the right, anything between.
+    const align = barNoteAlign(bars[barIndex]);
+    const formatWidth = align == null
+      ? noteAreaWidth
+      : Math.min(noteAreaWidth, naturalNotes[barIndex]);
+    new VF.Formatter().joinVoices([voice]).format([voice], Math.max(40, formatWidth));
+    if (align != null && noteAreaWidth > formatWidth) {
+      const shift = (noteAreaWidth - formatWidth) * align;
+      notes.forEach((note) => applyVisualOffset(note, shift));
+    }
   });
 
   // A separator opens a hole in the bar: every note after it moves along by
@@ -944,6 +982,9 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
   });
   formatted.forEach(({ notes }) => notes.forEach((note) => {
     applyVisualOffset(note, note.reaVisualOffset);
+    // Positive is to the right, as with every other offset here.
+    const nudge = note.reaAccidentalNudge;
+    if (nudge) nudge.acc.xShift = (Number(nudge.acc.xShift) || 0) + nudge.nudge;
   }));
 
   // Drawn without naming a stave when the score is on two of them: the voice

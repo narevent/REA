@@ -293,6 +293,8 @@
 }
 .ed-canvas:focus-visible { box-shadow: var(--ring); }
 .ed-canvas.is-over-note { cursor: pointer; }
+/* A barline is a handle: drag it to widen or narrow its bar. */
+.ed-canvas.is-over-barline { cursor: col-resize; }
 .ed-canvas svg { display: block; }
 
 /* VexFlow paints the SVG root with its own presentation attributes — a music

@@ -1,4 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=172";
+import { NotationRenderer } from "../components/notationRenderer.js?v=173";
 
 let renderer = null;
 
@@ -53,6 +53,8 @@ export function renderScaleNotation(keyModel, onBarClick, drawOpts = {}) {
     // The key the bar is in, so the stave can draw its signature and read the
     // notes against it — see `staveLayout`.
     modeChord: b.music_mode_chord,
+    widthScale: b.width_scale,
+    noteAlign: b.note_align,
     notes: (b.events || []).map((e) => ({
       name: e.note_name,
       alias: e.alias_degree,
@@ -65,6 +67,7 @@ export function renderScaleNotation(keyModel, onBarClick, drawOpts = {}) {
       tuplet_den: e.tuplet_den,
       separator: e.separator,
       notehead: e.notehead,
+      accidental_offset_px: e.accidental_offset_px,
     })),
   }));
   r.render(bars, { title: keyModel.name || "", onBarClick, style: keyModel, ...drawOpts });

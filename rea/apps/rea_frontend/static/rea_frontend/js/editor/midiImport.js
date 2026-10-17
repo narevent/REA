@@ -33,8 +33,8 @@
 // `midiToToken` is the inverse of notation.js's own `noteTokenToMidi`, and
 // lives beside it: the editor needs it too, to respell a note it has moved
 // by a semitone.
-import { midiToToken } from "../notation.js?v=172";
-import { DURATIONS, LETTERS, blankBar, blankEvent } from "./scoreDoc.js?v=172";
+import { midiToToken } from "../notation.js?v=173";
+import { DURATIONS, LETTERS, blankBar, blankEvent } from "./scoreDoc.js?v=173";
 
 // ---------------------------------------------------------------------------
 // The file

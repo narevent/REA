@@ -52,6 +52,7 @@ ABSOLUTE_META_FIELDS = (
 BAR_FIELDS = (
     "music_clef", "music_rhythm", "music_mode_chord",
     "is_incomplete_bar", "incomplete_bar_playback_count", "label",
+    "width_scale", "note_align",
 )
 # Relative bars additionally carry the scale degree they are built on.
 RELATIVE_BAR_FIELDS = ("degree", "quality")
@@ -59,7 +60,7 @@ RELATIVE_BAR_FIELDS = ("degree", "quality")
 EVENT_FIELDS = (
     "horizontal_offset_ms", "visual_offset_px", "duration", "attack_decay_time",
     "volume", "note_name", "alias_degree", "is_rest", "is_enharmonic", "event_type",
-    "tuplet_num", "tuplet_den", "separator", "notehead",
+    "tuplet_num", "tuplet_den", "separator", "notehead", "accidental_offset_px",
 )
 
 
@@ -90,6 +91,7 @@ def event_document(event):
         "pitch_class": event.pitch_class,
         "separator": event.separator,
         "notehead": event.notehead,
+        "accidental_offset_px": event.accidental_offset_px,
     }
 
 
@@ -237,6 +239,8 @@ def blank_bar(system, mode_chord=""):
         "is_incomplete_bar": False,
         "incomplete_bar_playback_count": 0,
         "label": "",
+        "width_scale": 1.0,
+        "note_align": None,
         "events": [],
     }
     if system == "relative":

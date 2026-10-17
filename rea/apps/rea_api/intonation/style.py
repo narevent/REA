@@ -142,6 +142,31 @@ class StyledScore(models.Model):
     )
 
 
+class ShapedBar(models.Model):
+    """How one bar is drawn, as opposed to what it holds.
+
+    A bar's width is normally whatever its notes ask for.  A teacher laying
+    out a page sometimes wants one wider — a long note given room, a short
+    bar matched to its neighbour — and says so by dragging its barline; and
+    in a bar wider than its notes they decide where the notes sit in it.
+    """
+
+    class Meta:
+        abstract = True
+
+    width_scale = models.FloatField(
+        default=1.0,
+        help_text="How wide the bar is drawn, as a multiple of the width its notes ask for.",
+    )
+    note_align = models.FloatField(
+        null=True, blank=True,
+        help_text=(
+            "Where the notes sit in a bar wider than they need: 0 at the left, "
+            "0.5 centred, 1 at the right. Empty spreads them across the bar."
+        ),
+    )
+
+
 class SeparatedEvent(models.Model):
     """The two things a note can say about how it is *drawn*, as opposed to
     what it sounds: the mark that follows it, and the shape of its head."""
@@ -155,6 +180,10 @@ class SeparatedEvent(models.Model):
     )
     notehead = models.CharField(
         max_length=16, choices=Notehead.choices, default=Notehead.NORMAL, blank=True,
+    )
+    accidental_offset_px = models.SmallIntegerField(
+        default=0,
+        help_text="Moves the note's accidental sideways, in pixels; positive is to the right.",
     )
 
 

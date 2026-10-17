@@ -247,6 +247,39 @@ class CreateAndSaveTests(EditorTestCase):
         ratios = [(e["tuplet_num"], e["tuplet_den"]) for e in loaded["bars"][0]["events"]]
         self.assertEqual(ratios, [(5, 4)] * 5)
 
+    def test_round_trip_keeps_bar_shape_and_accidental_offset(self):
+        """A dragged barline, the notes' place in the bar and an accidental's
+        nudge are all layout the teacher set by hand, and all come back."""
+        payload = self.relative_payload()
+        payload["bars"][0]["width_scale"] = 1.75
+        payload["bars"][0]["note_align"] = 0.5
+        payload["bars"][0]["events"] = [
+            {"note_name": "f1#", "duration": 0.125, "accidental_offset_px": -6},
+        ]
+        created = self.post(reverse("editor-create", args=["relative"]), payload).json()
+        loaded = self.client.get(
+            reverse("editor-detail", args=["relative", created["id"]])
+        ).json()
+        bar = loaded["bars"][0]
+        self.assertEqual((bar["width_scale"], bar["note_align"]), (1.75, 0.5))
+        self.assertEqual(bar["events"][0]["accidental_offset_px"], -6)
+
+    def test_bar_shape_defaults_to_spread_at_natural_width(self):
+        created = self.post(
+            reverse("editor-create", args=["relative"]), self.relative_payload()
+        ).json()
+        loaded = self.client.get(
+            reverse("editor-detail", args=["relative", created["id"]])
+        ).json()
+        bar = loaded["bars"][0]
+        self.assertEqual((bar["width_scale"], bar["note_align"]), (1.0, None))
+
+    def test_bar_width_is_bounded(self):
+        payload = self.relative_payload()
+        payload["bars"][0]["width_scale"] = 12
+        response = self.post(reverse("editor-create", args=["relative"]), payload)
+        self.assertEqual(response.status_code, 400)
+
     def test_rest_loses_its_pitch(self):
         payload = self.relative_payload()
         payload["bars"][0]["events"] = [

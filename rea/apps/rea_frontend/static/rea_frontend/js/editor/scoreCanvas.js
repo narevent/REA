@@ -22,11 +22,11 @@
 import {
   CLEF_TOP_LINE, METRICS, NOTEHEAD_REACH, drawScore, noteHeadYs, resolveVexFlow, scoreStyle,
   vexClef,
-} from "../components/staveLayout.js?v=172";
+} from "../components/staveLayout.js?v=173";
 import {
   LETTERS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX, OFFSET_GAIN,
   buildToken, offsetMs, splitToken,
-} from "./scoreDoc.js?v=172";
+} from "./scoreDoc.js?v=173";
 
 /** Vertical room added to each row when annotation lanes are showing. */
 const LANE_SPACE = 58;
@@ -119,6 +119,8 @@ export class ScoreCanvas {
       label: bar.label || "",
       clef: bar.music_clef,
       modeChord: bar.music_mode_chord,
+      widthScale: bar.width_scale,
+      noteAlign: bar.note_align,
       notes: (bar.events || []).map((event) => ({
         name: event.note_name,
         duration: event.duration,
@@ -128,6 +130,7 @@ export class ScoreCanvas {
         tuplet_den: event.tuplet_den,
         separator: event.separator,
         notehead: event.notehead,
+        accidental_offset_px: event.accidental_offset_px,
         alias: event.alias_degree,
       })),
     }));
@@ -570,6 +573,14 @@ export class ScoreCanvas {
     // deliberate gesture.
     container.addEventListener("mousedown", (e) => {
       if (e.button !== 0) return;
+      // A barline is checked before the notes: it is a thin target, and a
+      // note near the end of a bar would otherwise always win it.
+      const barline = this._barlineAt(e.clientX, e.clientY);
+      if (barline) {
+        e.preventDefault();
+        this._beginBarlineDrag(e, barline);
+        return;
+      }
       const note = this._noteAt(e.clientX, e.clientY);
       if (note) {
         e.preventDefault();
@@ -596,6 +607,7 @@ export class ScoreCanvas {
 
     container.addEventListener("mousemove", (e) => {
       if (this._drag) return;
+      container.classList.toggle("is-over-barline", !!this._barlineAt(e.clientX, e.clientY));
       const note = this._noteAt(e.clientX, e.clientY);
       container.classList.toggle("is-over-note", !!note);
       this.notes.forEach((n) => n.el && n.el.classList.toggle("is-hover", n === note));
@@ -745,6 +757,70 @@ export class ScoreCanvas {
       }
     };
 
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  /**
+   * The bar whose right-hand barline is under a client point, if any.
+   *
+   * Only within the staff lines and a few pixels either side of the line:
+   * the barline is a handle, and a handle that reached into the bar would
+   * steal the clicks meant for the last note in it.
+   */
+  _barlineAt(clientX, clientY) {
+    if (!this.svg) return null;
+    const svgRect = this.svg.getBoundingClientRect();
+    const x = clientX - svgRect.left;
+    const y = clientY - svgRect.top;
+    const SLACK = 4;
+    for (const box of this.barBoxes) {
+      if (!box.stave) continue;
+      const right = box.x + box.width;
+      if (Math.abs(x - right) > SLACK) continue;
+      const top = box.stave.getYForLine(0);
+      const bottom = (box.bass || box.stave).getYForLine(4);
+      if (y >= top - 2 && y <= bottom + 2) return box;
+    }
+    return null;
+  }
+
+  /**
+   * Dragging a barline: the bar gets wider or narrower, and its notes are
+   * spread across the new width (or keep their places, when the bar aligns
+   * them).  Live, like a note drag, and one undo step when let go.
+   */
+  _beginBarlineDrag(event, box) {
+    const bar = this.doc.bars[box.barIndex];
+    if (!bar) return;
+    this.handlers.onSelectBar && this.handlers.onSelectBar(box.barIndex, event);
+    const startX = event.clientX;
+    const startWidth = Math.max(1, box.width);
+    const startScale = Number(bar.width_scale) || 1;
+    const drag = { live: false, scale: startScale };
+    this._drag = drag;
+
+    const onMove = (e) => {
+      const width = Math.max(1, startWidth + (e.clientX - startX));
+      const next = Math.round(Math.min(4, Math.max(0.25, startScale * (width / startWidth))) * 20) / 20;
+      if (!drag.live) {
+        if (Math.abs(e.clientX - startX) < 3) return;
+        drag.live = true;
+        this.handlers.onBarlineDragBegin && this.handlers.onBarlineDragBegin(box.barIndex);
+      }
+      if (next !== drag.scale) {
+        drag.scale = next;
+        this.handlers.onBarlineDrag && this.handlers.onBarlineDrag(box.barIndex, next);
+      }
+      this._showDragHint(`width ${Math.round(next * 100)}%`, e);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      this._clearDragChrome();
+      this._drag = null;
+      if (drag.live) this.handlers.onBarlineDragEnd && this.handlers.onBarlineDragEnd(box.barIndex);
+    };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
   }
