@@ -1,4 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=170";
+import { NotationRenderer } from "../components/notationRenderer.js?v=171";
 
 let renderer = null;
 
@@ -46,7 +46,7 @@ export function renderScale(keyModel, onBarClick) {
  * key model rather than a formula lesson.
  * @returns {NotationRenderer} the shared renderer
  */
-export function renderScaleNotation(keyModel, onBarClick) {
+export function renderScaleNotation(keyModel, onBarClick, drawOpts = {}) {
   const r = getRenderer();
   const bars = (keyModel.bars || []).map((b) => ({
     clef: b.music_clef,
@@ -67,6 +67,6 @@ export function renderScaleNotation(keyModel, onBarClick) {
       notehead: e.notehead,
     })),
   }));
-  r.render(bars, { title: keyModel.name || "", onBarClick, style: keyModel });
+  r.render(bars, { title: keyModel.name || "", onBarClick, style: keyModel, ...drawOpts });
   return r;
 }

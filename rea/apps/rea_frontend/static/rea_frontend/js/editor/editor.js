@@ -20,23 +20,23 @@
  * exercise half-written is worse than one not written at all.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=170";
-import { EditorAPI } from "./editorApi.js?v=170";
-import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=170";
+import { AudioPlayer } from "../audioPlayer.js?v=171";
+import { EditorAPI } from "./editorApi.js?v=171";
+import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=171";
 import {
   Library, SHELF_DESTINATIONS, destinations, metaFromCtx,
-} from "./library.js?v=170";
-import { labelWithAccidental, labelWithDuration } from "./glyphs.js?v=170";
-import { ScoreCanvas } from "./scoreCanvas.js?v=170";
+} from "./library.js?v=171";
+import { labelWithAccidental, labelWithDuration } from "./glyphs.js?v=171";
+import { ScoreCanvas } from "./scoreCanvas.js?v=171";
 import {
   DURATIONS, LETTERS, MAX_VISUAL_OFFSET_PX, MODIFIERS, MODIFIER_LABELS, ScoreDoc,
   buildToken, noteMidi, offsetMs, splitToken, transposeToken,
-} from "./scoreDoc.js?v=170";
-import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=170";
-import { midiToToken } from "../notation.js?v=170";
+} from "./scoreDoc.js?v=171";
+import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=171";
+import { midiToToken } from "../notation.js?v=171";
 import {
   applyLegato, barGapMs, separatorGapMs, tupletRatio,
-} from "../practiceData.js?v=170";
+} from "../practiceData.js?v=171";
 
 /** The accidentals offered as buttons, in the order a musician reaches for
  *  them.  `null` is "whatever the key signature says", which is the state a

@@ -1,4 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=170";
+import { NotationRenderer } from "../components/notationRenderer.js?v=171";
 
 let renderer = null;
 
@@ -58,7 +58,7 @@ export function renderLesson(lesson, onBarClick) {
  * overwritten when re-rendering the score mid-session.
  * @returns {NotationRenderer} the shared renderer
  */
-export function renderLessonNotation(lesson, onBarClick) {
+export function renderLessonNotation(lesson, onBarClick, drawOpts = {}) {
   const r = getRenderer();
   const bars = (lesson.bars || []).map((b) => ({
     clef: b.music_clef,
@@ -82,6 +82,6 @@ export function renderLessonNotation(lesson, onBarClick) {
   }));
   const title = (lesson.key_model_name || "") + " " +
     (lesson.formula_name || lesson.category || "");
-  r.render(bars, { title, onBarClick, style: lesson });
+  r.render(bars, { title, onBarClick, style: lesson, ...drawOpts });
   return r;
 }

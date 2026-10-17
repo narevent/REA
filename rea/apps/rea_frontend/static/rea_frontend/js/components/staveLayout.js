@@ -34,14 +34,14 @@
 import {
   keyAccidentalCount, keyAccidentals, modeChordToVexKey, noteNameToVexflow,
   noteTokenToMidi, parseNoteToken,
-} from "../notation.js?v=170";
+} from "../notation.js?v=171";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
 export const METRICS = {
   PX_PER_WHOLE: 260,
   STAVE_PADDING: 26,
   MIN_BAR_WIDTH: 120,
-  BAR_GAP: 22,       // whitespace between adjacent bars
+  BAR_GAP: 12,       // whitespace between adjacent bars
   STAVE_Y: 26,       // y of the stave's first line within its row
   ROW_HEIGHT: 100,   // vertical pitch of each wrapped row
   MARGIN: 10,        // left margin inside the SVG
@@ -81,7 +81,7 @@ export const CLEF_MAP = {
  * lesson, or nothing at all, and get a complete style either way.
  */
 export const STYLE_DEFAULTS = {
-  barGap: 22,           // mid_bar_space: whitespace between bars, in pixels
+  barGap: 12,           // mid_bar_space: whitespace between bars, in pixels
   barsPerRow: 0,        // 0 = as many as the width allows
   centre: false,        // align_to_center
   stretch: false,       // auto_align: fill the line, or leave natural widths
@@ -472,16 +472,20 @@ export function noteLabelText(note, kind, keyMap) {
   return letter + String((tok.octave ?? 0) + 3);
 }
 
-/** Write the style's label under each note in a bar. */
-function drawNoteLabels(context, stave, notes, look, keyMap, bass) {
-  if (!look.noteLabel) return;
+/** The lowest point of a bar: its bottom line, or a notehead under it. */
+function barFloor(stave, notes, bass) {
   let floor = (bass || stave).getYForLine(4);
   notes.forEach((note) => {
     try {
       (note.getYs() || []).forEach((y) => { floor = Math.max(floor, y); });
     } catch (e) { /* a note with no geometry cannot push the lane down */ }
   });
-  const y = floor + 20;
+  return floor;
+}
+
+/** Write the style's label under each note in a bar, on the lane at `y`. */
+function drawNoteLabels(context, notes, look, keyMap, y) {
+  if (!look.noteLabel) return;
   context.save();
   context.setFont("Instrument Sans, sans-serif", 10);
   context.setFillStyle("#6b6f76");
@@ -505,11 +509,16 @@ function drawNoteLabels(context, stave, notes, look, keyMap, bass) {
  * @param {number} options.rowExtra      extra vertical room per row, for a
  *   caller that draws its own lanes under the stave.  0 keeps the rows
  *   exactly as the practice view spaces them.
+ * @param {boolean} options.keySignature  false draws no key signature.
+ * @param {boolean} options.accidentals   false draws no accidental beside a
+ *   note: it sits on its line or space and says nothing more.  The
+ *   note-guessing chapters draw the exercise this way, so the stave is a map
+ *   of where the notes are and not a crib of what they are called.
  * @returns {{VF, context, svg, width, height, bars, notes}}
  *   `bars`  [{barIndex, stave, staveEl, x, y, width, row, noteStart, noteEnd}]
  *   `notes` [{barIndex, noteIndex, globalIndex, note, el}]
  */
-function layoutScore(container, bars, { rowExtra = 0, style = null } = {}, padOverride = null) {
+function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature = true, accidentals = true } = {}, padOverride = null) {
   const VF = resolveVexFlow();
   if (!VF) return null;
 
@@ -579,7 +588,7 @@ function layoutScore(container, bars, { rowExtra = 0, style = null } = {}, padOv
   // before it can decide how wide they are.
   const heads = bars.map((bar) => ({
     clef: vexClef(bar.clef),
-    key: modeChordToVexKey(bar.modeChord || ""),
+    key: !keySignature ? "" : modeChordToVexKey(bar.modeChord || ""),
   }));
 
   const prefWidths = bars.map((bar, i) => {
@@ -617,6 +626,10 @@ function layoutScore(container, bars, { rowExtra = 0, style = null } = {}, padOv
   bars.forEach((_, i) => { if (showHead[i]) prefWidths[i] += headWidth(i); });
 
   // --- Flow-wrap bars into rows ----------------------------------------
+  // The width a row may fill: the SVG less a margin on each side.  Rows used
+  // to be measured against the whole SVG and then drawn from the left
+  // margin, so a full row ran past the right edge and was cut off.
+  const lineWidth = availWidth - METRICS.MARGIN * 2;
   const rows = [];
   let cur = [];
   let curW = 0;
@@ -628,7 +641,7 @@ function layoutScore(container, bars, { rowExtra = 0, style = null } = {}, padOv
     // every screen.  Otherwise, as many as fit.
     const full = look.barsPerRow
       ? cur.length >= look.barsPerRow
-      : cur.length && curW + w > availWidth;
+      : cur.length && curW + w > lineWidth;
     if (full) {
       rows.push(cur);
       cur = [];
@@ -655,17 +668,19 @@ function layoutScore(container, bars, { rowExtra = 0, style = null } = {}, padOv
   });
 
   rows.forEach((row, r) => {
-    const pref = row.reduce((sum, i, k) => sum + prefWidths[i] + (k ? look.barGap : 0), 0);
     // Stretched to the line, or left at its natural width.  Stretching is the
     // right default for a score that is read at a distance; a teacher setting
     // out a worksheet wants the bars the size they wrote them, and then
     // wants the short last line centred rather than adrift on the left.
-    const scale = (look.stretch || pref > availWidth) ? availWidth / pref : 1;
-    const width = row.reduce(
-      (sum, i, k) => sum + Math.floor(prefWidths[i] * scale) + (k ? look.barGap : 0), 0,
-    );
+    // Only the bars are scaled — the gaps between them are the style's and
+    // stay the size it asked for, so the room for them comes off first.
+    const gaps = look.barGap * (row.length - 1);
+    const barsWidth = row.reduce((sum, i) => sum + prefWidths[i], 0);
+    const room = Math.max(1, lineWidth - gaps);
+    const scale = (look.stretch || barsWidth > room) ? room / barsWidth : 1;
+    const width = row.reduce((sum, i) => sum + Math.floor(prefWidths[i] * scale), 0) + gaps;
     let x = METRICS.MARGIN;
-    if (look.centre && width < availWidth) x += Math.floor((availWidth - width) / 2);
+    if (look.centre && width < lineWidth) x += Math.floor((lineWidth - width) / 2);
     row.forEach((i, k) => {
       barWidths[i] = Math.floor(prefWidths[i] * scale);
       placement[i] = { x, y: r * rowHeight + METRICS.STAVE_Y + topPad, row: r };
@@ -792,7 +807,7 @@ function layoutScore(container, bars, { rowExtra = 0, style = null } = {}, padOv
         // which is how this library spells an enharmonic note and why such a
         // note needs a natural drawn to cancel the sharp before it.
         const accVal = soundedAlteration(tok, keyMap);
-        if (accVal !== (barStart[tok.letter] || 0)) {
+        if (accidentals && accVal !== (barStart[tok.letter] || 0)) {
           const accStr = ALTERATION_TO_ACC[String(accVal)];
           if (accStr) note.addModifier(new VF.Accidental(accStr), 0);
           barStart[tok.letter] = accVal;
@@ -901,10 +916,16 @@ function layoutScore(container, bars, { rowExtra = 0, style = null } = {}, padOv
     }
   });
 
-  formatted.forEach(({ voice, stave }) => {
+  formatted.forEach(({ voice, stave, notes }) => {
     if (!voice) return;
+    // The separators' room is held back from the formatter: it is opened up
+    // below, by moving the notes after each separator along.  Formatting into
+    // the whole bar and then moving them pushed the last notes over the
+    // barline by exactly the separator space.
+    const separatorRoom = notes.filter((n, k) => n.reaSeparator && k < notes.length - 1).length
+      * look.separatorSpace;
     const noteAreaWidth = stave.getWidth()
-      - (stave.getNoteStartX() - stave.getX()) - METRICS.STAVE_PADDING;
+      - (stave.getNoteStartX() - stave.getX()) - METRICS.STAVE_PADDING - separatorRoom;
     new VF.Formatter().joinVoices([voice]).format([voice], Math.max(40, noteAreaWidth));
   });
 
@@ -930,8 +951,17 @@ function layoutScore(container, bars, { rowExtra = 0, style = null } = {}, padOv
   // already said which of the two they are on.
   formatted.forEach(({ voice, stave }) => voice && (grand ? voice.draw(context) : voice.draw(context, stave)));
   formatted.forEach(({ notes, stave, bass }) => drawSeparators(context, stave, notes, look, bass));
-  formatted.forEach(({ notes, stave, bass, barIndex }) => drawNoteLabels(
-    context, stave, notes, look, keyAccidentals(heads[barIndex].key), bass,
+  // One label lane per row, under the lowest note anywhere on it.  Measured
+  // per bar, the labels climbed and fell from bar to bar with the notes
+  // above them, and a row of degrees read as a melody of its own.
+  const rowFloor = new Map();
+  formatted.forEach(({ notes, stave, bass, barIndex }) => {
+    const row = placement[barIndex].row;
+    rowFloor.set(row, Math.max(rowFloor.get(row) ?? -Infinity, barFloor(stave, notes, bass)));
+  });
+  formatted.forEach(({ notes, barIndex }) => drawNoteLabels(
+    context, notes, look, keyAccidentals(heads[barIndex].key),
+    rowFloor.get(placement[barIndex].row) + 20,
   ));
 
   // Bar numbers, where the style asks for them: on every bar, or once at the
