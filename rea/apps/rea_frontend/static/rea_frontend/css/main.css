@@ -1763,6 +1763,13 @@ svg.rea-score .vf-bar-focus rect { stroke: var(--accent); }
 }
 
 /* ------------------------------------------------------------- instruments */
+/* The panel under the stave that holds them: the score stays the main
+   picture, the instrument is the same bars in a second one. */
+.instrument-panel {
+  margin-top: 10px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.instrument-panel[hidden] { display: none; }
 /* The exercise drawn as a keyboard or a neck — the same answer sheet the
    stave is, in a picture a student who does not read music can answer in.
    See `instrumentRenderer.js`: one diagram per bar, holding that bar's own

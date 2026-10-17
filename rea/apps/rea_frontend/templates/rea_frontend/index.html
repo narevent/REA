@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=173" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=174" />
 </head>
 {% comment %}The practice app asks one thing of the session: whether the
 person using it teaches.  A teacher gets the answer key — see
@@ -54,6 +54,7 @@ server.{% endcomment %}
       <div class="session-topbar" id="session-topbar"></div>
       <div class="session-stage">
         <div id="notation" class="notation"></div>
+        <div id="instrument" class="instrument-panel" hidden></div>
         <div id="countdown-bar" class="countdown-bar" hidden><div class="cd-bar-fill" id="cd-bar-fill"></div></div>
         <div id="legend" class="legend"></div>
       </div>
@@ -90,7 +91,7 @@ server.{% endcomment %}
     <span class="footer-hint" id="footer-hint"></span>
   </footer>
 
-  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=173"></script>
-  <script type="module" src="{% static 'rea_frontend/js/app.js' %}?v=173"></script>
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=174"></script>
+  <script type="module" src="{% static 'rea_frontend/js/app.js' %}?v=174"></script>
 </body>
 </html>
