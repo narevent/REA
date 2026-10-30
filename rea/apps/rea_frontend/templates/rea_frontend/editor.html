@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=183" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=183" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=184" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=184" />
 </head>
 <body class="ed-body">
   <header class="app-header">
@@ -45,6 +45,7 @@
             <span class="ed-help-q" aria-hidden="true">?</span> How saving works
           </button>
           <button class="ed-btn ed-btn-quiet" type="button" id="ed-help-toggle" aria-controls="ed-help" title="Keyboard shortcuts (?)">Shortcuts</button>
+          <button class="ed-btn ed-btn-quiet ed-textsize" type="button" id="ed-textsize" aria-pressed="false" title="Larger text in the side panel and help — more to read, more to scroll">A<span>A</span></button>
         </div>
       </div>
 
@@ -138,12 +139,28 @@
     <aside class="ed-panel ed-panel-right" id="ed-inspector"></aside>
   </main>
 
-  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=183"></script>
-  <script type="module" src="{% static 'rea_frontend/js/editor/editor.js' %}?v=183"></script>
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=184"></script>
+  <script type="module" src="{% static 'rea_frontend/js/editor/editor.js' %}?v=184"></script>
   <script>
     // The one behaviour that belongs to the page rather than the score: the
     // shortcut sheet.  Keeping it here means the editor module never has to
     // care whether the button exists.
+    // Large text is a per-reader preference, so it lives in this browser
+    // only; a browser that will not store it just starts compact each time.
+    (function () {
+      var button = document.getElementById("ed-textsize");
+      var set = function (on) {
+        document.body.classList.toggle("ed-large-text", on);
+        button.setAttribute("aria-pressed", String(on));
+      };
+      try { set(localStorage.getItem("rea.editor.largeText") === "1"); } catch (e) { set(false); }
+      button.addEventListener("click", function () {
+        var on = !document.body.classList.contains("ed-large-text");
+        set(on);
+        try { localStorage.setItem("rea.editor.largeText", on ? "1" : "0"); } catch (e) {}
+      });
+    })();
+
     // The two help sheets share the space under the score, so opening one
     // closes the other.
     [["ed-help-toggle", "ed-help"], ["ed-save-help-toggle", "ed-save-help"]].forEach(function (pair, i, all) {

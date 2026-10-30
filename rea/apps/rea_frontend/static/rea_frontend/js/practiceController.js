@@ -26,23 +26,23 @@
  *  10  guess_multi        as 6 but multiple notes with generation options
  */
 
-import { AudioPlayer } from "./audioPlayer.js?v=183";
+import { AudioPlayer } from "./audioPlayer.js?v=184";
 import {
   PitchDetector, midiToName, getVoiceVibratoCents, getVoiceOnsetFloor,
-} from "./pitchDetector.js?v=183";
-import { API } from "./api.js?v=183";
+} from "./pitchDetector.js?v=184";
+import { API } from "./api.js?v=184";
 import {
   buildBarSteps, barsToFlat, barPitches, barDegrees, barDurationMs,
   vexKeyOf, shuffle, randInt, tempoOf, isMelodic,
-} from "./practiceData.js?v=183";
+} from "./practiceData.js?v=184";
 import {
   centsToScore, scoreGuessBar, scoreLabel,
-} from "./practiceScore.js?v=183";
-import { tuning } from "./difficulty.js?v=183";
-import { keyAccidentals, modeChordToVexKey, parseNoteToken, shiftNoteOctave } from "./notation.js?v=183";
-import { isSignedIn, loadNoteOctaves, saveNoteOctave } from "./account.js?v=183";
-import { vexClef } from "./components/staveLayout.js?v=183";
-import { AnswerStaff, naturalMidi, tokenStep, writtenName } from "./components/answerStaff.js?v=183";
+} from "./practiceScore.js?v=184";
+import { tuning } from "./difficulty.js?v=184";
+import { keyAccidentals, modeChordToVexKey, parseNoteToken, shiftNoteOctave } from "./notation.js?v=184";
+import { isSignedIn, loadNoteOctaves, saveNoteOctave } from "./account.js?v=184";
+import { vexClef } from "./components/staveLayout.js?v=184";
+import { AnswerStaff, naturalMidi, tokenStep, writtenName } from "./components/answerStaff.js?v=184";
 
 const TIMED_DEFAULT = 8;   // per-bar countdown (seconds)
 // Above this many rounds the per-round pips stop being readable (a 39-bar
