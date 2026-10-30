@@ -207,3 +207,16 @@ export function modeChordToVexKey(modeChord) {
   if (!vexRoot) return "";
   return mode === "Minor" ? vexRoot + "m" : vexRoot;
 }
+/**
+ * A note token moved by whole octaves: `shiftNoteOctave("f2#", -1)` is
+ * `"f1#"`.  A bare letter is octave index 0, and that is also what an octave
+ * index of 0 is written back as.  Null when the result would leave the
+ * notation's range (0-9).
+ */
+export function shiftNoteOctave(name, by) {
+  const m = (name || "").trim().match(TOKEN_RE);
+  if (!m) return null;
+  const octave = (m[2] ? parseInt(m[2], 10) : 0) + by;
+  if (octave < 0 || octave > 9) return null;
+  return m[1] + (octave ? String(octave) : "") + (m[3] || "");
+}

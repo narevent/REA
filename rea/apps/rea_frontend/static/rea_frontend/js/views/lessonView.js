@@ -1,4 +1,4 @@
-import { NotationRenderer } from "../components/notationRenderer.js?v=171";
+import { NotationRenderer } from "../components/notationRenderer.js?v=183";
 
 let renderer = null;
 
@@ -65,6 +65,8 @@ export function renderLessonNotation(lesson, onBarClick, drawOpts = {}) {
     // The key the bar is in, so the stave can draw its signature and read the
     // notes against it — see `staveLayout`.
     modeChord: b.music_mode_chord,
+    widthScale: b.width_scale,
+    noteAlign: b.note_align,
     label: b.label || "",
     notes: (b.events || []).map((e) => ({
       name: e.note_name,
@@ -78,6 +80,9 @@ export function renderLessonNotation(lesson, onBarClick, drawOpts = {}) {
       tuplet_den: e.tuplet_den,
       separator: e.separator,
       notehead: e.notehead,
+      accidental_offset_px: e.accidental_offset_px,
+      voice: e.voice,
+      stacked: e.stacked,
     })),
   }));
   const title = (lesson.key_model_name || "") + " " +

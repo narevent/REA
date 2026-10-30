@@ -20,7 +20,7 @@ one of the two foreign keys is set (mirroring the relative app).
 
 from django.db import models
 
-from ..style import SeparatedEvent, StyledScore
+from ..style import SeparatedEvent, ShapedBar, StyledScore
 
 
 class ChromaticBase(models.Model):
@@ -214,7 +214,7 @@ class Lesson(StyledScore):
         return self.display_name
 
 
-class Bar(models.Model):
+class Bar(ShapedBar):
     """A bar within the chromatic base or a lesson.
 
     Exactly one of ``base`` / ``lesson`` is set.

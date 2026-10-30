@@ -33,6 +33,12 @@
         aliases, timing offsets, dynamics — and hear it the way a student will.
       </p>
       <a class="acc-btn acc-btn-primary" href="{% url 'rea_frontend:editor' %}">Open the score editor</a>
+      <p class="acc-help">
+        The dictation editor is a full score editor — parts, chords, voices, ties,
+        dynamics, repeats — for writing dictations and cutting them into the phrases
+        students hear.
+      </p>
+      <a class="acc-btn" href="{% url 'rea_frontend:dictation-editor' %}">Open the dictation editor</a>
       {% if user.is_staff %}
         <p class="acc-help">Raw rows are still reachable through the <a href="/admin/">Django admin</a>.</p>
       {% endif %}

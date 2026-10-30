@@ -8,11 +8,13 @@
  *                performed note lengths and barlines.
  * `tuplets.mjs`  what a tuplet does to a note's sounding length, and what it
  *                leaves alone.
+ * `polyphony.mjs` when a chord's notes and a second voice sound, and what
+ *                the melody is.
  *
  * Everything the Django suite can reach is tested there instead; these two
  * are browser JavaScript with no server in them.
  */
-const mods = ["./midi.mjs", "./tuplets.mjs"];
+const mods = ["./midi.mjs", "./tuplets.mjs", "./polyphony.mjs"];
 let failed = false;
 for (const m of mods) {
   const out = [];

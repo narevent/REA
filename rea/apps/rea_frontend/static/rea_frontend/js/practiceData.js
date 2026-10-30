@@ -11,8 +11,8 @@
  * without depending on the main app state.
  */
 
-import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=171";
-import { getTempoScale } from "./tempo.js?v=171";
+import { noteNameToMidi, keySignatureMap, modeChordToVexKey } from "./notation.js?v=183";
+import { getTempoScale } from "./tempo.js?v=183";
 
 const DEFAULT_TEMPO = 80;
 // The event's stored offset is a *playback* offset — it moves when a note
@@ -55,10 +55,18 @@ export function barGapMs(item) {
  * overlaps its neighbour and is left exactly as it is.
  */
 export function applyLegato(steps, { cutAtSeparator = false } = {}) {
-  for (let i = 0; i < steps.length - 1; i += 1) {
+  // Each voice is its own line, so a note is held to the next note *of its
+  // own voice* — never to whatever another voice happens to play next.  Chord
+  // notes are not lines at all: they take their chord's length afterwards.
+  for (let i = 0; i < steps.length; i += 1) {
     const step = steps[i];
-    const next = steps[i + 1];
-    if (step.isRest || next.isRest) continue;
+    if (step.isRest || step.stacked) continue;
+    const voice = step.voice || 1;
+    let next = null;
+    for (let j = i + 1; j < steps.length; j += 1) {
+      if ((steps[j].voice || 1) === voice && !steps[j].stacked) { next = steps[j]; break; }
+    }
+    if (!next || next.isRest) continue;
     // A separator is a silence somebody drew, so it is the one gap whose
     // treatment is a decision rather than a repair: the exercise says whether
     // the note before a breath is cut at it or rings through it.
@@ -66,7 +74,59 @@ export function applyLegato(steps, { cutAtSeparator = false } = {}) {
     const gap = next.startMs - (step.startMs + step.durationMs);
     if (gap > 0) step.durationMs += gap;
   }
+  const heads = new Map();
+  steps.forEach((step) => {
+    const voice = step.voice || 1;
+    if (!step.stacked) heads.set(voice, step);
+    else if (heads.has(voice)) step.durationMs = heads.get(voice).durationMs;
+  });
   return steps;
+}
+
+/** The voice a note is in, 1-4; anything else is the first. */
+export function voiceOf(event) {
+  const voice = Number(event && event.voice);
+  return voice >= 1 && voice <= 4 ? voice : 1;
+}
+
+/**
+ * When each note of a bar starts and how long it lasts, in milliseconds from
+ * the start of the bar — with the bar's voices each keeping their own time,
+ * and a chord's notes starting and ending with the note they are stacked on.
+ *
+ * One function for the practice player and the editor's preview, so the
+ * teacher hears what the student will.
+ *
+ * @param {Array} events
+ * @param {object} how  { durationMs(event), offsetMs(event), separatorMs }
+ * @returns {{times: Array<{start, dur, voice, stacked}>, end: number}}
+ *   `times` index for index with `events`; `end` where the last voice stops.
+ */
+export function eventTimes(events, { durationMs, offsetMs, separatorMs = 0 }) {
+  const cursors = new Map();
+  const heads = new Map();
+  let end = 0;
+  const times = (events || []).map((event) => {
+    const voice = voiceOf(event);
+    const head = heads.get(voice);
+    if (event.stacked && head && !event.is_rest) {
+      return { start: head.start, dur: head.dur, voice, stacked: true };
+    }
+    const start = Math.max(0, (cursors.get(voice) || 0) + offsetMs(event));
+    const dur = durationMs(event);
+    heads.set(voice, { start, dur });
+    const after = start + dur + (event.separator ? separatorMs : 0);
+    cursors.set(voice, after);
+    end = Math.max(end, after);
+    return { start, dur, voice, stacked: false };
+  });
+  return { times, end };
+}
+
+/** Whether a step is part of the bar's melody — the first voice, without the
+ *  notes stacked on it.  It is what a singer is asked to sing. */
+export function isMelodic(step) {
+  return !step.stacked && (step.voice || 1) === 1;
 }
 
 /** The silence a separator opens in the playback, in milliseconds. */
@@ -137,21 +197,27 @@ export function buildBarSteps(item) {
   const allBars = [];
   bars.forEach((bar, barIndex) => {
     const steps = [];
-    let cursorMs = 0;
-    (bar.events || []).forEach((ev) => {
-      const offMs = (ev.horizontal_offset_ms || 0) * OFFSET_GAIN;
-      const startMs = Math.max(0, cursorMs + offMs);
+    const { times } = eventTimes(bar.events || [], {
+      offsetMs: (ev) => (ev.horizontal_offset_ms || 0) * OFFSET_GAIN,
       // A few lesson bars (notably the last note of the 5th bar) carry a 1/32
       // note (0.03125) that is too short to sound and is perceived as cut off.
       // Lift any note shorter than a 1/16 up to a full eighth (0.125) so it
       // plays at normal length.  Legit 1/16 (0.0625) notes are left untouched.
-      let dur = ev.duration || 0.125;
-      if (!ev.is_rest && dur < 0.0625) dur = 0.125;
       // A tuplet keeps its written note value and sounds a fraction of it:
       // three eighths in the time of two are each two-thirds of an eighth.
       // The written value is what the stave draws and what the beaming
       // groups by; this is the only place the ratio touches the sound.
-      const durMs = Math.max(20, Math.round(dur * wholeMs * tupletRatio(ev)));
+      durationMs: (ev) => {
+        let dur = ev.duration || 0.125;
+        if (!ev.is_rest && dur < 0.0625) dur = 0.125;
+        return Math.max(20, Math.round(dur * wholeMs * tupletRatio(ev)));
+      },
+      // A separator holds the next note off by the exercise's separator time —
+      // the breath a singer takes between two phrases of a formula.
+      separatorMs,
+    });
+    (bar.events || []).forEach((ev, index) => {
+      const { start: startMs, dur: durMs, voice, stacked } = times[index];
       // Prefer the server-resolved pitch_class (correct for enharmonics in
       // lessons) combined with the octave parsed from the note_name; fall
       // back to noteNameToMidi with the key-sig map for key models.
@@ -168,10 +234,8 @@ export function buildBarSteps(item) {
         // what a decay *sounds* like is the player's business.
         decaySec: ev.attack_decay_time != null ? Number(ev.attack_decay_time) : null,
         separator: ev.separator || "",
+        voice, stacked,
       });
-      // A separator holds the next note off by the exercise's separator time —
-      // the breath a singer takes between two phrases of a formula.
-      cursorMs = startMs + durMs + (ev.separator ? separatorMs : 0);
     });
     applyLegato(steps, { cutAtSeparator });
     allBars.push({ barIndex, steps, gapAfterMs: gapMs, holdAcrossBars });
@@ -217,8 +281,9 @@ function parseNoteTokenLite(name) {
 /** Total duration in ms of a single bar's step list. */
 export function barDurationMs(barSteps) {
   if (!barSteps || !barSteps.steps.length) return 0;
-  const last = barSteps.steps[barSteps.steps.length - 1];
-  return last.startMs + last.durationMs;
+  // Where the last voice stops, which with more than one voice need not be
+  // the last note written.
+  return barSteps.steps.reduce((end, s) => Math.max(end, s.startMs + s.durationMs), 0);
 }
 
 /** Convert a sequence of bar indices into a flat schedule the player can play. */
@@ -240,6 +305,7 @@ export function barsToFlat(barSteps, order, renderer) {
         separator: s.separator,
         barIndex,
         aliasDegree: s.aliasDegree,
+        voice: s.voice, stacked: s.stacked,
         scoreGlobalIndex: scoreBase + localIdx,
       });
       noteCount += 1;
@@ -266,14 +332,15 @@ export function barsToFlat(barSteps, order, renderer) {
   return { steps };
 }
 
-/** The list of pitched MIDI notes in a bar (rests excluded), in order. */
+/** The pitched MIDI notes of a bar's melody, in order: rests, the other
+ *  voices and the notes stacked into chords are left out (see `isMelodic`). */
 export function barPitches(barSteps) {
-  return (barSteps.steps || []).filter((s) => !s.isRest && s.midi != null).map((s) => s.midi);
+  return (barSteps.steps || []).filter((s) => !s.isRest && s.midi != null && isMelodic(s)).map((s) => s.midi);
 }
 
 /** The scale degrees (alias_degree) of the pitched notes in a bar. */
 export function barDegrees(barSteps) {
-  return (barSteps.steps || []).filter((s) => !s.isRest && s.midi != null).map((s) => s.aliasDegree);
+  return (barSteps.steps || []).filter((s) => !s.isRest && s.midi != null && isMelodic(s)).map((s) => s.aliasDegree);
 }
 
 /** Shuffle a copy of an array (Fisher-Yates). */

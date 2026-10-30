@@ -13,7 +13,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr) 320px;
+  grid-template-columns: 290px minmax(0, 1fr) 360px;
   gap: 0;
 }
 
@@ -293,6 +293,8 @@
 }
 .ed-canvas:focus-visible { box-shadow: var(--ring); }
 .ed-canvas.is-over-note { cursor: pointer; }
+/* A barline is a handle: drag it to widen or narrow its bar. */
+.ed-canvas.is-over-barline { cursor: col-resize; }
 .ed-canvas svg { display: block; }
 
 /* VexFlow paints the SVG root with its own presentation attributes — a music
@@ -364,8 +366,8 @@
 
 /* ------------------------------------------------------------------- help */
 .ed-help {
-  position: absolute; right: 340px; bottom: 60px; z-index: 20;
-  width: 460px; max-height: 70vh; overflow-y: auto;
+  position: absolute; right: 380px; bottom: 60px; z-index: 20;
+  width: 500px; max-width: calc(100vw - 40px); max-height: 70vh; overflow-y: auto;
   background: var(--surface); border: 1px solid var(--border-strong);
   border-radius: var(--r-lg); box-shadow: var(--shadow-2); padding: 18px 22px;
 }
@@ -376,8 +378,24 @@
 }
 .ed-help h2 + dl { margin: 0 0 18px; }
 .ed-help dl { display: grid; grid-template-columns: 130px 1fr; gap: 5px 12px; margin: 0; }
-.ed-help dt { font-size: 12px; font-weight: 600; color: var(--ink); }
-.ed-help dd { margin: 0; font-size: 12px; color: var(--ink-2); }
+.ed-help dt { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.ed-help dd { margin: 0; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); }
+
+/* The saving guide is prose, not a key table: read top to bottom, at the
+   size of the inspector beside it. */
+.ed-stage-help-btns { display: flex; gap: 8px; flex: none; }
+.ed-help-q {
+  display: inline-grid; place-items: center; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 700; line-height: 1; margin-right: 4px;
+}
+.ed-save-help { width: 560px; }
+.ed-save-help dl { grid-template-columns: 150px 1fr; }
+.ed-save-help kbd { display: block; font: inherit; font-size: 11.5px; font-weight: 500; color: var(--muted); }
+.ed-save-help p, .ed-save-help li { font-size: 14.5px; line-height: 1.55; color: var(--ink-2); }
+.ed-save-help p { margin: 0 0 18px; }
+.ed-save-help ol { margin: 0 0 18px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.ed-save-help b { color: var(--ink); }
 
 /* ---------------------------------------------------------------- library */
 .ed-lib-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -470,6 +488,24 @@
 .ed-error { font-size: 12px; color: var(--bad); margin: 8px 0; }
 .ed-empty { padding: 40px; text-align: center; color: var(--muted); }
 
+/* The inspector is where a teacher reads, not just glances: what a field
+   means, what saving will do.  At 11–12px in the faintest grey it was a strain
+   for anyone without young eyes, so the panel reads at body size and its
+   explanations take the ordinary muted ink.  The right-click menu reuses
+   these fields and keeps its own compact sizes above. */
+.ed-panel-right .ed-tab { font-size: 14.5px; padding: 8px 12px; }
+.ed-panel-right .ed-group-title { font-size: 12.5px; }
+.ed-panel-right .ed-field { gap: 5px; }
+.ed-panel-right .ed-field-lbl { font-size: 14px; }
+.ed-panel-right .ed-field-hint { font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+.ed-panel-right .ed-input { font-size: 14.5px; padding: 7px 9px; }
+.ed-panel-right .ed-input-sm { font-size: 14px; }
+.ed-panel-right .ed-hint { font-size: 14.5px; line-height: 1.55; color: var(--ink-2); }
+.ed-panel-right .ed-error { font-size: 14px; }
+.ed-panel-right .ed-note-pitch { font-size: 16px; }
+.ed-panel-right .ed-note-place { font-size: 13px; }
+.ed-panel-right .ed-check { width: 17px; height: 17px; }
+
 /* ------------------------------------------------------------- responsive */
 /* Below a certain width the three columns stop being a workspace and start
    being three cramped ones, so the panels move under the score instead. */
@@ -479,3 +515,15 @@
   .ed-panel { max-height: 420px; border: 0; border-top: 1px solid var(--border); }
   .ed-help { position: static; width: auto; right: auto; bottom: auto; margin: 0 24px 20px; }
 }
+
+/* Voices, as MuseScore colours them: the melody stays ink, the others take a
+   colour each — on the stave and on their toolbar buttons. */
+.ed-canvas g.ed-note[data-voice="2"] .vf-notehead text,
+.ed-canvas g.ed-note[data-voice="2"] .vf-stem path { fill: #1f8a4c; stroke: #1f8a4c; }
+.ed-canvas g.ed-note[data-voice="3"] .vf-notehead text,
+.ed-canvas g.ed-note[data-voice="3"] .vf-stem path { fill: #c2681a; stroke: #c2681a; }
+.ed-canvas g.ed-note[data-voice="4"] .vf-notehead text,
+.ed-canvas g.ed-note[data-voice="4"] .vf-stem path { fill: #8a3fb5; stroke: #8a3fb5; }
+.ed-dur.ed-voice-2.is-on { background: #1f8a4c; border-color: #1f8a4c; color: #fff; }
+.ed-dur.ed-voice-3.is-on { background: #c2681a; border-color: #c2681a; color: #fff; }
+.ed-dur.ed-voice-4.is-on { background: #8a3fb5; border-color: #8a3fb5; color: #fff; }

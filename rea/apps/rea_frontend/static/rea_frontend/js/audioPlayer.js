@@ -13,7 +13,8 @@
  * highlight the sounding note.  Pass -1 to clear (on stop).
  */
 
-import { buildVoice, getCurrentSoundPreset } from "./soundPresets.js?v=171";
+import { buildVoice, getCurrentSoundPreset } from "./soundPresets.js?v=183";
+import { loadPiano } from "./sampler.js?v=183";
 
 const A4_HZ = 440;
 const A4_MIDI = 69;
@@ -41,6 +42,9 @@ export class AudioPlayer {
       if (!Ctx) return false;
       if (window.__reaAudioCtx) this.ctx = window.__reaAudioCtx;
       else this.ctx = window.__reaAudioCtx = new Ctx();
+      // The recorded piano starts loading the moment there is a context to
+      // decode it on, so it is ready by the second note at the latest.
+      if (getCurrentSoundPreset().sampled) loadPiano(this.ctx);
     }
     // A WebAudio context may start 'suspended' until a user gesture occurs;
     // resume() is a no-op if already running.  We call it on every play so the

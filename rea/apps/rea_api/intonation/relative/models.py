@@ -18,7 +18,7 @@ A `Bar` is owned by *either* a `KeyModel` (scale-template bars) *or* a
 
 from django.db import models
 
-from ..style import SeparatedEvent, StyledScore
+from ..style import SeparatedEvent, ShapedBar, StyledScore
 
 
 class ScaleModel(models.Model):
@@ -264,7 +264,7 @@ class Lesson(StyledScore):
         return self.display_name
 
 
-class Bar(models.Model):
+class Bar(ShapedBar):
     """A bar within a key-model scale or a lesson.
 
     Exactly one of ``key_model`` / ``lesson`` is set.

@@ -100,6 +100,12 @@ class EventSerializer(serializers.Serializer):
     notehead = serializers.ChoiceField(
         choices=Notehead.choices, required=False, allow_blank=True, default="",
     )
+    # The accidental's own nudge, apart from its note's — see
+    # `SeparatedEvent.accidental_offset_px`.
+    accidental_offset_px = serializers.IntegerField(default=0, min_value=-40, max_value=40)
+    # Polyphony — see `SeparatedEvent.voice`.
+    voice = serializers.IntegerField(default=1, min_value=1, max_value=4)
+    stacked = serializers.BooleanField(default=False)
 
     def validate_duration(self, value):
         if value not in DURATIONS:
@@ -157,12 +163,37 @@ class BarSerializer(serializers.Serializer):
     is_incomplete_bar = serializers.BooleanField(default=False)
     incomplete_bar_playback_count = serializers.IntegerField(default=0, min_value=0, max_value=99)
     label = serializers.CharField(max_length=32, required=False, allow_blank=True, default="")
+    # How the bar is drawn — see `ShapedBar`.  Bounded so a stray drag cannot
+    # shrink a bar to nothing or push the rest of the line off the page.
+    width_scale = serializers.FloatField(default=1.0, min_value=0.25, max_value=4.0)
+    note_align = serializers.FloatField(required=False, allow_null=True, default=None, min_value=0, max_value=1)
     # Relative bars only; ignored when saving an absolute lesson.
     degree = serializers.CharField(max_length=16, required=False, allow_blank=True, default="")
     quality = serializers.ChoiceField(
         choices=["natural", "raised", "lowered"], required=False, default="natural"
     )
     events = EventSerializer(many=True, default=list)
+
+    def validate_events(self, events):
+        # A chord note sounds with the note before it in its own voice, so it
+        # needs one; and a rest is a silence, not a chord.  Both are refused
+        # rather than repaired, because which note was meant to carry the
+        # chord is not something to guess at.
+        seen = set()
+        for position, event in enumerate(events, start=1):
+            voice = event.get("voice", 1)
+            if event.get("stacked"):
+                if event.get("is_rest"):
+                    raise serializers.ValidationError(
+                        f"Note {position} is a rest and cannot be part of a chord."
+                    )
+                if voice not in seen:
+                    raise serializers.ValidationError(
+                        f"Note {position} is stacked on a chord, but voice {voice} "
+                        "has no note before it in this bar."
+                    )
+            seen.add(voice)
+        return events
 
 
 def _meta_kwargs(model, field_names):

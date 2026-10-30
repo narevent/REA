@@ -19,8 +19,8 @@
 import {
   DURATIONS, MODIFIERS, MODIFIER_LABELS, MAX_OFFSET_MS, MAX_VISUAL_OFFSET_PX,
   OFFSET_GAIN, describeNote, splitToken, buildToken,
-} from "./scoreDoc.js?v=171";
-import { labelWithAccidental, labelWithDuration, labelWithNotehead } from "./glyphs.js?v=171";
+} from "./scoreDoc.js?v=183";
+import { labelWithAccidental, labelWithDuration, labelWithNotehead } from "./glyphs.js?v=183";
 
 const MIXED = "—"; // em dash: several selected items, several values
 
@@ -180,7 +180,11 @@ function buildControl(spec, value, commit) {
       else if (option.accidental !== undefined) {
         labelWithAccidental(button, option.accidental, option.label);
       }
-      button.classList.toggle("is-on", !mixed && String(option.value) === String(value ?? ""));
+      // A null option ("none of these") is on when the field is empty.
+      const on = option.value === null
+        ? value == null
+        : String(option.value) === String(value ?? "");
+      button.classList.toggle("is-on", !mixed && on);
       button.addEventListener("click", () => commit(option.value));
       wrap.appendChild(button);
     });
@@ -280,7 +284,7 @@ function renderGroup(parent, title, specs, items, onChange) {
       // decimals that unit keeps: milliseconds shown, seconds stored, and
       // rounding those to whole numbers would turn every pause into none.
       let back = next;
-      if (scale !== 1) {
+      if (scale !== 1 && next != null) {
         const factor = 10 ** (spec.round != null ? spec.round : 0);
         back = Math.round((next / scale) * factor) / factor;
       }
@@ -498,6 +502,31 @@ export class Inspector {
       },
     ], events, commit);
 
+    // Polyphony.  The voice moves whole chords (see `ScoreDoc.setVoice`), so
+    // it goes through the editor rather than writing the field directly.
+    renderGroup(body, "Voice and chord", [
+      {
+        key: "voice", label: "Voice", type: "buttons",
+        get: (items) => {
+          const first = items[0].voice || 1;
+          return items.every((e) => (e.voice || 1) === first) ? first : MIXED;
+        },
+        options: [1, 2, 3, 4].map((v) => ({ value: v, label: String(v) })),
+        hint: "Voice 1 is the melody a student sings. Ctrl+Alt+1…4.",
+      },
+      {
+        key: "stacked", label: "Sounds with the note before (chord)", type: "checkbox",
+        get: (items) => {
+          const first = !!items[0].stacked;
+          return items.every((e) => !!e.stacked === first) ? first : MIXED;
+        },
+        hint: "Shift+letter or Alt+2…9 adds a note to a chord.",
+      },
+    ], events, (key, value) => {
+      if (key === "voice") this.hooks.onVoice(positions, value);
+      else commit(key, value);
+    });
+
     // Its counterpart, and deliberately in a group of its own so the two are
     // never read as one control with two spellings: this one moves the
     // notehead and leaves the sound alone.
@@ -507,6 +536,12 @@ export class Inspector {
         min: -MAX_VISUAL_OFFSET_PX, max: MAX_VISUAL_OFFSET_PX, step: 1,
         hint: "Pixels. Moves the notehead left (−) or right (+) on the stave — " +
           "for spacing that reads badly. When it sounds does not change.",
+      },
+      {
+        key: "accidental_offset_px", label: "Accidental offset", type: "range",
+        min: -40, max: 40, step: 1,
+        hint: "Pixels. Moves only the sharp or flat, left (−) or right (+) — " +
+          "for one that crowds its neighbour.",
       },
       {
         // The mark after the note.  It is a note property rather than a bar
@@ -630,6 +665,31 @@ export class Inspector {
     }
 
     renderGroup(body, bars.length > 1 ? `${bars.length} bars` : `Bar ${indices[0] + 1}`, specs, bars, commit);
+
+    renderGroup(body, "On the page", [
+      {
+        // Shown as a percentage, stored as a factor.  Dragging the bar's
+        // right-hand barline on the stave sets the same value.
+        key: "width_scale", label: "Width", type: "range",
+        min: 25, max: 400, step: 5, scale: 100, round: 2,
+        hint: "Percent of the width the notes ask for. Or drag the barline on the stave.",
+      },
+      {
+        key: "note_align", label: "Notes in the bar", type: "buttons",
+        options: [
+          { value: null, label: "Spread" },
+          { value: 0, label: "Left" },
+          { value: 0.5, label: "Centre" },
+          { value: 1, label: "Right" },
+        ],
+        hint: "Spread fills the bar. The others keep the notes at their own spacing and place them.",
+      },
+      {
+        key: "note_align", label: "Position", type: "range",
+        min: 0, max: 100, step: 5, scale: 100, round: 2,
+        hint: "Anywhere between the left barline (0) and the right (100).",
+      },
+    ], bars, commit);
   }
 
   // -- the exercise ------------------------------------------------------

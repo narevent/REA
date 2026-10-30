@@ -20,23 +20,23 @@
  * exercise half-written is worse than one not written at all.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=171";
-import { EditorAPI } from "./editorApi.js?v=171";
-import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=171";
+import { AudioPlayer } from "../audioPlayer.js?v=183";
+import { EditorAPI } from "./editorApi.js?v=183";
+import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=183";
 import {
   Library, SHELF_DESTINATIONS, destinations, metaFromCtx,
-} from "./library.js?v=171";
-import { labelWithAccidental, labelWithDuration } from "./glyphs.js?v=171";
-import { ScoreCanvas } from "./scoreCanvas.js?v=171";
+} from "./library.js?v=183";
+import { labelWithAccidental, labelWithDuration } from "./glyphs.js?v=183";
+import { ScoreCanvas } from "./scoreCanvas.js?v=183";
 import {
   DURATIONS, LETTERS, MAX_VISUAL_OFFSET_PX, MODIFIERS, MODIFIER_LABELS, ScoreDoc,
-  buildToken, noteMidi, offsetMs, splitToken, transposeToken,
-} from "./scoreDoc.js?v=171";
-import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=171";
-import { midiToToken } from "../notation.js?v=171";
+  buildToken, chordAt, noteMidi, offsetMs, splitToken, transposeToken,
+} from "./scoreDoc.js?v=183";
+import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=183";
+import { midiToToken } from "../notation.js?v=183";
 import {
-  applyLegato, barGapMs, separatorGapMs, tupletRatio,
-} from "../practiceData.js?v=171";
+  applyLegato, barGapMs, eventTimes, separatorGapMs, tupletRatio,
+} from "../practiceData.js?v=183";
 
 /** The accidentals offered as buttons, in the order a musician reaches for
  *  them.  `null` is "whatever the key signature says", which is the state a
@@ -106,6 +106,9 @@ class Editor {
     this.writeDuration = 0.125;
     // An accidental armed for the next written note, spent when it is used.
     this.writeModifier = null;
+    // The voice the next note is written into.  Voice 1 is the melody; the
+    // others run beside it with rhythms of their own.
+    this.writeVoice = 1;
 
     this.library = new Library(this.dom.library, {
       search: (params) => EditorAPI.browse(params),
@@ -122,12 +125,22 @@ class Editor {
       onDragVisual: (position, px) => this.dragVisual(position, px),
       onDragOrder: (from, to) => this.dragOrder(from, to),
       onDragEnd: (position) => this.endDrag(position),
+      onBarlineDragBegin: () => this.doc.beginLive("resize bar"),
+      onBarlineDrag: (barIndex, scale) => this.doc.live((doc) => {
+        if (doc.bars[barIndex]) doc.bars[barIndex].width_scale = scale;
+      }),
+      onBarlineDragEnd: (barIndex) => {
+        this.doc.endLive();
+        this.selection = { notes: [], bars: [barIndex] };
+        this.renderAll();
+      },
       onNoteMenu: (position, event) => this.openNoteMenu(position, event),
       onBarMenu: (barIndex, event) => this.openBarMenu(barIndex, event),
     });
     this.inspector = new Inspector(this.dom.inspector, {
       onNote: (positions, changes) => this.updateNotes(positions, changes),
       onTuplet: (positions, num) => this.setTuplet(positions, num),
+      onVoice: (positions, voice) => this.doc.setVoice(positions, voice),
       onBar: (indices, changes) => this.updateBars(indices, changes),
       onMeta: (changes) => this.updateMeta(changes),
       onKey: (key) => this.setKey(key),
@@ -618,7 +631,8 @@ class Editor {
         } : null,
         relative ? {
           key: "variant", label: "Variant", value: this._suggestVariant(meta.variant),
-          hint: "What tells this exercise apart from the others in the same category.",
+          hint: "What tells this exercise apart from the others in the same category. "
+            + "Not used for a melodic module (Octave, Dominant, Scale) — the module sets it.",
         } : {
           key: "exercise_number", label: "Exercise number", type: "number",
           value: (Number(meta.exercise_number) || 0) + 1,
@@ -630,6 +644,12 @@ class Editor {
 
     const payload = this.doc.payload();
     const where = answer.values.where;
+    const place = where.startsWith("shelf:") ? null : places[Number(where)];
+    // A melodic module *is* a variant — "" is Diatonic, AL1 Alterations,
+    // SKALA the scale — and practice looks the lesson up by exactly that.
+    // Letting the typed variant overwrite it filed the exercise under a name
+    // no module asks for: saved, in the library, and never practised.
+    const moduleVariant = relative && place && "variant" in place.ctx;
     if (where.startsWith("shelf:")) {
       // Onto a shelf: the exercise keeps whatever identity it happens to have
       // and simply lives somewhere other than the curriculum.
@@ -638,12 +658,13 @@ class Editor {
       // Filing it into the method: the destination's own facets decide where
       // it lands, and they must be the same ones the tree filters that branch
       // by.
-      Object.assign(payload.meta, metaFromCtx(places[Number(where)].ctx, system));
+      Object.assign(payload.meta, metaFromCtx(place.ctx, system));
     }
     if (relative) {
       payload.key_model = Number(answer.values.key_model) || payload.key_model;
-      // A draft's variant is its working title, so it is kept either way.
-      payload.meta.variant = answer.values.variant.trim();
+      // A draft's variant is its working title, so it is kept — everywhere
+      // but a melodic module, which has already said what it must be.
+      if (!moduleVariant) payload.meta.variant = answer.values.variant.trim();
     } else {
       payload.meta.exercise_number = Number(answer.values.exercise_number);
     }
@@ -661,10 +682,19 @@ class Editor {
           ? `Saved “${saved.display_name}” to the drafts — students do not see it.`
           : shelf === "dictation"
             ? `Saved “${saved.display_name}” as a dictation — students find it under Dictation.`
-            : `Created “${saved.display_name}” — it is in the library, and students can practise it now.`,
+            : `Filed “${saved.display_name}” under ${place.label}.`,
         "good");
       return true;
     } catch (e) {
+      if (moduleVariant && e.status === 409) {
+        // The server's message asks for a different variant, which is the one
+        // thing a melodic module will not take.  Say what will work instead.
+        const key = keys.find((k) => String(k.id) === String(payload.key_model));
+        answer.fail(
+          `${key ? key.name : "This key"} already has an exercise in ${place.label}, and practice shows one per key. `
+          + "Open that one from the library and press Save to replace it, or choose a key that has none yet.");
+        return false;
+      }
       answer.fail(e.message);
       return false;
     }
@@ -915,6 +945,17 @@ class Editor {
         () => this.toggleTuplet(num, den), "ed-tup")
     ))));
 
+    // Polyphony: which voice the next note goes into (or the selection is
+    // moved to), and a chord built up from the selected note.
+    rows[1].appendChild(palette("Voice", [1, 2, 3, 4].map((v) => (
+      choice(String(v), `Voice ${v} (Ctrl+Alt+${v})${v === 1 ? " — the melody" : ""}`,
+        this.writeVoice === v, !doc, () => this.setWriteVoice(v), `ed-voice ed-voice-${v}`)
+    ))));
+    rows[1].appendChild(palette("Chord", [[3, "3rd"], [4, "4th"], [5, "5th"], [6, "6th"], [8, "8ve"]].map(([n, label]) => (
+      choice(label, `Add a ${label} above the chord (Alt+${n}); Shift+letter adds that note`,
+        false, !doc || (!selected.length && !this.caret), () => this.addToChord({ interval: n }), "ed-chord")
+    ))));
+
     // What the stave shows.  Last on the row and visually apart: these change
     // the picture and never the exercise.
     const views = el("div", "ed-tool-group ed-tool-views");
@@ -999,6 +1040,7 @@ class Editor {
   }
 
   selectNote(position, event = {}) {
+    this._inputSelection = false;
     // Clicking a note selects it *and* moves the caret after it, because they
     // are the same cursor — see `resetCaret`.  Typing then carries on from
     // where you clicked, which is what clicking into text does.
@@ -1278,6 +1320,8 @@ class Editor {
       this.selection = event
         ? { notes: [{ barIndex: caret.barIndex, noteIndex: at }], bars: [] }
         : { notes: [], bars: [] };
+      // A selection the input made rather than the hand: see `setWriteVoice`.
+      this._inputSelection = true;
     }
     this.renderAll();
   }
@@ -1459,6 +1503,7 @@ class Editor {
       note_name: buildToken({ letter, octave, modifier: this.writeModifier }),
       duration: this.writeDuration,
       is_rest: false,
+      voice: this.writeVoice,
     });
     if (!position) return;
     // An armed accidental applies to the note it was armed for and no further,
@@ -1472,10 +1517,67 @@ class Editor {
   writeRest() {
     const { barIndex, at } = this._caret();
     const position = this.doc.insertNote(barIndex, at, {
-      is_rest: true, note_name: "", duration: this.writeDuration,
+      is_rest: true, note_name: "", duration: this.writeDuration, voice: this.writeVoice,
     });
     if (!position) return;
     this.setCaret({ barIndex, at: at + 1 });
+  }
+
+  /**
+   * Add a note to a chord: the selected note's, or the one just written.
+   *
+   * MuseScore's two ways of saying it: a letter (Shift+letter) puts that note
+   * on the chord, in the nearest octave above its top note; an interval
+   * (Alt+2…9) puts the note that many steps above the top, in the key.
+   */
+  addToChord({ letter = null, interval = null } = {}) {
+    let target = this.selection.notes[0] || null;
+    if (!target) {
+      const { barIndex, at } = this._caret();
+      if (at > 0) target = { barIndex, noteIndex: at - 1 };
+    }
+    if (!target) { this.status("Select a note to build the chord on.", "warn"); return; }
+    const bar = this.doc.doc.bars[target.barIndex];
+    const notes = chordAt(bar, target.noteIndex).map((i) => bar.events[i]).filter((e) => e && !e.is_rest);
+    if (!notes.length) { this.status("A rest cannot carry a chord.", "warn"); return; }
+    const step = (name) => { const t = splitToken(name); return t.octave * 7 + LETTERS.indexOf(t.letter); };
+    const top = Math.max(...notes.map((e) => step(e.note_name)));
+    let wanted;
+    if (interval) {
+      wanted = top + interval - 1;
+    } else {
+      wanted = Math.floor(top / 7) * 7 + LETTERS.indexOf(letter);
+      if (wanted <= top) wanted += 7;
+    }
+    const octave = Math.floor(wanted / 7);
+    if (octave < 0 || octave > 9) { this.status("That is off the edge of the notation.", "warn"); return; }
+    const name = buildToken({
+      letter: LETTERS[((wanted % 7) + 7) % 7], octave,
+      // A letter takes an armed accidental, as writing does; an interval is
+      // in the key.
+      modifier: letter ? this.writeModifier : null,
+    });
+    const position = this.doc.addChordNote(target, name);
+    if (!position) return;
+    this.writeModifier = null;
+    this.selection = { notes: [position], bars: [] };
+    this.caret = { barIndex: position.barIndex, at: position.noteIndex + 1 };
+    this.canvas.setCaret(this.caret);
+    this.renderAll();
+    this.previewNote(position);
+  }
+
+  /** Choose the voice to write in; with notes selected, move them into it. */
+  setWriteVoice(voice) {
+    this.writeVoice = voice;
+    // MuseScore's distinction: while writing, the voice keys change the voice
+    // of what is written next; with notes the hand selected, they move those
+    // notes.  The note just written is selected too, but nobody chose it.
+    if (this.selection.notes.length && !this._inputSelection) {
+      this.doc.setVoice(this.selection.notes, voice);
+    }
+    this.renderToolbar();
+    this.status(`Writing in voice ${voice}.`);
   }
 
   /** Backspace in note input: remove what was just written. */
@@ -1808,16 +1910,22 @@ class Editor {
       const bar = doc.bars[barIndex];
       if (!bar) return;
       const from = steps.length;
-      let cursor = 0;
-      (bar.events || []).forEach((event, noteIndex) => {
-        const offset = offsetMs(event);
-        const start = Math.max(0, cursor + offset);
-        let duration = event.duration || 0.125;
-        if (!event.is_rest && duration < 0.0625) duration = 0.125;
+      // Voices keep their own time and chords sound together — the timing is
+      // `practiceData.eventTimes`, the same the student's player uses.
+      const { times, end } = eventTimes(bar.events || [], {
+        offsetMs: (event) => offsetMs(event),
         // Tuplets scale the sounding length and not the written one — the
         // same rule `practiceData.buildBarSteps` applies, so the teacher's
         // preview and the student's playback agree.
-        const durationMs = Math.max(20, Math.round(duration * wholeMs * tupletRatio(event)));
+        durationMs: (event) => {
+          let duration = event.duration || 0.125;
+          if (!event.is_rest && duration < 0.0625) duration = 0.125;
+          return Math.max(20, Math.round(duration * wholeMs * tupletRatio(event)));
+        },
+        separatorMs,
+      });
+      (bar.events || []).forEach((event, noteIndex) => {
+        const { start, dur: durationMs, voice, stacked } = times[noteIndex];
         steps.push({
           midi: noteMidi(event, doc.key_signature),
           isRest: !!event.is_rest,
@@ -1828,15 +1936,16 @@ class Editor {
           separator: event.separator || "",
           barIndex,
           noteIndex,
+          voice,
+          stacked,
         });
-        cursor = start + durationMs + (event.separator ? separatorMs : 0);
       });
       // Held notes are closed up inside the bar, exactly as the student's
       // player does it — see `applyLegato`.  Bar by bar, so a gap between
       // bars stays a gap until the rule below decides otherwise.
       applyLegato(steps.slice(from), { cutAtSeparator });
       steps.slice(from).forEach((step) => { step.startMs += barStart; });
-      barStart += cursor + gapMs;
+      barStart += end + gapMs;
     });
     // ...and the note that ends a bar rings into that gap unless the exercise
     // says to cut it at the barline.
@@ -1941,7 +2050,9 @@ class Editor {
       const CLAIMED_WITH_MODIFIER = new Set([
         "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
       ]);
-      if (modifier && !CLAIMED_WITH_MODIFIER.has(e.key)) return;
+      // Ctrl+Alt+1…4 picks the voice, as in MuseScore.
+      const voiceKey = modifier && e.altKey && /^Digit[1-4]$/.test(e.code);
+      if (modifier && !CLAIMED_WITH_MODIFIER.has(e.key) && !voiceKey) return;
       if (!this.doc) return;
 
       const notes = this.selection.notes;
@@ -1968,6 +2079,22 @@ class Editor {
   handleKey(e, notes) {
     const key = e.key;
     const modifier = e.metaKey || e.ctrlKey;
+
+    // Read from the physical key, because Alt and Shift change what the key
+    // types — Alt+3 is "£" or "#" depending on the keyboard.
+    const digit = /^Digit([1-9])$/.exec(e.code || "");
+    if (digit && modifier && e.altKey) {
+      const voice = Number(digit[1]);
+      if (voice <= 4) { this.setWriteVoice(voice); return true; }
+    }
+    if (digit && e.altKey && !modifier && Number(digit[1]) >= 2) {
+      this.addToChord({ interval: Number(digit[1]) });
+      return true;
+    }
+    if (e.shiftKey && !e.altKey && !modifier && LETTER_KEYS.has(key.toLowerCase())) {
+      this.addToChord({ letter: key.toLowerCase() });
+      return true;
+    }
 
     if (key === " ") {
       if (e.shiftKey) this.playBar(); else this.togglePlay();

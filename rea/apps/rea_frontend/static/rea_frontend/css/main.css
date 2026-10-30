@@ -135,8 +135,12 @@ body {
   /* Equal outer columns, so the switcher sits on the page's centre line and
      not merely in the middle of whatever is left over.  This only holds while
      the right-hand cluster fits its share — below 1200px the switcher takes a
-     row of its own rather than being pushed off centre. */
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+     row of its own rather than being pushed off centre.
+     The outer tracks never shrink below their content, though: a teacher's
+     cluster (Curriculum, About, Editor, Dictations, account) is wider than
+     half the spare room on a laptop, and with a zero minimum it spilled left
+     over the switcher.  Off centre by a little beats unreadable. */
+  grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
   align-items: center;
   gap: 16px;
   padding: 14px 24px;
@@ -415,6 +419,9 @@ svg.rea-score .vf-bar-number {
 /* ...and the noteheads inside them, so the answer reads at note level too and
    not only as a box.  Below the accuracy rules, above the playback cursor
    rules — a guessing chapter never runs both. */
+/* A note this student sings an octave away from where it is written. */
+.notation .vf-stavenote.vf-octave-shifted .vf-notehead text { fill: var(--accent-3) !important; }
+
 .notation .vf-stavenote.vf-res-picked .vf-notehead text,
 .notation .vf-stavenote.vf-res-picked .vf-notehead path { fill: #3d4edb !important; stroke: #3d4edb !important; }
 .notation .vf-stavenote.vf-res-correct .vf-notehead text,
@@ -1763,6 +1770,13 @@ svg.rea-score .vf-bar-focus rect { stroke: var(--accent); }
 }
 
 /* ------------------------------------------------------------- instruments */
+/* The panel under the stave that holds them: the score stays the main
+   picture, the instrument is the same bars in a second one. */
+.instrument-panel {
+  margin-top: 10px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.instrument-panel[hidden] { display: none; }
 /* The exercise drawn as a keyboard or a neck — the same answer sheet the
    stave is, in a picture a student who does not read music can answer in.
    See `instrumentRenderer.js`: one diagram per bar, holding that bar's own
@@ -1885,3 +1899,14 @@ svg.rea-score .vf-bar-focus rect { stroke: var(--accent); }
 }
 .answer-key th { color: var(--muted); font-weight: 500; }
 .answer-key p { margin: 8px 0 0; color: var(--muted); }
+
+/* The little panel a singing chapter opens on a notehead: sing this note an
+   octave up or down, for this student only. */
+.octave-pop {
+  position: absolute; z-index: 50; display: flex; flex-direction: column; gap: 8px;
+  padding: 10px; background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--r-md); box-shadow: var(--shadow-1, 0 4px 16px rgba(0,0,0,.12));
+}
+.octave-pop-state { font-size: 12px; color: var(--muted); }
+.octave-pop-row { display: flex; gap: 6px; }
+.octave-pop-btn { padding: 6px 10px; font-size: 13px; }

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=171" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=183" />
 </head>
 <body>
   <header class="app-header">
@@ -51,6 +51,17 @@
       <section class="about-part" id="theory">
         <h2>Theory</h2>
         <p class="about-todo">Not written up yet — this chapter still lives in the original PDF.</p>
+      </section>
+
+      {% comment %}The piano samples are CC BY 3.0, which asks for credit
+      where the work is used — here, as well as in vendor/salamander.{% endcomment %}
+      <section class="about-part" id="credits">
+        <h2>Credits</h2>
+        <p>
+          The piano you hear is the <a href="https://archive.org/details/SalamanderGrandPianoV3">Salamander Grand Piano</a>,
+          recorded by Alexander Holm and shared under
+          <a href="https://creativecommons.org/licenses/by/3.0/">Creative Commons Attribution 3.0</a>.
+        </p>
       </section>
     </div>
   </main>

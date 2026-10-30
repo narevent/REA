@@ -1,7 +1,7 @@
 from django.urls import path
 from django.http import HttpResponse
 
-from .views import AboutView, EditorView, IndexView
+from .views import AboutView, DictationEditorView, EditorView, IndexView
 
 app_name = "rea_frontend"
 
@@ -21,5 +21,6 @@ urlpatterns = [
     path("", IndexView.as_view(), name="index"),
     path("about/", AboutView.as_view(), name="about"),
     path("editor/", EditorView.as_view(), name="editor"),
+    path("dictation-editor/", DictationEditorView.as_view(), name="dictation-editor"),
     path("favicon.ico", favicon, name="favicon"),
 ]

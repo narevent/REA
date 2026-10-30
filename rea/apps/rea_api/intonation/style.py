@@ -86,7 +86,7 @@ class StyledScore(models.Model):
 
     # -- on the page -------------------------------------------------------
     mid_bar_space = models.PositiveSmallIntegerField(
-        default=12,
+        default=6,
         help_text="Whitespace between two bars on the page, in pixels.",
     )
     bars_per_row = models.PositiveSmallIntegerField(
@@ -142,6 +142,31 @@ class StyledScore(models.Model):
     )
 
 
+class ShapedBar(models.Model):
+    """How one bar is drawn, as opposed to what it holds.
+
+    A bar's width is normally whatever its notes ask for.  A teacher laying
+    out a page sometimes wants one wider — a long note given room, a short
+    bar matched to its neighbour — and says so by dragging its barline; and
+    in a bar wider than its notes they decide where the notes sit in it.
+    """
+
+    class Meta:
+        abstract = True
+
+    width_scale = models.FloatField(
+        default=1.0,
+        help_text="How wide the bar is drawn, as a multiple of the width its notes ask for.",
+    )
+    note_align = models.FloatField(
+        null=True, blank=True,
+        help_text=(
+            "Where the notes sit in a bar wider than they need: 0 at the left, "
+            "0.5 centred, 1 at the right. Empty spreads them across the bar."
+        ),
+    )
+
+
 class SeparatedEvent(models.Model):
     """The two things a note can say about how it is *drawn*, as opposed to
     what it sounds: the mark that follows it, and the shape of its head."""
@@ -155,6 +180,22 @@ class SeparatedEvent(models.Model):
     )
     notehead = models.CharField(
         max_length=16, choices=Notehead.choices, default=Notehead.NORMAL, blank=True,
+    )
+    accidental_offset_px = models.SmallIntegerField(
+        default=0,
+        help_text="Moves the note's accidental sideways, in pixels; positive is to the right.",
+    )
+    # Polyphony.  A bar holds up to four voices, each with its own rhythm from
+    # the start of the bar; a note marked `stacked` sounds together with the
+    # note before it in the same voice, which is how a chord is written.  An
+    # exercise written before either existed is one voice of single notes,
+    # which is exactly what the defaults say.
+    voice = models.PositiveSmallIntegerField(
+        default=1, help_text="Which voice (1-4) the note belongs to.",
+    )
+    stacked = models.BooleanField(
+        default=False,
+        help_text="Sounds together with the note before it in the same voice: a chord.",
     )
 
 
@@ -170,10 +211,10 @@ STYLE_FIELDS = (
 
 
 #: The source measures the gap between bars in its own unit, and writes 3 for
-#: every file in the library.  That 3 is drawn as the default gap, 12 pixels,
-#: so one source unit is four of them — which is how a re-imported lesson
+#: every file in the library.  That 3 is drawn as the default gap, 6 pixels,
+#: so one source unit is two of them — which is how a re-imported lesson
 #: lands on the same spacing as every other exercise.
-SOURCE_SPACE_PX = 12 / 3
+SOURCE_SPACE_PX = 6 / 3
 
 
 def style_from_source(data: dict) -> dict:

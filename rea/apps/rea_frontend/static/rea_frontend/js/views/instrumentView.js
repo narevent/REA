@@ -1,7 +1,7 @@
 /**
  * instrumentView.js
  *
- * A lesson or key model drawn on an instrument instead of a stave.
+ * A lesson or key model drawn on an instrument, under its stave.
  *
  * It mirrors `numericView` exactly — same lesson, same bars, same events,
  * same resolved pitches — and differs only in which renderer it hands them
@@ -10,14 +10,15 @@
  * drawn at all.
  */
 
-import { InstrumentRenderer } from "../components/instrumentRenderer.js?v=171";
-import { keySigMap, midiFromEvent } from "../practiceData.js?v=171";
+import { InstrumentRenderer } from "../components/instrumentRenderer.js?v=183";
+import { keySigMap, midiFromEvent } from "../practiceData.js?v=183";
 
 let renderer = null;
 let current = null;
 
 function getRenderer(instrument) {
-  const host = document.getElementById("notation");
+  const host = document.getElementById("instrument");
+  if (host) host.hidden = false;
   // A different instrument is a different picture, not a redraw of this one.
   if (!renderer || current !== instrument) {
     if (renderer) renderer.clear();
@@ -30,6 +31,8 @@ function getRenderer(instrument) {
 /** Reset the shared renderer (e.g. on view switch). */
 export function resetRenderer() {
   if (renderer) renderer.clear();
+  const host = document.getElementById("instrument");
+  if (host) host.hidden = true;
 }
 
 function toBars(item) {

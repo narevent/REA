@@ -7,8 +7,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=171" />
-  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=171" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/main.css' %}?v=183" />
+  <link rel="stylesheet" href="{% static 'rea_frontend/css/editor.css' %}?v=183" />
 </head>
 <body class="ed-body">
   <header class="app-header">
@@ -21,7 +21,8 @@
     </a>
     <nav class="app-nav">
       <a class="app-nav-btn" href="{% url 'rea_frontend:index' %}">Practice</a>
-      <a class="app-nav-btn active" href="{% url 'rea_frontend:editor' %}">Editor</a>
+      <a class="app-nav-btn active" href="{% url 'rea_frontend:editor' %}">Exercises</a>
+      <a class="app-nav-btn" href="{% url 'rea_frontend:dictation-editor' %}">Dictations</a>
       <a class="app-nav-btn" href="{% url 'accounts:dashboard' %}">Profile</a>
     </nav>
     <div class="header-right">
@@ -39,7 +40,12 @@
           <h1 class="ed-title" id="ed-title">Loading…</h1>
           <p class="ed-subtitle" id="ed-subtitle"></p>
         </div>
-        <button class="ed-btn ed-btn-quiet" type="button" id="ed-help-toggle" title="Keyboard shortcuts (?)">Shortcuts</button>
+        <div class="ed-stage-help-btns">
+          <button class="ed-btn ed-btn-quiet" type="button" id="ed-save-help-toggle" aria-controls="ed-save-help" title="How to save an exercise into a practice module">
+            <span class="ed-help-q" aria-hidden="true">?</span> How saving works
+          </button>
+          <button class="ed-btn ed-btn-quiet" type="button" id="ed-help-toggle" aria-controls="ed-help" title="Keyboard shortcuts (?)">Shortcuts</button>
+        </div>
       </div>
 
       <div class="ed-toolbar" id="ed-toolbar"></div>
@@ -49,6 +55,30 @@
            aria-label="Score. Click a notehead to select it, click a bar to select the bar, double-click empty staff to write a note."></div>
 
       <p class="ed-status" id="ed-status">Loading the editor…</p>
+
+      {% comment %}Saving is where the editor meets the practice app, and the
+      rule that joins them is not visible from here: practice shows exactly one
+      exercise per module, key and part.  A new exercise filed beside an
+      existing one is saved but never shown — so say so before it happens.
+      {% endcomment %}
+      <div class="ed-help ed-save-help" id="ed-save-help" hidden>
+        <h2>Save or Save as…</h2>
+        <dl>
+          <dt>Save <kbd>⌘/Ctrl S</kbd></dt><dd>replaces the exercise that is open. Students practising it get the new version straight away.</dd>
+          <dt>Save as… <kbd>⌘/Ctrl ⇧ S</kbd></dt><dd>makes a new exercise and leaves the open one alone. You choose <b>Where it goes</b>: a practice module, the Drafts, or Dictation.</dd>
+        </dl>
+        <h2>The one rule to know</h2>
+        <p>Practice shows <b>one exercise per module, per key</b> (and per part, for harmonic modules). An exercise filed next to one that is already there is saved and stays in the library, but students will not see it.</p>
+        <h2>Putting an exercise into a module</h2>
+        <ol>
+          <li><b>To change what students practise</b> — in the library on the left, open the module's exercise for that key, make your changes, and press <b>Save</b>.</li>
+          <li><b>Melodic modules</b> (Octave, Dominant, Scale — Diatonic or Alterations) — press <b>Save as…</b>, pick the module under <b>Where it goes</b>, and choose a <b>Key</b> that has no exercise there yet. The module sets the variant itself.</li>
+          <li><b>Harmonic modules</b> (Formula, Intervals, Triads, Seventh chords) — first set a new <b>Part</b> in the <b>Exercise</b> tab on the right (e.g. <i>4</i>), then <b>Save as…</b> into the module. It appears as “Part 4” in the module's part chooser.</li>
+          <li><b>Absolute modules</b> — the <b>Exercise number</b> (1–10) is which of the ten practice exercises it is used for, within its part.</li>
+        </ol>
+        <h2>Drafts and Dictation</h2>
+        <p><b>Drafts</b> are only for you — students never see them. <b>Dictation</b> puts the exercise in the students' Dictation area. Teachers save to these two; filing into the curriculum itself is for administrators.</p>
+      </div>
 
       <div class="ed-help" id="ed-help" hidden>
         {% comment %}The bindings follow MuseScore wherever MuseScore has an
@@ -101,21 +131,32 @@
           <dt>Alt + drag</dt><dd>sideways to change when it sounds — the playback offset</dd>
           <dt>Alt + Shift + drag</dt><dd>sideways to change where it is drawn — the visual offset</dd>
         </dl>
+      </div>
     </section>
 
     {# Properties of whatever is selected: note, bar, or the exercise. #}
     <aside class="ed-panel ed-panel-right" id="ed-inspector"></aside>
   </main>
 
-  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=171"></script>
-  <script type="module" src="{% static 'rea_frontend/js/editor/editor.js' %}?v=171"></script>
+  <script src="{% static 'rea_frontend/vendor/vexflow/vexflow.min.js' %}?v=183"></script>
+  <script type="module" src="{% static 'rea_frontend/js/editor/editor.js' %}?v=183"></script>
   <script>
     // The one behaviour that belongs to the page rather than the score: the
     // shortcut sheet.  Keeping it here means the editor module never has to
     // care whether the button exists.
-    document.getElementById("ed-help-toggle").addEventListener("click", function () {
-      var help = document.getElementById("ed-help");
-      help.hidden = !help.hidden;
+    // The two help sheets share the space under the score, so opening one
+    // closes the other.
+    [["ed-help-toggle", "ed-help"], ["ed-save-help-toggle", "ed-save-help"]].forEach(function (pair, i, all) {
+      document.getElementById(pair[0]).addEventListener("click", function () {
+        var sheet = document.getElementById(pair[1]);
+        var open = sheet.hidden;
+        all.forEach(function (other) {
+          document.getElementById(other[1]).hidden = true;
+          document.getElementById(other[0]).setAttribute("aria-expanded", "false");
+        });
+        sheet.hidden = !open;
+        this.setAttribute("aria-expanded", String(open));
+      });
     });
   </script>
 </body>

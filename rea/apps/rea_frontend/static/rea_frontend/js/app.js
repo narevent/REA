@@ -11,36 +11,38 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=171";
-import { renderLessonNotation } from "./views/lessonView.js?v=171";
-import { renderScaleNotation } from "./views/scaleView.js?v=171";
-import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=171";
+import { API } from "./api.js?v=183";
+import { renderLessonNotation } from "./views/lessonView.js?v=183";
+import { renderScaleNotation } from "./views/scaleView.js?v=183";
+import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=183";
 import {
   renderLessonInstrument, renderScaleInstrument, resetRenderer as resetInstrument,
-} from "./views/instrumentView.js?v=171";
-import { SoundcheckView } from "./views/soundcheckView.js?v=171";
-import { AudioPlayer } from "./audioPlayer.js?v=171";
-import { PracticeController } from "./practiceController.js?v=171";
-import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=171";
+} from "./views/instrumentView.js?v=183";
+import { pairRenderers } from "./components/pairedRenderer.js?v=183";
+import { DictationPractice } from "./dictation/practice.js?v=183";
+import { SoundcheckView } from "./views/soundcheckView.js?v=183";
+import { AudioPlayer } from "./audioPlayer.js?v=183";
+import { PracticeController } from "./practiceController.js?v=183";
+import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=183";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=171";
+} from "./chapters.js?v=183";
 import {
   AREAS, AREA_BY_ID, contextFor, kindOf, isPractisable, defaultCategory, setDictations,
   categoryByUid, firstCategory, pathOf, neighbourCategory,
-} from "./curriculum.js?v=171";
-import { createNav } from "./curriculumNav.js?v=171";
+} from "./curriculum.js?v=183";
+import { createNav } from "./curriculumNav.js?v=183";
 import {
   DIFFICULTIES, DIFFICULTY_LABELS, getDifficulty, setDifficulty,
   adoptAccountDifficulty,
-} from "./difficulty.js?v=171";
+} from "./difficulty.js?v=183";
 import {
   TEMPO_SCALES, tempoLabel, getTempoScale, setTempoScale,
-} from "./tempo.js?v=171";
+} from "./tempo.js?v=183";
 // Shared with the score editor's tree, so both call the same thing by the
 // same name.
-import { absPartKey, absPartLabel } from "./lessonNaming.js?v=171";
+import { absPartKey, absPartLabel } from "./lessonNaming.js?v=183";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");
@@ -637,10 +639,13 @@ function isNumericCategory() {
  * nothing about the exercise or the marking.
  */
 const VIEW_KEY = "rea.view";
+// The stave is always drawn; the choice is what, if anything, goes under it.
+// The stored values are the ones the setting has always had, so a device that
+// chose "keyboard" before keeps it.
 const VIEWS = [
-  { value: "score", label: "Score" },
-  { value: "keyboard", label: "Keyboard" },
-  { value: "guitar", label: "Guitar" },
+  { value: "score", label: "Staff only" },
+  { value: "keyboard", label: "Staff + keyboard" },
+  { value: "guitar", label: "Staff + guitar" },
 ];
 
 function getView() {
@@ -655,6 +660,21 @@ function setView(value) {
   try { window.localStorage.setItem(VIEW_KEY, value); } catch (e) { /* ditto */ }
 }
 
+/**
+ * The instrument under the stave, when one is chosen — or nothing.
+ *
+ * Not in a chapter that draws the exercise without accidentals: a key on a
+ * keyboard *is* a sharp or a natural, so the instrument would print the very
+ * answer the plain stave is hiding.
+ */
+function instrumentUnder(opts, draw) {
+  if (getView() === "score" || (opts && opts.accidentals === false)) {
+    resetInstrument();
+    return null;
+  }
+  return draw();
+}
+
 const practice = new PracticeController({
   stage: document.getElementById("notation"),
   legend: document.getElementById("legend"),
@@ -665,18 +685,18 @@ const practice = new PracticeController({
   // choice is made here, at the one place the score is drawn, and nothing
   // downstream has to know which of the two it is driving.
   renderNotation: (lesson, onBarClick, opts) => {
-    const view = getView();
-    if (view !== "score") return renderLessonInstrument(lesson, onBarClick, view);
-    return isNumericCategory()
+    const primary = isNumericCategory()
       ? renderLessonNumeric(lesson, onBarClick)
       : renderLessonNotation(lesson, onBarClick, opts);
+    return pairRenderers(primary, instrumentUnder(opts, () =>
+      renderLessonInstrument(lesson, onBarClick, getView())));
   },
   renderKeyModelNotation: (keyModel, onBarClick, opts) => {
-    const view = getView();
-    if (view !== "score") return renderScaleInstrument(keyModel, onBarClick, view);
-    return isNumericCategory()
+    const primary = isNumericCategory()
       ? renderScaleNumeric(keyModel, onBarClick)
       : renderScaleNotation(keyModel, onBarClick, opts);
+    return pairRenderers(primary, instrumentUnder(opts, () =>
+      renderScaleInstrument(keyModel, onBarClick, getView())));
   },
   getKeyModel: (id) => API.getKey(id),
   setStatus: (m) => setStatus(m),
@@ -1448,6 +1468,16 @@ async function applyCategory(node, part, exercise) {
     renderNav();
   }
 
+  // A score from the dictation editor is given in the dictation player, not
+  // run through the chapters.
+  if (kindOf(node) === "dictation-score") {
+    practice.stop();
+    state.activeChapter = null;
+    await showDictationScore(node, ctx.scoreDictation.id);
+    renderTopbar();
+    return;
+  }
+
   if (!isPractisable(node)) {
     practice.stop();
     state.activeChapter = null;
@@ -1522,6 +1552,9 @@ function showPlaceholder(node) {
   const ph = document.getElementById("placeholder");
   if (stage) stage.hidden = true;
   if (info) info.hidden = true;
+  const dictation = document.getElementById("dictation-view");
+  if (dictation) dictation.hidden = true;
+  if (dictationPlayer) dictationPlayer.stop();
   if (!ph) return;
   ph.hidden = false;
   const copy = {
@@ -1544,6 +1577,32 @@ function hidePlaceholder() {
   if (stage) stage.hidden = false;
   if (info) info.hidden = false;
   if (ph) ph.hidden = true;
+  const dictation = document.getElementById("dictation-view");
+  if (dictation) dictation.hidden = true;
+  if (dictationPlayer) dictationPlayer.stop();
+}
+
+/** Open a dictation score in the dictation player, in place of the deck. */
+let dictationPlayer = null;
+async function showDictationScore(node, id) {
+  showSession();
+  const stage = document.querySelector(".session-stage");
+  const info = document.getElementById("info");
+  const ph = document.getElementById("placeholder");
+  const host = document.getElementById("dictation-view");
+  if (stage) stage.hidden = true;
+  if (info) info.hidden = true;
+  if (ph) ph.hidden = true;
+  if (!host) return;
+  host.hidden = false;
+  if (!dictationPlayer) dictationPlayer = new DictationPractice(host, { player, setStatus });
+  try {
+    await dictationPlayer.open(id);
+  } catch (e) {
+    host.innerHTML = '<div class="ph-card"><div class="ph-kind">Dictation</div><h2></h2><p></p></div>';
+    host.querySelector("h2").textContent = node.name;
+    host.querySelector("p").textContent = e.message;
+  }
 }
 
 // --- position memory -------------------------------------------------------
@@ -2201,7 +2260,11 @@ viewSession.addEventListener("rea:next-chapter", (e) => {
   // in the app depends on the list, so a failure here must not stop a student
   // reaching their intonation exercises.
   try {
-    setDictations(await API.listDictations());
+    const [lessons, scores] = await Promise.all([
+      API.listDictations().catch(() => []),
+      API.listDictationScores().catch(() => []),
+    ]);
+    setDictations(lessons, scores);
   } catch (e) { /* the area keeps its outline */ }
 
   // Straight into an exercise — where the student left off, or the method's

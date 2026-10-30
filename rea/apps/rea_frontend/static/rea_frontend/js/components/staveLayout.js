@@ -34,14 +34,14 @@
 import {
   keyAccidentalCount, keyAccidentals, modeChordToVexKey, noteNameToVexflow,
   noteTokenToMidi, parseNoteToken,
-} from "../notation.js?v=171";
+} from "../notation.js?v=183";
 
 /** Fixed metrics.  Changing one changes both views, which is the point. */
 export const METRICS = {
   PX_PER_WHOLE: 260,
   STAVE_PADDING: 26,
   MIN_BAR_WIDTH: 120,
-  BAR_GAP: 12,       // whitespace between adjacent bars
+  BAR_GAP: 6,        // whitespace between adjacent bars
   STAVE_Y: 26,       // y of the stave's first line within its row
   ROW_HEIGHT: 100,   // vertical pitch of each wrapped row
   MARGIN: 10,        // left margin inside the SVG
@@ -81,7 +81,7 @@ export const CLEF_MAP = {
  * lesson, or nothing at all, and get a complete style either way.
  */
 export const STYLE_DEFAULTS = {
-  barGap: 12,           // mid_bar_space: whitespace between bars, in pixels
+  barGap: 6,            // mid_bar_space: whitespace between bars, in pixels
   barsPerRow: 0,        // 0 = as many as the width allows
   centre: false,        // align_to_center
   stretch: false,       // auto_align: fill the line, or leave natural widths
@@ -215,12 +215,53 @@ export function noteHeadYs(noteEl) {
  * per tick, so it is one note per context; if that ever stops being true,
  * nudging one note of a chord would nudge the chord.
  */
+/**
+ * Move notes sideways by `amountOf(note)`, once per moment of the bar.
+ *
+ * VexFlow places everything that happens at the same moment — one note in
+ * each voice — on one shared tick context, so moving a note moves the notes
+ * beside it in the other voices too.  Moving each note in turn would move a
+ * shared moment twice; this moves each moment once, by the largest amount
+ * asked of it.
+ */
+function moveContexts(notes, amountOf) {
+  const moves = new Map();
+  notes.forEach((note) => {
+    const amount = Number(amountOf(note)) || 0;
+    const context = note.getTickContext ? note.getTickContext() : null;
+    if (!amount || !context) return;
+    const previous = moves.get(context);
+    if (previous == null || Math.abs(amount) > Math.abs(previous.amount)) moves.set(context, { note, amount });
+  });
+  moves.forEach(({ note, amount }) => applyVisualOffset(note, amount));
+}
+
+/** The voice a note is written in, 1-4; anything else is the first. */
+function voiceNumber(n) {
+  const voice = Number(n && n.voice);
+  return voice >= 1 && voice <= 4 ? voice : 1;
+}
+
 function applyVisualOffset(note, px) {
   const shift = Number(px) || 0;
   if (!shift || !note.getTickContext) return;
   const context = note.getTickContext();
   if (!context || !context.setX) return;
   context.setX(context.getX() + shift);
+}
+
+/** A bar's own width, as a multiple of what its notes ask for. */
+function barWidthScale(bar) {
+  const scale = Number(bar && bar.widthScale);
+  return Number.isFinite(scale) && scale > 0 ? Math.min(4, Math.max(0.25, scale)) : 1;
+}
+
+/** Where a bar's notes sit in it (0..1), or null to spread them across it. */
+function barNoteAlign(bar) {
+  const align = bar && bar.noteAlign;
+  if (align == null || align === "") return null;
+  const value = Number(align);
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null;
 }
 
 /**
@@ -591,23 +632,38 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
     key: !keySignature ? "" : modeChordToVexKey(bar.modeChord || ""),
   }));
 
+  const naturalNotes = new Array(bars.length);
   const prefWidths = bars.map((bar, i) => {
-    const notes = bar.notes || [];
+    // Measured per voice, on the notes that take time of their own: a chord's
+    // stacked notes sit on top of their note and need no room beside it, and
+    // two voices share the bar's width rather than adding to it.
+    const byVoice = new Map();
+    (bar.notes || []).forEach((n) => {
+      if (n.stacked && !n.is_rest) return;
+      const voice = voiceNumber(n);
+      if (!byVoice.has(voice)) byVoice.set(voice, []);
+      byVoice.get(voice).push(n);
+    });
+    const lines = byVoice.size ? Array.from(byVoice.values()) : [[]];
     // A tuplet's notes keep their written value and occupy less time than it,
     // so the room the bar needs is measured from what they actually take —
     // three eighths in the time of two ask for two eighths of width, which is
     // what the formatter will then give them.
-    const totalWhole = notes.reduce(
+    const totalWhole = Math.max(...lines.map((notes) => notes.reduce(
       (sum, n) => sum + (n.duration || 0.125) * tupletRatio(n), 0,
-    );
+    )));
     const durArea = Math.ceil(totalWhole * METRICS.PX_PER_WHOLE);
-    const countArea = notes.length * METRICS.NOTE_SLOT;
-    const separators = notes.filter((n) => n.separator).length;
+    const countArea = Math.max(...lines.map((notes) => notes.length)) * METRICS.NOTE_SLOT;
+    const separators = Math.max(...lines.map((notes) => notes.filter((n) => n.separator).length));
     const noteArea = Math.max(durArea, countArea)
       + separators * look.separatorSpace + METRICS.STAVE_PADDING * 2;
+    // The width the notes themselves ask for, kept for a bar whose notes are
+    // aligned rather than spread: they are formatted into this, not the bar.
+    naturalNotes[i] = Math.max(durArea, countArea);
     // The clef and key signature are added below, to the bars that actually
-    // draw them — which is not known until the bars have been wrapped.
-    return Math.max(METRICS.MIN_BAR_WIDTH, noteArea);
+    // draw them — which is not known until the bars have been wrapped.  The
+    // teacher's own width for the bar (a dragged barline) scales the rest.
+    return Math.max(METRICS.MIN_BAR_WIDTH, noteArea) * barWidthScale(bar);
   });
 
   /** The room a bar's clef and key signature need before its first note. */
@@ -767,35 +823,64 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
     // that says so.
     const keyMap = keyAccidentals(heads[i].key);
     const barStart = Object.assign({}, keyMap);
-    const staveNotes = [];
-    (bar.notes || []).forEach((n) => {
-      const durType = durationToType(drawnDuration(n));
+
+    // The bar's notes as the stave draws them: one unit per moment in each
+    // voice — a single note, a rest, or a chord made of a note and the notes
+    // stacked on it.  Every input note keeps its own global index (its place
+    // in the bar, counted across the score) so the views can still point at
+    // the one note a student sang or a teacher clicked, chord or not.
+    const units = [];
+    const lastUnit = new Map();
+    (bar.notes || []).forEach((n, k) => {
+      const voice = voiceNumber(n);
+      const member = { n, k, globalIndex: globalIndex + k };
+      const previous = lastUnit.get(voice);
+      if (n.stacked && !n.is_rest && n.name && previous && !previous.rest) {
+        previous.members.push(member);
+        return;
+      }
+      const unit = { voice, members: [member], rest: !!(n.is_rest || !n.name) };
+      units.push(unit);
+      lastUnit.set(voice, unit);
+    });
+    const voiceIds = Array.from(new Set(units.map((u) => u.voice))).sort((a, b) => a - b);
+    // With more than one voice, stems say which voice a note is in: up for
+    // the odd ones, down for the even, the way two parts share a staff.
+    const polyphonic = voiceIds.length > 1;
+
+    /** Build the stave note for one unit. */
+    const buildUnit = (unit) => {
+      const head = unit.members[0].n;
+      const durType = durationToType(drawnDuration(head));
       // On a grand staff a note belongs to the stave it reads better on:
       // middle C and up on the treble, below it on the bass.  One voice, two
       // staves — the notes are not divided into parts, they simply cross.
-      const midi = (!n.is_rest && n.name) ? noteTokenToMidi(parseNoteToken(n.name)) : null;
+      const midi = !unit.rest ? noteTokenToMidi(parseNoteToken(head.name)) : null;
       const onBass = !!(grand && midi != null && midi < GRAND_SPLIT);
       const clef = onBass ? "bass" : heads[i].clef;
+      const stem = polyphonic ? (unit.voice % 2 ? 1 : -1) : null;
       let note;
-      if (n.is_rest || !n.name) {
+      if (unit.rest) {
         note = new VF.StaveNote({ keys: ["b/4"], duration: durType + "r", clef: heads[i].clef });
       } else {
-        const tok = parseNoteToken(n.name);
         // A notehead shape is part of the key in VexFlow: `c/4/x2` is a
         // cross.  Asked for in a try, because a build that does not know a
         // shape should cost the note its decoration and not the score.
-        const head = NOTEHEAD_CODES[n.notehead];
-        const key = noteNameToVexflow(tok);
+        const keyOf = (n, withHead) => {
+          const key = noteNameToVexflow(parseNoteToken(n.name));
+          const shape = withHead ? NOTEHEAD_CODES[n.notehead] : null;
+          return shape ? `${key}/${shape}` : key;
+        };
+        const options = (withHead) => Object.assign(
+          { keys: unit.members.map((m) => keyOf(m.n, withHead)), duration: durType, clef },
+          stem == null ? { auto_stem: true } : { stem_direction: stem },
+        );
         try {
-          note = new VF.StaveNote({
-            keys: [head ? `${key}/${head}` : key],
-            duration: durType, clef, auto_stem: true,
-          });
+          note = new VF.StaveNote(options(true));
         } catch (e) {
-          note = new VF.StaveNote({
-            keys: [key], duration: durType, clef, auto_stem: true,
-          });
+          note = new VF.StaveNote(options(false));
         }
+        if (stem != null && note.setStemDirection) note.setStemDirection(stem);
         // Drawn from what the note *sounds* against what the stave has said
         // so far, rather than from the token's own modifier.  The two differ
         // in exactly the case that was silently wrong: `fr` in G major sounds
@@ -806,28 +891,47 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
         // after an `f#` earlier in the bar still means "as the key has it",
         // which is how this library spells an enharmonic note and why such a
         // note needs a natural drawn to cancel the sharp before it.
-        const accVal = soundedAlteration(tok, keyMap);
-        if (accidentals && accVal !== (barStart[tok.letter] || 0)) {
+        // Each key of a chord gets its own, at its own index.
+        note.reaAccidentalNudges = [];
+        unit.members.forEach((m, keyIndex) => {
+          const tok = parseNoteToken(m.n.name);
+          const accVal = soundedAlteration(tok, keyMap);
+          if (!accidentals || accVal === (barStart[tok.letter] || 0)) return;
           const accStr = ALTERATION_TO_ACC[String(accVal)];
-          if (accStr) note.addModifier(new VF.Accidental(accStr), 0);
+          if (accStr) {
+            const acc = new VF.Accidental(accStr);
+            // The accidental's own nudge, applied once the formatter has
+            // placed it — the formatter sets every accidental's shift itself
+            // while it stacks them, so anything set now would be overwritten.
+            const nudge = Number(m.n.accidental_offset_px) || 0;
+            if (nudge) note.reaAccidentalNudges.push({ acc, nudge });
+            note.addModifier(acc, keyIndex);
+          }
           barStart[tok.letter] = accVal;
-        }
+        });
       }
-      note.globalIndex = globalIndex;
+      note.globalIndex = unit.members[0].globalIndex;
+      note.reaMembers = unit.members;
+      note.reaVoice = unit.voice;
       // Carried here and applied once the formatter has run — see
       // `applyVisualOffset` for why it has to happen exactly there.
-      note.reaVisualOffset = Number(n.visual_offset_px) || 0;
-      note.reaTuplet = (n.tuplet_num > 0 && n.tuplet_den > 0)
-        ? { num: Number(n.tuplet_num), den: Number(n.tuplet_den) } : null;
-      note.reaSeparator = n.separator || "";
-      note.reaLabel = n;
+      note.reaVisualOffset = Number(head.visual_offset_px) || 0;
+      note.reaTuplet = (head.tuplet_num > 0 && head.tuplet_den > 0)
+        ? { num: Number(head.tuplet_num), den: Number(head.tuplet_den) } : null;
+      note.reaSeparator = unit.members[unit.members.length - 1].n.separator || "";
+      note.reaLabel = head;
       // Which of the two staves it is drawn on.  Set on the note rather than
       // handed to `voice.draw`, because the voice would set one stave on all
       // of them — see the draw call below.
       if (grand) note.setStave(onBass ? bass : stave);
-      staveNotes.push(note);
-      globalIndex += 1;
-    });
+      return note;
+    };
+
+    // Built in written order, so the accidentals carry through the bar the
+    // way they are read; grouped by voice afterwards.
+    const built = units.map((unit) => ({ unit, note: buildUnit(unit) }));
+    const voiceNotes = voiceIds.map((v) => built.filter((b) => b.unit.voice === v).map((b) => b.note));
+    globalIndex += (bar.notes || []).length;
 
     /** Whether a note is short enough to carry a beam rather than a flag. */
     const isBeamable = (n) => {
@@ -835,98 +939,122 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
       return d === "8" || d === "16";
     };
 
-    // Tuplets: runs of adjacent notes carrying the same ratio, cut into
-    // groups of `num`.  Two triplets in a row are six marked notes and read
-    // as 3 + 3 — see `MusicEvent.tuplet_num` for why the grouping is
-    // positional rather than held by an id.
-    //
-    // The groups are kept rather than only their brackets, because the
-    // beaming below has to know where each one begins and ends.
-    const tupletGroups = [];
-    let run = [];
-    const closeRun = () => {
-      if (!run.length) return;
-      const { num, den } = run[0].reaTuplet;
-      for (let start = 0; start + num <= run.length; start += num) {
-        const group = run.slice(start, start + num);
-        // A beamed group is read from its beam and takes only the number;
-        // one that is not beamed needs the bracket to say how far it
-        // reaches.  Decided here because VexFlow decides it at construction,
-        // which is before the beams exist — so left to itself it brackets
-        // every tuplet, beam and all.
-        const beamed = group.length >= 2 && group.every(isBeamable);
-        try {
-          // VexFlow 5 spells these `numNotes` and `notesOccupied`.  Under the
-          // 3.x names it silently ignored both and fell back to its own
-          // defaults — which is why every tuplet drew and spaced as "in the
-          // time of 2", and a quintuplet announced itself as 5:2.
-          allTuplets.push(new VF.Tuplet(group, {
-            numNotes: num, notesOccupied: den, bracketed: !beamed,
-          }));
-          tupletGroups.push(group);
-        } catch (e) { /* a malformed group is not worth losing the score over */ }
-      }
-      run = [];
-    };
-    staveNotes.forEach((note) => {
-      const t = note.reaTuplet;
-      if (!t) { closeRun(); return; }
-      if (run.length && (run[0].reaTuplet.num !== t.num || run[0].reaTuplet.den !== t.den)) closeRun();
-      run.push(note);
-    });
-    closeRun();
+    // Tuplets and beams belong to a voice: a beam never joins two parts, and
+    // a triplet in one says nothing about the other.
+    voiceNotes.forEach((staveNotes) => {
+      // Tuplets: runs of adjacent notes carrying the same ratio, cut into
+      // groups of `num`.  Two triplets in a row are six marked notes and read
+      // as 3 + 3 — see `MusicEvent.tuplet_num` for why the grouping is
+      // positional rather than held by an id.
+      //
+      // The groups are kept rather than only their brackets, because the
+      // beaming below has to know where each one begins and ends.
+      const tupletGroups = [];
+      let run = [];
+      const closeRun = () => {
+        if (!run.length) return;
+        const { num, den } = run[0].reaTuplet;
+        for (let start = 0; start + num <= run.length; start += num) {
+          const group = run.slice(start, start + num);
+          // A beamed group is read from its beam and takes only the number;
+          // one that is not beamed needs the bracket to say how far it
+          // reaches.  Decided here because VexFlow decides it at construction,
+          // which is before the beams exist — so left to itself it brackets
+          // every tuplet, beam and all.
+          const beamed = group.length >= 2 && group.every(isBeamable);
+          try {
+            // VexFlow 5 spells these `numNotes` and `notesOccupied`.  Under the
+            // 3.x names it silently ignored both and fell back to its own
+            // defaults — which is why every tuplet drew and spaced as "in the
+            // time of 2", and a quintuplet announced itself as 5:2.
+            allTuplets.push(new VF.Tuplet(group, {
+              numNotes: num, notesOccupied: den, bracketed: !beamed,
+            }));
+            tupletGroups.push(group);
+          } catch (e) { /* a malformed group is not worth losing the score over */ }
+        }
+        run = [];
+      };
+      staveNotes.forEach((note) => {
+        const t = note.reaTuplet;
+        if (!t) { closeRun(); return; }
+        if (run.length && (run[0].reaTuplet.num !== t.num || run[0].reaTuplet.den !== t.den)) closeRun();
+        run.push(note);
+      });
+      closeRun();
 
-    // Beaming: eighths and shorter group into beats — except a tuplet, which
-    // is beamed as the one unit it is read as.  Left to the beat grouping a
-    // 5-in-the-time-of-4 would be cut wherever four eighths' worth of ticks
-    // happened to land, which is in the middle of the group.
-    const inTuplet = new Set();
-    tupletGroups.forEach((group) => {
-      group.forEach((n) => inTuplet.add(n));
-      if (group.length < 2 || !group.every(isBeamable)) return;
-      try { allBeams.push(new VF.Beam(group)); } catch (e) { /* decoration */ }
-    });
+      // Beaming: eighths and shorter group into beats — except a tuplet, which
+      // is beamed as the one unit it is read as.  Left to the beat grouping a
+      // 5-in-the-time-of-4 would be cut wherever four eighths' worth of ticks
+      // happened to land, which is in the middle of the group.
+      const inTuplet = new Set();
+      tupletGroups.forEach((group) => {
+        group.forEach((n) => inTuplet.add(n));
+        if (group.length < 2 || !group.every(isBeamable)) return;
+        try { allBeams.push(new VF.Beam(group)); } catch (e) { /* decoration */ }
+      });
 
-    // Everything outside a tuplet, in runs: a beam must not reach across a
-    // group and join the notes on either side of it.
-    let plain = [];
-    const closePlain = () => {
-      if (plain.length >= 2) {
-        try {
-          VF.Beam.generateBeams(plain, { groups: [new VF.Fraction(2, 8)] })
-            .forEach((b) => allBeams.push(b));
-        } catch (e) { /* beaming is decoration; best effort */ }
-      }
-      plain = [];
-    };
-    staveNotes.forEach((note) => {
-      if (inTuplet.has(note)) closePlain();
-      else if (isBeamable(note)) plain.push(note);
+      // Everything outside a tuplet, in runs: a beam must not reach across a
+      // group and join the notes on either side of it.  In two voices the
+      // beam keeps the stem direction its voice gave it.
+      let plain = [];
+      const closePlain = () => {
+        if (plain.length >= 2) {
+          try {
+            VF.Beam.generateBeams(plain, {
+              groups: [new VF.Fraction(2, 8)], maintainStemDirections: polyphonic,
+            }).forEach((b) => allBeams.push(b));
+          } catch (e) { /* beaming is decoration; best effort */ }
+        }
+        plain = [];
+      };
+      staveNotes.forEach((note) => {
+        if (inTuplet.has(note)) closePlain();
+        else if (isBeamable(note)) plain.push(note);
+      });
+      closePlain();
     });
-    closePlain();
 
     // An empty bar has nothing to format — VexFlow throws on a voice with no
     // tickables, and the editor's brand-new bars are exactly that.
-    if (staveNotes.length) {
+    const voices = voiceNotes.map((staveNotes) => {
       const voice = new VF.Voice({ num_beats: 4, beat_value: 4 }).setStrict(false);
       voice.addTickables(staveNotes);
-      formatted.push({ voice, stave, bass, notes: staveNotes, noteStart, barIndex: i });
-    } else {
-      formatted.push({ voice: null, stave, bass, notes: [], noteStart, barIndex: i });
-    }
+      return voice;
+    });
+    formatted.push({
+      voices, voiceNotes, stave, bass, barIndex: i, noteStart,
+      // Every stave note, in the order the voices are drawn — which is the
+      // order VexFlow emits their SVG groups in.
+      notes: voiceNotes.flat(),
+    });
   });
 
-  formatted.forEach(({ voice, stave, notes }) => {
-    if (!voice) return;
+  formatted.forEach(({ voices, voiceNotes, stave, notes, barIndex }) => {
+    if (!notes.length) return;
     // The separators' room is held back from the formatter: it is opened up
     // below, by moving the notes after each separator along.  Formatting into
     // the whole bar and then moving them pushed the last notes over the
     // barline by exactly the separator space.
-    const separatorRoom = notes.filter((n, k) => n.reaSeparator && k < notes.length - 1).length
-      * look.separatorSpace;
+    // Measured on the voice with the most of them: the voices share the bar's
+    // width, so the room one voice opens is room the others get too.
+    const separatorRoom = Math.max(0, ...voiceNotes.map((list) => (
+      list.filter((n, k) => n.reaSeparator && k < list.length - 1).length
+    ))) * look.separatorSpace;
     const noteAreaWidth = stave.getWidth()
       - (stave.getNoteStartX() - stave.getX()) - METRICS.STAVE_PADDING - separatorRoom;
-    new VF.Formatter().joinVoices([voice]).format([voice], Math.max(40, noteAreaWidth));
+    // Spread across the bar, or — when the bar says where its notes sit — set
+    // at the width they ask for and placed in what is left: 0 against the
+    // left barline, 1 against the right, anything between.
+    const align = barNoteAlign(bars[barIndex]);
+    const formatWidth = align == null
+      ? noteAreaWidth
+      : Math.min(noteAreaWidth, naturalNotes[barIndex]);
+    new VF.Formatter().joinVoices(voices).format(voices, Math.max(40, formatWidth));
+    if (align != null && noteAreaWidth > formatWidth) {
+      const shift = (noteAreaWidth - formatWidth) * align;
+      moveContexts(notes, () => shift);
+    }
   });
 
   // A separator opens a hole in the bar: every note after it moves along by
@@ -935,22 +1063,34 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
   // the notehead — and before the offsets, because the two are additive and a
   // teacher's own nudge should land on top of the spacing rather than under
   // it.  See `applyVisualOffset` for why this cannot be a transform.
-  formatted.forEach(({ notes }) => {
-    let shift = 0;
-    notes.forEach((note) => {
-      if (shift) applyVisualOffset(note, shift);
-      if (note.reaSeparator) shift += look.separatorSpace;
+  formatted.forEach(({ notes, voiceNotes }) => {
+    const shifts = new Map();
+    voiceNotes.forEach((list) => {
+      let shift = 0;
+      list.forEach((note) => {
+        if (shift) shifts.set(note, shift);
+        if (note.reaSeparator) shift += look.separatorSpace;
+      });
     });
+    moveContexts(notes, (note) => shifts.get(note) || 0);
   });
-  formatted.forEach(({ notes }) => notes.forEach((note) => {
-    applyVisualOffset(note, note.reaVisualOffset);
-  }));
+  formatted.forEach(({ notes }) => {
+    moveContexts(notes, (note) => note.reaVisualOffset);
+    // Positive is to the right, as with every other offset here.
+    notes.forEach((note) => (note.reaAccidentalNudges || []).forEach(({ acc, nudge }) => {
+      acc.xShift = (Number(acc.xShift) || 0) + nudge;
+    }));
+  });
 
   // Drawn without naming a stave when the score is on two of them: the voice
   // would otherwise set that one stave on every note, and the notes have
   // already said which of the two they are on.
-  formatted.forEach(({ voice, stave }) => voice && (grand ? voice.draw(context) : voice.draw(context, stave)));
-  formatted.forEach(({ notes, stave, bass }) => drawSeparators(context, stave, notes, look, bass));
+  formatted.forEach(({ voices, stave }) => voices.forEach((voice) => (
+    grand ? voice.draw(context) : voice.draw(context, stave)
+  )));
+  formatted.forEach(({ voiceNotes, stave, bass }) => voiceNotes.forEach((list) => (
+    drawSeparators(context, stave, list, look, bass)
+  )));
   // One label lane per row, under the lowest note anywhere on it.  Measured
   // per bar, the labels climbed and fell from bar to bar with the notes
   // above them, and a row of degrees read as a melody of its own.
@@ -999,17 +1139,25 @@ function layoutScore(container, bars, { rowExtra = 0, style = null, keySignature
   const noteGroups = container.querySelectorAll("svg g.vf-stavenote");
   const staveGroups = container.querySelectorAll("svg g.vf-stave");
 
+  // One entry per *written* note, chord notes included, all pointing at the
+  // stave note that draws them; `keyIndex` says which of its heads is theirs.
+  // In written order, so the n-th pitched entry of a bar is the n-th note the
+  // bar sounds.
   const noteEntries = [];
   let gi = 0;
   formatted.forEach(({ notes, barIndex }) => {
-    notes.forEach((note, noteIndex) => {
-      noteEntries.push({
-        barIndex, noteIndex, globalIndex: note.globalIndex, note,
-        el: noteGroups[gi] || null,
-      });
+    notes.forEach((note) => {
+      const el = noteGroups[gi] || null;
       gi += 1;
+      (note.reaMembers || []).forEach((member, keyIndex) => {
+        noteEntries.push({
+          barIndex, noteIndex: member.k, globalIndex: member.globalIndex, note, el,
+          keyIndex, voice: note.reaVoice || 1,
+        });
+      });
     });
   });
+  noteEntries.sort((a, b) => a.globalIndex - b.globalIndex);
 
   const barEntries = formatted.map((f, i) => ({
     barIndex: i,
