@@ -7,8 +7,8 @@
  * keyboard calls — so a palette button and its shortcut can never disagree.
  */
 
-import * as S from "./score.js?v=181";
-import { labelWithAccidental, labelWithDuration } from "../editor/glyphs.js?v=181";
+import * as S from "./score.js?v=183";
+import { labelWithAccidental, labelWithDuration } from "../editor/glyphs.js?v=183";
 
 const DURATION_FRACTION = { w: 1, h: 0.5, q: 0.25, 8: 0.125, 16: 0.0625, 32: 0.03125, 64: 0.015625 };
 const DURATION_KEY = { 64: 1, 32: 2, 16: 3, 8: 4, q: 5, h: 6, w: 7 };

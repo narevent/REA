@@ -20,23 +20,23 @@
  * exercise half-written is worse than one not written at all.
  */
 
-import { AudioPlayer } from "../audioPlayer.js?v=181";
-import { EditorAPI } from "./editorApi.js?v=181";
-import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=181";
+import { AudioPlayer } from "../audioPlayer.js?v=183";
+import { EditorAPI } from "./editorApi.js?v=183";
+import { Inspector, TUPLET_CHOICES } from "./inspector.js?v=183";
 import {
   Library, SHELF_DESTINATIONS, destinations, metaFromCtx,
-} from "./library.js?v=181";
-import { labelWithAccidental, labelWithDuration } from "./glyphs.js?v=181";
-import { ScoreCanvas } from "./scoreCanvas.js?v=181";
+} from "./library.js?v=183";
+import { labelWithAccidental, labelWithDuration } from "./glyphs.js?v=183";
+import { ScoreCanvas } from "./scoreCanvas.js?v=183";
 import {
   DURATIONS, LETTERS, MAX_VISUAL_OFFSET_PX, MODIFIERS, MODIFIER_LABELS, ScoreDoc,
   buildToken, chordAt, noteMidi, offsetMs, splitToken, transposeToken,
-} from "./scoreDoc.js?v=181";
-import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=181";
-import { midiToToken } from "../notation.js?v=181";
+} from "./scoreDoc.js?v=183";
+import { parseMidi, midiToBars, describeImport } from "./midiImport.js?v=183";
+import { midiToToken } from "../notation.js?v=183";
 import {
   applyLegato, barGapMs, eventTimes, separatorGapMs, tupletRatio,
-} from "../practiceData.js?v=181";
+} from "../practiceData.js?v=183";
 
 /** The accidentals offered as buttons, in the order a musician reaches for
  *  them.  `null` is "whatever the key signature says", which is the state a
@@ -631,7 +631,8 @@ class Editor {
         } : null,
         relative ? {
           key: "variant", label: "Variant", value: this._suggestVariant(meta.variant),
-          hint: "What tells this exercise apart from the others in the same category.",
+          hint: "What tells this exercise apart from the others in the same category. "
+            + "Not used for a melodic module (Octave, Dominant, Scale) — the module sets it.",
         } : {
           key: "exercise_number", label: "Exercise number", type: "number",
           value: (Number(meta.exercise_number) || 0) + 1,
@@ -643,6 +644,12 @@ class Editor {
 
     const payload = this.doc.payload();
     const where = answer.values.where;
+    const place = where.startsWith("shelf:") ? null : places[Number(where)];
+    // A melodic module *is* a variant — "" is Diatonic, AL1 Alterations,
+    // SKALA the scale — and practice looks the lesson up by exactly that.
+    // Letting the typed variant overwrite it filed the exercise under a name
+    // no module asks for: saved, in the library, and never practised.
+    const moduleVariant = relative && place && "variant" in place.ctx;
     if (where.startsWith("shelf:")) {
       // Onto a shelf: the exercise keeps whatever identity it happens to have
       // and simply lives somewhere other than the curriculum.
@@ -651,12 +658,13 @@ class Editor {
       // Filing it into the method: the destination's own facets decide where
       // it lands, and they must be the same ones the tree filters that branch
       // by.
-      Object.assign(payload.meta, metaFromCtx(places[Number(where)].ctx, system));
+      Object.assign(payload.meta, metaFromCtx(place.ctx, system));
     }
     if (relative) {
       payload.key_model = Number(answer.values.key_model) || payload.key_model;
-      // A draft's variant is its working title, so it is kept either way.
-      payload.meta.variant = answer.values.variant.trim();
+      // A draft's variant is its working title, so it is kept — everywhere
+      // but a melodic module, which has already said what it must be.
+      if (!moduleVariant) payload.meta.variant = answer.values.variant.trim();
     } else {
       payload.meta.exercise_number = Number(answer.values.exercise_number);
     }
@@ -674,10 +682,19 @@ class Editor {
           ? `Saved “${saved.display_name}” to the drafts — students do not see it.`
           : shelf === "dictation"
             ? `Saved “${saved.display_name}” as a dictation — students find it under Dictation.`
-            : `Created “${saved.display_name}” — it is in the library, and students can practise it now.`,
+            : `Filed “${saved.display_name}” under ${place.label}.`,
         "good");
       return true;
     } catch (e) {
+      if (moduleVariant && e.status === 409) {
+        // The server's message asks for a different variant, which is the one
+        // thing a melodic module will not take.  Say what will work instead.
+        const key = keys.find((k) => String(k.id) === String(payload.key_model));
+        answer.fail(
+          `${key ? key.name : "This key"} already has an exercise in ${place.label}, and practice shows one per key. `
+          + "Open that one from the library and press Save to replace it, or choose a key that has none yet.");
+        return false;
+      }
       answer.fail(e.message);
       return false;
     }

@@ -19,8 +19,8 @@
  * where across the staff the pointer is — left flattens, right sharpens.
  */
 
-import { CLEF_TOP_LINE, resolveVexFlow, vexClef } from "./staveLayout.js?v=181";
-import { keyAccidentalCount } from "../notation.js?v=181";
+import { CLEF_TOP_LINE, resolveVexFlow, vexClef } from "./staveLayout.js?v=183";
+import { keyAccidentalCount } from "../notation.js?v=183";
 
 const WIDTH = 240;
 const HEIGHT = 150;

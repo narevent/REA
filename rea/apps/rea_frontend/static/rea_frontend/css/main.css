@@ -135,8 +135,12 @@ body {
   /* Equal outer columns, so the switcher sits on the page's centre line and
      not merely in the middle of whatever is left over.  This only holds while
      the right-hand cluster fits its share — below 1200px the switcher takes a
-     row of its own rather than being pushed off centre. */
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+     row of its own rather than being pushed off centre.
+     The outer tracks never shrink below their content, though: a teacher's
+     cluster (Curriculum, About, Editor, Dictations, account) is wider than
+     half the spare room on a laptop, and with a zero minimum it spilled left
+     over the switcher.  Off centre by a little beats unreadable. */
+  grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
   align-items: center;
   gap: 16px;
   padding: 14px 24px;

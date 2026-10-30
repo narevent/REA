@@ -11,38 +11,38 @@
  * kept to a minimum.
  */
 
-import { API } from "./api.js?v=181";
-import { renderLessonNotation } from "./views/lessonView.js?v=181";
-import { renderScaleNotation } from "./views/scaleView.js?v=181";
-import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=181";
+import { API } from "./api.js?v=183";
+import { renderLessonNotation } from "./views/lessonView.js?v=183";
+import { renderScaleNotation } from "./views/scaleView.js?v=183";
+import { renderLessonNumeric, renderScaleNumeric } from "./views/numericView.js?v=183";
 import {
   renderLessonInstrument, renderScaleInstrument, resetRenderer as resetInstrument,
-} from "./views/instrumentView.js?v=181";
-import { pairRenderers } from "./components/pairedRenderer.js?v=181";
-import { DictationPractice } from "./dictation/practice.js?v=181";
-import { SoundcheckView } from "./views/soundcheckView.js?v=181";
-import { AudioPlayer } from "./audioPlayer.js?v=181";
-import { PracticeController } from "./practiceController.js?v=181";
-import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=181";
+} from "./views/instrumentView.js?v=183";
+import { pairRenderers } from "./components/pairedRenderer.js?v=183";
+import { DictationPractice } from "./dictation/practice.js?v=183";
+import { SoundcheckView } from "./views/soundcheckView.js?v=183";
+import { AudioPlayer } from "./audioPlayer.js?v=183";
+import { PracticeController } from "./practiceController.js?v=183";
+import { loadAccount, currentAccount, recordServerSession } from "./account.js?v=183";
 import {
   CHAPTERS, loadProgress, saveProgress, recordSession,
   isUnlocked, completedCount, PASS_THRESHOLD,
-} from "./chapters.js?v=181";
+} from "./chapters.js?v=183";
 import {
   AREAS, AREA_BY_ID, contextFor, kindOf, isPractisable, defaultCategory, setDictations,
   categoryByUid, firstCategory, pathOf, neighbourCategory,
-} from "./curriculum.js?v=181";
-import { createNav } from "./curriculumNav.js?v=181";
+} from "./curriculum.js?v=183";
+import { createNav } from "./curriculumNav.js?v=183";
 import {
   DIFFICULTIES, DIFFICULTY_LABELS, getDifficulty, setDifficulty,
   adoptAccountDifficulty,
-} from "./difficulty.js?v=181";
+} from "./difficulty.js?v=183";
 import {
   TEMPO_SCALES, tempoLabel, getTempoScale, setTempoScale,
-} from "./tempo.js?v=181";
+} from "./tempo.js?v=183";
 // Shared with the score editor's tree, so both call the same thing by the
 // same name.
-import { absPartKey, absPartLabel } from "./lessonNaming.js?v=181";
+import { absPartKey, absPartLabel } from "./lessonNaming.js?v=183";
 
 const status = document.getElementById("status");
 const footerHint = document.getElementById("footer-hint");

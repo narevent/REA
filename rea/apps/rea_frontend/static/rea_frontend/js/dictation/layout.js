@@ -16,8 +16,8 @@
  * belongs to.
  */
 
-import { resolveVexFlow } from "../components/staveLayout.js?v=181";
-import * as S from "./score.js?v=181";
+import { resolveVexFlow } from "../components/staveLayout.js?v=183";
+import * as S from "./score.js?v=183";
 
 export const METRICS = {
   margin: 14,          // left and right

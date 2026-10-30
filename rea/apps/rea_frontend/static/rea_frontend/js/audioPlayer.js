@@ -13,8 +13,8 @@
  * highlight the sounding note.  Pass -1 to clear (on stop).
  */
 
-import { buildVoice, getCurrentSoundPreset } from "./soundPresets.js?v=181";
-import { loadPiano } from "./sampler.js?v=181";
+import { buildVoice, getCurrentSoundPreset } from "./soundPresets.js?v=183";
+import { loadPiano } from "./sampler.js?v=183";
 
 const A4_HZ = 440;
 const A4_MIDI = 69;

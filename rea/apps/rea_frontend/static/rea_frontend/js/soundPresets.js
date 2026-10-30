@@ -51,7 +51,7 @@
  *  is tuned for monophonic pitch playback: clear fundamental, musical
  *  envelope, and a timbre that reads well at the short-to-medium note lengths
  *  the exercises use. */
-import { loadPiano, pianoReady, pianoVoice } from "./sampler.js?v=181";
+import { loadPiano, pianoReady, pianoVoice } from "./sampler.js?v=183";
 
 export const SOUND_PRESETS = [
   // ---- Acoustic ------------------------------------------------------------
