@@ -10,9 +10,9 @@
  * exercise), a speed control, and the score — hidden until they ask for it.
  */
 
-import * as S from "./score.js?v=183";
-import { renderScore } from "./layout.js?v=183";
-import { schedule } from "./playback.js?v=183";
+import * as S from "./score.js?v=184";
+import { renderScore } from "./layout.js?v=184";
+import { schedule } from "./playback.js?v=184";
 
 const API = "/api/dictation-scores/";
 

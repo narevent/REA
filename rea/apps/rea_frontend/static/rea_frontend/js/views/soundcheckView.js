@@ -23,17 +23,17 @@
  *   sc.leave()  - release the microphone when navigating away.
  */
 
-import { NotationRenderer } from "../components/notationRenderer.js?v=183";
+import { NotationRenderer } from "../components/notationRenderer.js?v=184";
 import {
   PitchDetector, midiToName, hzToMidi, rmsToDb,
   getVoiceOctaveOffset, setVoiceOctaveOffset,
   getInputGain, setInputGain, setNoiseGate, getNoiseGate, hasCalibratedInput,
   setVoiceVibratoCents, setVoiceOnsetFloor,
   INPUT_GAIN_MIN, INPUT_GAIN_MAX,
-} from "../pitchDetector.js?v=183";
+} from "../pitchDetector.js?v=184";
 import {
   SOUND_PRESETS, getCurrentSoundPreset, setSoundPresetById, soundPresetGroups,
-} from "../soundPresets.js?v=183";
+} from "../soundPresets.js?v=184";
 
 // ---------------------------------------------------------------------------
 // The soundcheck run
